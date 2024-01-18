@@ -1,8 +1,7 @@
 defmodule BondTest do
-  use ExUnit.Case
-  doctest Bond
+  @moduledoc false
 
-  test "greets the world" do
-    assert Bond.hello() == :world
-  end
+  use ExUnit.Case
+
+  doctest Bond
 end
