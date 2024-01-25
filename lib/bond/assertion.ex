@@ -20,6 +20,63 @@ defmodule Bond.Assertion do
           meta: list()
         }
 
+  @assertion_errors %{
+    precondition: Bond.PreconditionError,
+    postcondition: Bond.PostconditionError,
+    check: Bond.CheckError
+  }
+
+  defguard is_assertion_expression(expression)
+           when is_tuple(expression) and
+                  tuple_size(expression) == 3 and
+                  is_atom(elem(expression, 0)) and is_list(elem(expression, 1)) and
+                  is_list(elem(expression, 2))
+
+  def new(kind, label, expression, %Macro.Env{} = env, meta)
+      when is_assertion_expression(expression) do
+    %__MODULE__{
+      kind: kind,
+      label: label,
+      expression: expression,
+      definition_env: Bond.Env.new(env),
+      meta: meta
+    }
+  end
+
+  @doc """
+  Returns a quoted expression that, when unquoted, evaluates the given `assertion`.
+  """
+  def quoted_eval(%__MODULE__{kind: kind, expression: expression} = assertion) do
+    imports = imports(kind)
+    exception = Map.fetch!(@assertion_errors, kind)
+
+    quote do
+      unquote(imports)
+
+      if value = unquote(expression) do
+        value
+      else
+        raise unquote(exception),
+          assertion: unquote(Macro.escape(assertion)),
+          env: __ENV__,
+          binding: binding()
+      end
+    end
+  end
+
+  defp imports(:postcondition) do
+    quote do
+      import Bond.Predicates
+      # import Bond.OldExpression
+    end
+  end
+
+  defp imports(kind) when kind in [:precondition, :check] do
+    quote do
+      import Bond.Predicates
+    end
+  end
+
   defimpl String.Chars do
     def to_string(%Bond.Assertion{label: label, expression: expression, kind: kind}) do
       "#{kind}(#{inspect(label)}) => #{Macro.to_string(expression)}"

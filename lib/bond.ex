@@ -242,15 +242,8 @@ defmodule Bond do
     do: Module.get_attribute(module, :_bond_fsm_pid)
 
   defp check_assertion(expression, label, env, meta) do
-    assertion = %Assertion{
-      label: label,
-      expression: expression,
-      kind: :check,
-      definition_env: Bond.Env.new(env),
-      meta: meta
-    }
-
-    Bond.Assert.check!(assertion)
+    check = Bond.Assertion.new(:check, label, expression, env, meta)
+    Bond.Assertion.quoted_eval(check)
   end
 
   defp register_assertion(:pre, expression, label, env, meta) do
@@ -262,13 +255,7 @@ defmodule Bond do
   end
 
   defp register_assertion(kind, expression, label, env, meta) do
-    assertion = %Assertion{
-      label: label,
-      expression: expression,
-      kind: kind,
-      definition_env: Bond.Env.new(env),
-      meta: meta
-    }
+    assertion = Assertion.new(kind, label, expression, env, meta)
 
     fsm_event =
       case kind do
@@ -298,8 +285,8 @@ defmodule Bond do
   end
 
   defp wrap_function_body(body, preconditions, postconditions) do
-    preconditions_ast = Enum.map(preconditions, &Bond.Assert.require!(&1))
-    postconditions_ast = Enum.map(postconditions, &Bond.Assert.ensure!(&1))
+    preconditions_ast = Enum.map(preconditions, &Assertion.quoted_eval/1)
+    postconditions_ast = Enum.map(postconditions, &Assertion.quoted_eval(&1))
 
     Keyword.update!(body, :do, fn do_block ->
       quote do
