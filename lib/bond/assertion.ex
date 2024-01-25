@@ -3,9 +3,12 @@ defmodule Bond.Assertion do
   @moduledoc """
   Struct representing assertions that appear as part of contract specifications, such as in
   preconditions or postconditions attached to functions.
+
+  Assertions are constructed at compile-time and as such the fields in this struct are quoted
+  expressions or compile-time environment data. At run-time, the assertion `:expression` is
+  evaluated by unquoting it in the context of the function to which the assertion is attached.
   """
 
-  # @derive {Inspect, only: [:label, :expression, :kind]}
   @enforce_keys [:expression, :kind, :definition_env, :meta]
   defstruct [:label, :expression, :kind, :definition_env, :meta]
 

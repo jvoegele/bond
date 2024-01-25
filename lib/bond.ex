@@ -68,7 +68,7 @@ defmodule Bond do
   > therein can be used for assertions. `Bond.Predicates` can be explicitly imported into modules
   > for use outside of assertions.
 
-  ### Assertion syntax
+  ## Assertion syntax
 
   Assertions in Bond are conditional Elixir expressions, optionally associated with a textual
   label (either an atom or a string). These assertions may appear in `@pre` or `@post`
@@ -87,9 +87,19 @@ defmodule Bond do
   alias Bond.Assertion
   alias Bond.CompileStateFSM, as: FSM
 
+  @typedoc false
   @type assertion_kind :: :precondition | :postcondition | :check
-  @type assertion_label :: String.t() | atom() | nil
-  @type assertion_expression :: Macro.t()
+
+  @typedoc """
+  Type to represent a label for an assertion, which must be a compile-time atom or string.
+  """
+  @type assertion_label :: String.t() | atom()
+
+  @typedoc """
+  Type to represent a compile-time quoted assertion expression, which must be a valid Elixir
+  expression that, when unquoted, evaluates to a `t:boolean/0` or `t:as_boolean/1` value.
+  """
+  @type assertion_expression :: {atom(), Macro.metadata(), list()}
 
   @typedoc """
   Subset of `Macro.Env` struct that excludes fields that, according to the documentation, "are
@@ -178,7 +188,28 @@ defmodule Bond do
     define_function_with_contract(__CALLER__, definition, body, false)
   end
 
-  defmacro check(expression_or_list)
+  @doc """
+  Check an assertion or a keyword list of assertions for validity.
+
+  Returns the result(s) of the assertion(s) if satisfied, or raises a `Bond.CheckError` exception
+  if any assertions are not satisfied.
+
+  ## Examples
+
+      iex> check 1 == 1.0
+      true
+      iex> check 1 == 1.0, "integer 1 is equal to float 1.0"
+      true
+      iex> check "integer 1 is equal to float 1.0", 1 == 1.0
+      true
+      iex> check tautology: 1 == 1
+      [true]
+      iex> check "1 is 1": 1 == 1, "2 is 2": 2 == 2
+      [true, true]
+  """
+  @spec check(assertion_expression()) :: as_boolean(any())
+  @spec check(Keyword.t(assertion_expression())) :: list(as_boolean(any()))
+  defmacro check(assertion_or_list_of_assertions)
 
   defmacro check(keyword_list) when is_list(keyword_list) do
     for {label, {_, meta, _} = expression} <- keyword_list do
@@ -190,12 +221,19 @@ defmodule Bond do
     check_assertion(expression, nil, __CALLER__, meta)
   end
 
+  @doc """
+  Check a single labelled assertion for validity.
+
+  See `check/1` for details and examples.
+  """
   defmacro check(label_or_expression, expression_or_label)
 
+  @spec check(assertion_label(), assertion_expression()) :: as_boolean(any())
   defmacro check(label, {_, meta, _} = expression) when is_atom(label) or is_binary(label) do
     check_assertion(expression, label, __CALLER__, meta)
   end
 
+  @spec check(assertion_expression(), assertion_label()) :: as_boolean(any())
   defmacro check({_, meta, _} = expression, label) when is_atom(label) or is_binary(label) do
     check_assertion(expression, label, __CALLER__, meta)
   end

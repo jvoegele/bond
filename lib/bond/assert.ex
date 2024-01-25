@@ -18,18 +18,24 @@ defmodule Bond.Assert do
     assert!(check, Bond.CheckError)
   end
 
-  defp assert!(%Assertion{expression: expression} = assertion, exception_type) do
-    quote bind_quoted: [
-            assertion: Macro.escape(assertion),
-            expression: expression,
-            exception_type: exception_type
-          ],
-          generated: true do
-      import Bond.Predicates
+  defp assert!(%Assertion{expression: expression} = assertion, exception_type, opts \\ []) do
+    imports =
+      for module <- [Bond.Predicates | List.wrap(opts[:import])] do
+        quote do
+          import unquote(module)
+        end
+      end
 
-      unless expression do
-        raise exception_type,
-          assertion: assertion,
+    quote generated: true do
+      unquote_splicing(imports)
+
+      value = unquote(expression)
+
+      if value do
+        value
+      else
+        raise unquote(exception_type),
+          assertion: unquote(Macro.escape(assertion)),
           env: __ENV__,
           binding: binding()
       end

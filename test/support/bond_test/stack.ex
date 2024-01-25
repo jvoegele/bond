@@ -2,7 +2,7 @@ defmodule BondTest.Stack do
   @moduledoc """
   Stack module for testing Bond contracts.
 
-  This is an example of a "demanding" stack, as opposed to a "tolerant" stack, which is useful
+  This is an example of a "demanding" stack (as opposed to a "tolerant" stack) which is useful
   for demonstrating contracts but is not the typical Elixir style.
   """
 

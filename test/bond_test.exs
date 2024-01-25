@@ -3,5 +3,5 @@ defmodule BondTest do
 
   use ExUnit.Case
 
-  doctest Bond
+  doctest Bond, import: true
 end
