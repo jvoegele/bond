@@ -86,6 +86,7 @@ defmodule Bond do
 
   alias Bond.Assertion
   alias Bond.CompileStateFSM, as: FSM
+  alias Bond.OldExpression
 
   @typedoc false
   @type assertion_kind :: :precondition | :postcondition | :check
@@ -238,8 +239,7 @@ defmodule Bond do
     check_assertion(expression, label, __CALLER__, meta)
   end
 
-  defp fsm(%Macro.Env{module: module}),
-    do: Module.get_attribute(module, :_bond_fsm_pid)
+  defp fsm(%Macro.Env{module: module}), do: Module.get_attribute(module, :_bond_fsm_pid)
 
   defp check_assertion(expression, label, env, meta) do
     check = Bond.Assertion.new(:check, label, expression, env, meta)
@@ -286,11 +286,16 @@ defmodule Bond do
 
   defp wrap_function_body(body, preconditions, postconditions) do
     preconditions_ast = Enum.map(preconditions, &Assertion.quoted_eval/1)
+
+    {postconditions, old_context} = OldExpression.precompile(postconditions)
+    old_resolved_ast = OldExpression.resolve(old_context)
     postconditions_ast = Enum.map(postconditions, &Assertion.quoted_eval(&1))
 
     Keyword.update!(body, :do, fn do_block ->
       quote do
         unquote_splicing(preconditions_ast)
+        unquote_splicing(old_resolved_ast)
+
         var!(result) = unquote(do_block)
         unquote_splicing(postconditions_ast)
         var!(result)

@@ -64,7 +64,7 @@ defmodule BondTest.Stack do
   @pre not full?(stack)
   @post not empty?(stack)
   @post top(stack) == elem
-  # @post "size increased by one": size(stack) == old(size(stack)) + 1
+  @post "size increased by one": size(stack) == old(size(stack)) + 1
   @spec push(handle(), elem()) :: :ok
   def push(stack, elem) do
     Agent.update(stack, fn %{stack: stack, size: size} = state ->
@@ -81,6 +81,7 @@ defmodule BondTest.Stack do
 
   @pre not empty?(stack)
   @post not full?(stack)
+  @post "size decreased by one": size(stack) == old(size(stack)) - 1
   @spec pop(handle()) :: elem()
   def pop(stack) do
     Agent.get_and_update(stack, fn %{stack: stack, size: size} = state ->

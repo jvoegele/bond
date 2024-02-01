@@ -25,7 +25,7 @@ defmodule Bond.AssertionError do
 
         error = %__MODULE__{
           label: assertion.label,
-          expression: Macro.to_string(assertion.expression),
+          expression: assertion.code,
           assertion_env: assertion.definition_env,
           function_env: function_env,
           binding: binding
@@ -38,7 +38,7 @@ defmodule Bond.AssertionError do
     """
     #{headline}
     |   label: #{inspect(error.label)}
-    |   assertion: #{Macro.to_string(error.expression)}
+    |   assertion: #{error.expression}
     |   binding: #{inspect(error.binding)}
     """
   end

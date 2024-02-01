@@ -10,14 +10,16 @@ defmodule Bond.Assertion do
   """
 
   @enforce_keys [:expression, :kind, :definition_env, :meta]
-  defstruct [:label, :expression, :kind, :definition_env, :meta]
+  defstruct [:label, :expression, :code, :kind, :definition_env, :meta, :context]
 
   @type t :: %__MODULE__{
           label: Bond.assertion_label(),
           expression: Bond.assertion_expression(),
+          code: String.t(),
           kind: Bond.assertion_kind(),
           definition_env: Bond.env(),
-          meta: list()
+          meta: list(),
+          context: map()
         }
 
   @assertion_errors %{
@@ -32,12 +34,13 @@ defmodule Bond.Assertion do
                   is_atom(elem(expression, 0)) and is_list(elem(expression, 1)) and
                   is_list(elem(expression, 2))
 
-  def new(kind, label, expression, %Macro.Env{} = env, meta)
+  def new(kind, label, expression, %Macro.Env{} = env \\ __ENV__, meta \\ [])
       when is_assertion_expression(expression) do
     %__MODULE__{
       kind: kind,
       label: label,
       expression: expression,
+      code: Macro.to_string(expression),
       definition_env: Bond.Env.new(env),
       meta: meta
     }
