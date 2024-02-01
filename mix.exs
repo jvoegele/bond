@@ -1,22 +1,33 @@
 defmodule Bond.MixProject do
   use Mix.Project
 
+  @version "0.1.0"
+  @source_url "https://github.com/jvoegele/bond"
+
   def project do
     [
       app: :bond,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      docs: docs(),
       test_coverage: [tool: ExCoveralls],
       preferred_cli_env: [
         coveralls: :test,
         "coveralls.detail": :test,
         "coveralls.post": :test,
         "coveralls.html": :test
-      ]
+      ],
+
+      # Hex
+      description: "Design By Contract (DbC) for Elixir",
+      package: package(),
+
+      # Docs
+      name: "Bond",
+      source_url: @source_url,
+      docs: docs()
     ]
   end
 
@@ -42,11 +53,27 @@ defmodule Bond.MixProject do
     ]
   end
 
+  defp package do
+    [
+      name: :bond,
+      files: ["lib", "mix.exs", "README.md", "LICENSE", "CHANGELOG.md"],
+      maintainers: ["Jason Voegele"],
+      licenses: ["Apache-2.0"],
+      links: %{"GitHub" => @source_url}
+    ]
+  end
+
   defp docs do
     [
       main: "Bond",
-      extras: ["README.md"],
+      extras: [
+        "README.md": [title: "Introduction"],
+        "CHANGELOG.md": [title: "Changelog"],
+        LICENSE: [title: "License"]
+      ],
       filter_modules: fn _module, meta ->
+        # This allows us to tag modules as internal and exclude them from the API docs as follows:
+        #   @moduledoc internal: true
         not Map.get(meta, :internal, false)
       end
     ]
