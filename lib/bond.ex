@@ -84,10 +84,6 @@ defmodule Bond do
       expressions as the associated values
   """
 
-  alias Bond.Assertion
-  alias Bond.CompileStateFSM, as: FSM
-  alias Bond.OldExpression
-
   @typedoc false
   @type assertion_kind :: :precondition | :postcondition | :check
 
@@ -118,22 +114,14 @@ defmodule Bond do
 
   @doc false
   defmacro __using__(_opts) do
-    module = __CALLER__.module
-    {:ok, fsm_pid} = FSM.start_link(module)
-    Module.put_attribute(module, :_bond_fsm_pid, fsm_pid)
+    Bond.Contracts.init(__CALLER__.module)
 
     quote do
       import Kernel, except: [@: 1, def: 2, defp: 2]
       import Bond
 
-      @before_compile Bond
+      @before_compile Bond.Contracts
     end
-  end
-
-  @doc false
-  defmacro __before_compile__(%Macro.Env{} = env) do
-    FSM.stop(fsm(env))
-    Module.delete_attribute(env.module, :_bond_fsm_pid)
   end
 
   @doc """
@@ -149,23 +137,23 @@ defmodule Bond do
     # assertions.
     if Keyword.keyword?(expression) do
       for {label, expression} <- expression do
-        register_assertion(pre_or_post, expression, label, __CALLER__, meta)
+        Bond.Contracts.register_assertion(pre_or_post, expression, label, __CALLER__, meta)
       end
     else
-      register_assertion(pre_or_post, expression, nil, __CALLER__, meta)
+      Bond.Contracts.register_assertion(pre_or_post, expression, nil, __CALLER__, meta)
     end
   end
 
   defmacro @{pre_or_post, meta, [label, {_, _, _} = expression]}
            when (pre_or_post in [:pre, :post] and is_atom(label)) or is_binary(label) do
     # This clause handles @pre or @post assertions that have a label preceding them.
-    register_assertion(pre_or_post, expression, label, __CALLER__, meta)
+    Bond.Contracts.register_assertion(pre_or_post, expression, label, __CALLER__, meta)
   end
 
   defmacro @{pre_or_post, meta, [{_, _, _} = expression, label]}
            when (pre_or_post in [:pre, :post] and is_atom(label)) or is_binary(label) do
     # This clause handles @pre or @post assertions that have a label following them.
-    register_assertion(pre_or_post, expression, label, __CALLER__, meta)
+    Bond.Contracts.register_assertion(pre_or_post, expression, label, __CALLER__, meta)
   end
 
   defmacro @attr do
@@ -179,14 +167,14 @@ defmodule Bond do
   Override `Kernel.def/2` to support wrapping with preconditions and postconditions.
   """
   defmacro def(definition, body) do
-    define_function_with_contract(__CALLER__, definition, body, true)
+    Bond.Contracts.define_function_with_contract(__CALLER__, definition, body, true)
   end
 
   @doc """
   Override `Kernel.defp/2` to support wrapping with preconditions and postconditions.
   """
   defmacro defp(definition, body) do
-    define_function_with_contract(__CALLER__, definition, body, false)
+    Bond.Contracts.define_function_with_contract(__CALLER__, definition, body, false)
   end
 
   @doc """
@@ -214,12 +202,12 @@ defmodule Bond do
 
   defmacro check(keyword_list) when is_list(keyword_list) do
     for {label, {_, meta, _} = expression} <- keyword_list do
-      check_assertion(expression, label, __CALLER__, meta)
+      Bond.Contracts.check_assertion(expression, label, __CALLER__, meta)
     end
   end
 
   defmacro check({_, meta, _} = expression) do
-    check_assertion(expression, nil, __CALLER__, meta)
+    Bond.Contracts.check_assertion(expression, nil, __CALLER__, meta)
   end
 
   @doc """
@@ -231,75 +219,11 @@ defmodule Bond do
 
   @spec check(assertion_label(), assertion_expression()) :: as_boolean(any())
   defmacro check(label, {_, meta, _} = expression) when is_atom(label) or is_binary(label) do
-    check_assertion(expression, label, __CALLER__, meta)
+    Bond.Contracts.check_assertion(expression, label, __CALLER__, meta)
   end
 
   @spec check(assertion_expression(), assertion_label()) :: as_boolean(any())
   defmacro check({_, meta, _} = expression, label) when is_atom(label) or is_binary(label) do
-    check_assertion(expression, label, __CALLER__, meta)
-  end
-
-  defp fsm(%Macro.Env{module: module}), do: Module.get_attribute(module, :_bond_fsm_pid)
-
-  defp check_assertion(expression, label, env, meta) do
-    check = Bond.Assertion.new(:check, label, expression, env, meta)
-    Bond.Assertion.quoted_eval(check)
-  end
-
-  defp register_assertion(:pre, expression, label, env, meta) do
-    register_assertion(:precondition, expression, label, env, meta)
-  end
-
-  defp register_assertion(:post, expression, label, env, meta) do
-    register_assertion(:postcondition, expression, label, env, meta)
-  end
-
-  defp register_assertion(kind, expression, label, env, meta) do
-    assertion = Assertion.new(kind, label, expression, env, meta)
-
-    fsm_event =
-      case kind do
-        :precondition -> :precondition_def
-        :postcondition -> :postcondition_def
-      end
-
-    apply(FSM, fsm_event, [fsm(env), assertion])
-  end
-
-  defp define_function_with_contract(env, definition, body, public?) do
-    fsm = fsm(env)
-    FSM.function_def(fsm, definition)
-    preconditions = FSM.pending_preconditions(fsm)
-    postconditions = FSM.pending_postconditions(fsm)
-    body_with_contracts = wrap_function_body(body, preconditions, postconditions)
-
-    if public? do
-      quote do
-        Kernel.def(unquote(definition), unquote(body_with_contracts))
-      end
-    else
-      quote do
-        Kernel.defp(unquote(definition), unquote(body_with_contracts))
-      end
-    end
-  end
-
-  defp wrap_function_body(body, preconditions, postconditions) do
-    preconditions_ast = Enum.map(preconditions, &Assertion.quoted_eval/1)
-
-    {postconditions, old_context} = OldExpression.precompile(postconditions)
-    old_resolved_ast = OldExpression.resolve(old_context)
-    postconditions_ast = Enum.map(postconditions, &Assertion.quoted_eval(&1))
-
-    Keyword.update!(body, :do, fn do_block ->
-      quote do
-        unquote_splicing(preconditions_ast)
-        unquote_splicing(old_resolved_ast)
-
-        var!(result) = unquote(do_block)
-        unquote_splicing(postconditions_ast)
-        var!(result)
-      end
-    end)
+    Bond.Contracts.check_assertion(expression, label, __CALLER__, meta)
   end
 end
