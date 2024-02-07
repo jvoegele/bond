@@ -90,4 +90,23 @@ defmodule Bond.Predicates do
       true
   """
   def p ~> q, do: implies?(p, q)
+
+  @doc """
+  Pattern matching operator: equivalent to `match?(pattern, expression)`.
+
+  ## Examples
+
+      iex> {:ok, %Date{}} <~ Date.new(1974, 6, 6) 
+      true
+      iex> {:error, _} <~ Date.new(-1, -1, -1)
+      true
+  """
+  defmacro pattern <~ expression do
+    quote do
+      case unquote(expression) do
+        unquote(pattern) -> true
+        _unmatched -> false
+      end
+    end
+  end
 end
