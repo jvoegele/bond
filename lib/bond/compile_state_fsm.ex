@@ -18,6 +18,8 @@ defmodule Bond.CompileStateFSM do
   @type function_def :: {name :: atom, list, parameters :: list | nil}
   @type precondition_def :: Bond.Assertion.t()
   @type postcondition_def :: Bond.Assertion.t()
+  @type doc_attribute :: {:doc, meta :: Keyword.t(), value :: doc_attribute_value()}
+  @type doc_attribute_value :: String.t() | Keyword.t()
 
   @doc """
   Starts a new FSM process for the given module.
@@ -66,6 +68,13 @@ defmodule Bond.CompileStateFSM do
   end
 
   @doc """
+  Sends a `doc_attribute` devent to the FSM.
+  """
+  def doc_attribute(fsm, doc_value) do
+    :gen_statem.cast(fsm, {:doc_attribute, doc_value})
+  end
+
+  @doc """
   Returns a list containing all pending precondition definitions.
   """
   @spec pending_preconditions(server_ref) :: list(precondition_def)
@@ -81,11 +90,23 @@ defmodule Bond.CompileStateFSM do
     :gen_statem.call(fsm, :pending_postconditions)
   end
 
+  @doc """
+  Returns a list containing all pending @doc attributes.
+  """
+  @spec pending_doc_attributes(server_ref) :: list(doc_attribute())
+  def pending_doc_attributes(fsm) do
+    :gen_statem.call(fsm, :pending_doc_attributes)
+  end
+
   defmodule Server do
     @moduledoc false
     @behaviour :gen_statem
 
-    defstruct module: nil, last_function_def: nil, precondition_defs: [], postcondition_defs: []
+    defstruct module: nil,
+              last_function_def: nil,
+              precondition_defs: [],
+              postcondition_defs: [],
+              doc_attributes: []
 
     @impl :gen_statem
     def callback_mode, do: :handle_event_function
@@ -154,6 +175,18 @@ defmodule Bond.CompileStateFSM do
       {:next_state, :contracts_pending, new_data}
     end
 
+    def handle_event(:cast, {:doc_attribute, doc_value}, state, data)
+        when state in [:no_contracts_pending, :contracts_pending] do
+      new_data = update_in(data.doc_attributes, &[doc_value | &1])
+      {:next_state, :contracts_pending, new_data}
+    end
+
+    def handle_event(:cast, {:doc_attribute, doc_value}, :contracts_apply, data) do
+      data = clear_pending_contracts(data)
+      new_data = put_in(data.doc_attributes, [doc_value])
+      {:next_state, :contracts_pending, new_data}
+    end
+
     def handle_event({:call, from}, :pending_preconditions, :no_contracts_pending, data) do
       {:keep_state, data, {:reply, from, []}}
     end
@@ -170,6 +203,14 @@ defmodule Bond.CompileStateFSM do
       {:keep_state, data, {:reply, from, Enum.reverse(data.postcondition_defs)}}
     end
 
+    def handle_event({:call, from}, :pending_doc_attributes, :no_contracts_pending, data) do
+      {:keep_state, data, {:reply, from, []}}
+    end
+
+    def handle_event({:call, from}, :pending_doc_attributes, _state, data) do
+      {:keep_state, data, {:reply, from, Enum.reverse(data.doc_attributes)}}
+    end
+
     # NOTE: this clause is used only for testing purposes
     def handle_event(:cast, {:set_state, new_state}, _state, data) do
       {:next_state, new_state, data}
@@ -183,7 +224,7 @@ defmodule Bond.CompileStateFSM do
     end
 
     defp clear_pending_contracts(data) do
-      %{data | precondition_defs: [], postcondition_defs: []}
+      %{data | precondition_defs: [], postcondition_defs: [], doc_attributes: []}
     end
   end
 end

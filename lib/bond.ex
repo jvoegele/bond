@@ -142,18 +142,27 @@ defmodule Bond do
     else
       Bond.Contracts.register_assertion(pre_or_post, expression, nil, __CALLER__, meta)
     end
+
+    :ok
   end
 
   defmacro @{pre_or_post, meta, [label, {_, _, _} = expression]}
            when (pre_or_post in [:pre, :post] and is_atom(label)) or is_binary(label) do
     # This clause handles @pre or @post assertions that have a label preceding them.
     Bond.Contracts.register_assertion(pre_or_post, expression, label, __CALLER__, meta)
+    :ok
   end
 
   defmacro @{pre_or_post, meta, [{_, _, _} = expression, label]}
            when (pre_or_post in [:pre, :post] and is_atom(label)) or is_binary(label) do
     # This clause handles @pre or @post assertions that have a label following them.
     Bond.Contracts.register_assertion(pre_or_post, expression, label, __CALLER__, meta)
+    :ok
+  end
+
+  defmacro @{:doc, meta, [value]} do
+    Bond.Contracts.register_doc(__CALLER__, meta, value)
+    :ok
   end
 
   defmacro @attr do
