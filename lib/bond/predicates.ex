@@ -1,12 +1,16 @@
 defmodule Bond.Predicates do
   @moduledoc """
-  Predicate functions and operators that are useful in contract specifications.
+  Predicate functions and operators that are useful in assertions and contract specifications.
 
-  To use the operator versions of the predicates, this module must be imported in the using module.
+  This module is automatically imported for all 
+  To use the infix operator versions of the predicates, this module must be imported in the
+  using module.
   """
 
   @doc """
   Logical exclusive or: is either `p` or `q` true, but not both?
+
+  For an infix operator version of exclusive or see `|||/2`.
 
   ## Examples
 
@@ -50,6 +54,8 @@ defmodule Bond.Predicates do
 
   @doc """
   Logical implication: does `p` imply `q`?
+
+  For an infix operator version of logical implication see `~>/2`.
 
   ## Examples
 

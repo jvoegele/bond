@@ -131,10 +131,10 @@ defmodule Bond do
   """
   defmacro @pre_or_post
 
+  # This clause handles either "bare" @pre or @post assertions that do not have a label
+  # attached to them, or keyword lists where the keys are labels and the values are the
+  # assertions.
   defmacro @{pre_or_post, meta, [expression]} when pre_or_post in [:pre, :post] do
-    # This clause handles "bare" @pre or @post assertions that either do not have a label
-    # attached to them, or a keyword list where the keys are labels and the values are the
-    # assertions.
     if Keyword.keyword?(expression) do
       for {label, expression} <- expression do
         Bond.Contracts.register_assertion(pre_or_post, expression, label, __CALLER__, meta)
@@ -146,16 +146,16 @@ defmodule Bond do
     :ok
   end
 
+  # This clause handles @pre or @post assertions that have a label preceding them.
   defmacro @{pre_or_post, meta, [label, {_, _, _} = expression]}
            when (pre_or_post in [:pre, :post] and is_atom(label)) or is_binary(label) do
-    # This clause handles @pre or @post assertions that have a label preceding them.
     Bond.Contracts.register_assertion(pre_or_post, expression, label, __CALLER__, meta)
     :ok
   end
 
+  # This clause handles @pre or @post assertions that have a label following them.
   defmacro @{pre_or_post, meta, [{_, _, _} = expression, label]}
            when (pre_or_post in [:pre, :post] and is_atom(label)) or is_binary(label) do
-    # This clause handles @pre or @post assertions that have a label following them.
     Bond.Contracts.register_assertion(pre_or_post, expression, label, __CALLER__, meta)
     :ok
   end

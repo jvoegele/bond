@@ -6,7 +6,7 @@ defmodule Bond.Contracts do
 
   alias Bond.Assertion
   alias Bond.CompileStateFSM, as: FSM
-  alias Bond.OldExpression
+  alias Bond.FunctionWithContract
 
   def init(module) do
     {:ok, fsm_pid} = FSM.start_link(module)
@@ -49,27 +49,34 @@ defmodule Bond.Contracts do
 
   def define_function_with_contract(env, definition, body, public?) do
     fsm = fsm(env)
+    function = FunctionWithContract.new(env, definition, body)
     FSM.function_def(fsm, definition)
 
     preconditions = FSM.pending_preconditions(fsm)
     postconditions = FSM.pending_postconditions(fsm)
+
     docs = append_contract_docs(FSM.pending_doc_attributes(fsm), preconditions, postconditions)
 
-    body_with_contracts = wrap_function_body(body, preconditions, postconditions)
+    function = FunctionWithContract.apply_contract(function, preconditions, postconditions)
+    body_with_contracts = function.body_ast
 
-    if public? do
-      quote do
-        Enum.each(unquote(docs), fn {meta, doc} ->
-          Module.put_attribute(__MODULE__, :doc, {meta[:line], doc})
-        end)
+    result =
+      if public? do
+        quote do
+          Enum.each(unquote(docs), fn {meta, doc} ->
+            Module.put_attribute(__MODULE__, :doc, {meta[:line], doc})
+          end)
 
-        Kernel.def(unquote(definition), unquote(body_with_contracts))
+          Kernel.def(unquote(definition), unquote(body_with_contracts))
+        end
+      else
+        quote do
+          Kernel.defp(unquote(definition), unquote(body_with_contracts))
+        end
       end
-    else
-      quote do
-        Kernel.defp(unquote(definition), unquote(body_with_contracts))
-      end
-    end
+
+    FSM.doc_attributes_applied(fsm)
+    result
   end
 
   defp append_contract_docs([], _preconditions, _postconditions), do: []
@@ -113,25 +120,6 @@ defmodule Bond.Contracts do
     |> Enum.reverse()
     |> List.insert_at(0, header)
     |> Enum.intersperse("\n    ")
-  end
-
-  defp wrap_function_body(body, preconditions, postconditions) do
-    preconditions_ast = Enum.map(preconditions, &Assertion.quoted_eval/1)
-
-    {postconditions, old_context} = OldExpression.precompile(postconditions)
-    old_resolved_ast = OldExpression.resolve(old_context)
-    postconditions_ast = Enum.map(postconditions, &Assertion.quoted_eval(&1))
-
-    Keyword.update!(body, :do, fn do_block ->
-      quote do
-        unquote_splicing(preconditions_ast)
-        unquote_splicing(old_resolved_ast)
-
-        var!(result) = unquote(do_block)
-        unquote_splicing(postconditions_ast)
-        var!(result)
-      end
-    end)
   end
 
   defp fsm(%Macro.Env{module: module}), do: Module.get_attribute(module, :_bond_fsm_pid)

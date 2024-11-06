@@ -1,8 +1,8 @@
 defmodule Bond.OldExpression do
   @moduledoc internal: true
   @moduledoc """
-  Support for the `old` construct that can be used in postconditions for capturing values prior
-  to execution of a function.
+  Support for the `old` construct that can be used in postconditions for capturing values of
+  expressions prior to execution of a function.
   """
 
   alias Bond.Assertion
@@ -22,10 +22,9 @@ defmodule Bond.OldExpression do
   @spec precompile([%Bond.Assertion{kind: :postcondition}]) :: {Macro.t(), old_context()}
   def precompile(postconditions) when is_list(postconditions) do
     {precompiled_postconditions, old_table} =
-      for postcondition <- postconditions, reduce: {[], %{}} do
-        acc ->
-          accumulate_old_expressions(postcondition, acc)
-      end
+      Enum.reduce(postconditions, {[], %{}}, fn postcondition, acc ->
+        accumulate_old_expressions(postcondition, acc)
+      end)
 
     {Enum.reverse(precompiled_postconditions), old_table}
   end

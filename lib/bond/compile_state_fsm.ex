@@ -68,10 +68,17 @@ defmodule Bond.CompileStateFSM do
   end
 
   @doc """
-  Sends a `doc_attribute` devent to the FSM.
+  Sends a `doc_attribute` event to the FSM.
   """
   def doc_attribute(fsm, doc_value) do
     :gen_statem.cast(fsm, {:doc_attribute, doc_value})
+  end
+
+  @doc """
+  Sends a `doc_attributes_applied` event to the FSM.
+  """
+  def doc_attributes_applied(fsm) do
+    :gen_statem.cast(fsm, :doc_attributes_applied)
   end
 
   @doc """
@@ -181,6 +188,10 @@ defmodule Bond.CompileStateFSM do
       {:next_state, :contracts_pending, new_data}
     end
 
+    def handle_event(:cast, :doc_attributes_applied, _state, data) do
+      {:keep_state, clear_pending_doc_attributes(data)}
+    end
+
     def handle_event(:cast, {:doc_attribute, doc_value}, :contracts_apply, data) do
       data = clear_pending_contracts(data)
       new_data = put_in(data.doc_attributes, [doc_value])
@@ -216,6 +227,9 @@ defmodule Bond.CompileStateFSM do
       {:next_state, new_state, data}
     end
 
+    defp function_id({:when, _, [{name, _, params} | _]}) when is_list(params),
+      do: {name, length(params)}
+
     defp function_id({name, _, nil}), do: {name, 0}
     defp function_id({name, _, params}) when is_list(params), do: {name, length(params)}
 
@@ -225,6 +239,10 @@ defmodule Bond.CompileStateFSM do
 
     defp clear_pending_contracts(data) do
       %{data | precondition_defs: [], postcondition_defs: [], doc_attributes: []}
+    end
+
+    defp clear_pending_doc_attributes(data) do
+      %{data | doc_attributes: []}
     end
   end
 end

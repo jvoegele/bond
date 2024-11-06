@@ -144,11 +144,13 @@ defmodule Bond.CompileStateFSMTest do
       assert FSM.pending_postconditions(fsm) == [:ensures1, :ensures2]
       assert FSM.pending_doc_attributes(fsm) == [@doc_attribute, @doc_attribute_keyword]
 
+      FSM.doc_attributes_applied(fsm)
+
       FSM.function_def(fsm, function_def(:fn1, [:a, :b]))
       assert FSM.current_state(fsm) == :contracts_apply
       assert FSM.pending_preconditions(fsm) == [:requires1, :requires2]
       assert FSM.pending_postconditions(fsm) == [:ensures1, :ensures2]
-      assert FSM.pending_doc_attributes(fsm) == [@doc_attribute, @doc_attribute_keyword]
+      assert FSM.pending_doc_attributes(fsm) == []
 
       FSM.function_def(fsm, function_def(:fn2, [:x, :y]))
       assert FSM.current_state(fsm) == :no_contracts_pending
