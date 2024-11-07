@@ -252,7 +252,7 @@ on mouse hover in VS Code.
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.8.0"}
+    {:bond, "~> 0.8.1"}
   ]
 end
 ```
