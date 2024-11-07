@@ -12,7 +12,7 @@ Refer to the `Bond` module docs for detailed usage instructions and examples.
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.1.0"}
+    {:bond, "~> 0.8.0"}
   ]
 end
 ```
@@ -34,4 +34,4 @@ defmodule Math do
         "x > 1 implies result smaller than x": (x > 1) ~> (result < x)
   def sqrt(x), do: :math.sqrt(x)
 end
-  ```
+```
