@@ -21,11 +21,13 @@ defmodule BondTest.Stack do
 
   @type elem :: any()
 
+  @pre positive_capacity: capacity > 0
+  @post initial_state: empty?(result)
+  def new(capacity)
+
   @doc """
   Creates a new stack with the specified `capacity`.
   """
-  @pre positive_capacity: capacity > 0
-  @post initial_state: empty?(result)
   @spec new(capacity :: pos_integer()) :: handle()
   def new(capacity) when is_integer(capacity) do
     {:ok, pid} =
@@ -39,6 +41,9 @@ defmodule BondTest.Stack do
 
     pid
   end
+
+  # @pre is_float(capacity)
+  def new(capacity) when is_float(capacity) and capacity > 0.0, do: new(round(capacity))
 
   @doc """
   Returns the number of elements currently on the stack.

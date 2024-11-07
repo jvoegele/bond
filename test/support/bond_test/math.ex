@@ -9,22 +9,20 @@ defmodule BondTest.Math do
 
   @doc """
   Returns the square root of `x`.
-
-  ### Preconditions
-
-    *numeric_x*: is_number(x)
   """
+  @doc function_name: :sqrt
+  @doc function_arity: 1
   @pre numeric_x: is_number(x), non_negative_x: x >= 0
   @post float_result: is_float(result),
         non_negative_result: result >= 0.0,
         "sqrt of 0 is 0": (x == 0) ~> (result === 0.0),
         "sqrt of 1 is 1": (x == 1) ~> (result === 1.0),
         "x > 1 implies result smaller than x": (x > 1) ~> (result < x)
-  def sqrt(x, poison_pill \\ nil) do
+  def sqrt(x, trap_door \\ nil) do
     x2 = x * 2
 
-    if is_function(poison_pill) do
-      poison_pill.(x)
+    if is_function(trap_door) do
+      trap_door.(x)
     else
       :math.sqrt(x)
     end
@@ -37,9 +35,11 @@ defmodule BondTest.Math do
   @doc """
   Returns `x` raised to the power of `y`.
   """
+  @doc function_name: :pow, function_arity: 2
   @spec pow(x :: number(), y :: number()) :: float()
-  @pre numeric_x: is_number(x), numeric_y: is_number(y)
-  @post float_result: is_float(result)
+  @pre is_number(x)
+  @pre is_number(y)
+  @post is_float(result)
   def pow(x, y) do
     check is_number(x)
     check y_is_number: is_number(y)
