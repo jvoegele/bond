@@ -2,9 +2,12 @@ defmodule Bond.Predicates do
   @moduledoc """
   Predicate functions and operators that are useful in assertions and contract specifications.
 
-  This module is automatically imported for all 
-  To use the infix operator versions of the predicates, this module must be imported in the
-  using module.
+  This module is automatically imported for all assertion expressions, specifically in
+  preconditions defined with `@pre`, postconditions defined with `@post`, and in uses of
+  `Bond.check/1` or `Bond.check/2`.
+
+  To use the infix operator versions of the predicates in other contexts, this module must be
+  imported in the using module.
   """
 
   @doc """
