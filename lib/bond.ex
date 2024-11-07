@@ -1,88 +1,13 @@
 defmodule Bond do
-  @moduledoc """
-  Design By Contract for Elixir.
-
-  As described on [Wikipedia](https://en.wikipedia.org/wiki/Design_by_contract):
-
-  > Design by contract (DbC), also known as contract programming, programming by contract and
-  > design-by-contract programming, is an approach for designing software.
-  >
-  > It prescribes that software designers should define formal, precise and verifiable interface
-  > specifications for software components, which extend the ordinary definition of
-  > [abstract data types](https://en.wikipedia.org/wiki/Abstract_data_type) with preconditions,
-  > postconditions and invariants. These specifications are referred to as "contracts", in
-  > accordance with a conceptual metaphor with the conditions and obligations of business
-  > contracts.
-  >
-  > The term was coined by [Bertrand Meyer](https://en.wikipedia.org/wiki/Bertrand_Meyer) in
-  > connection with his design of the
-  > [Eiffel programming language](https://en.wikipedia.org/wiki/Eiffel_(programming_language))
-  > and first described in various articles starting in 1986 and the two successive editions
-  > (1988, 1997) of his book
-  > [_Object-Oriented Software Construction_](https://en.wikipedia.org/wiki/Object-Oriented_Software_Construction).
-  >
-  > Design by contract has its roots in work on
-  > [formal verification](https://en.wikipedia.org/wiki/Formal_verification),
-  > [formal specification](https://en.wikipedia.org/wiki/Formal_specification) and
-  > [Hoare logic](https://en.wikipedia.org/wiki/Hoare_logic).
-
-  `Bond` applies the central ideas of contract programming to Elixir and provides support for
-  attaching preconditions and postconditions to function definitions and conditionally evaluating
-  them based on compile-time configuration.
-
-  ## Quick start
-
-  `use Bond` in your module and then define preconditions and postconditions for your functions
-  with the `@pre` and `@post` annotations, respectively. For example:
-
-  ```elixir
-  defmodule Math do
-    use Bond
-
-    @pre numeric_x: is_number(x), non_negative_x: x >= 0
-    @post float_result: is_float(result),
-          non_negative_result: result >= 0.0,
-          "sqrt of 0 is 0": (x == 0) ~> (result === 0.0),
-          "sqrt of 1 is 1": (x == 1) ~> (result === 1.0),
-          "x > 1 implies result smaller than x": (x > 1) ~> (result < x)
-    def sqrt(x), do: :math.sqrt(x)
-  end
-  ```
-
-  ## Usage
-
-  > #### `use Bond` {: .info}
-  >
-  > When you `use Bond`, the `Bond` module will override several `Kernel` macros in order to
-  > support attaching preconditions and postconditions to functions. Specifically:
-  >
-  >   * `Kernel.@/1` is overridden by `Bond.@/1`
-  >   * `Kernel.def/2` is overridden by `Bond.def/2`
-  >   * `Kernel.defp/2` is overridden by `Bond.defp/2`
-  >
-  > `use Bond` will also import the `Bond` module so that the `check/1` and `check/2` macros are
-  > available for use.
-  >
-  > Additionally, the `Bond.Predicates` module is automatically imported for all preconditions,
-  > postconditions, and checks, so that the predicate functions and operators that are defined
-  > therein can be used for assertions. `Bond.Predicates` can be explicitly imported into modules
-  > for use outside of assertions.
-
-  ## Assertion syntax
-
-  Assertions in Bond are conditional Elixir expressions, optionally associated with a textual
-  label (either an atom or a string). These assertions may appear in `@pre` or `@post`
-  expressions, or in calls to `check/1` or `check/2`.
-
-  Bond offers considerable flexibility in its assertion syntax; assertions may take any of the
-  following forms:
-
-    * `expression` - a "bare" expression without any associated label
-    * `label, expression` - an expression preceded by a string or atom label
-    * `expression, label` - an expression followed by a string or atom label
-    * `label_1: expression_1, label_2: expression_2` - a keyword list with labels as the keys and
-      expressions as the associated values
-  """
+  # Pull in the moduledocs from the demarcated section of the README file
+  @readme Path.expand("./README.md")
+  @external_resource @readme
+  @moduledoc @readme
+             |> File.read!()
+             |> String.split("<!-- README START -->")
+             |> Enum.at(1)
+             |> String.split("<!-- README END -->")
+             |> List.first()
 
   @typedoc false
   @type assertion_kind :: :precondition | :postcondition | :check
