@@ -26,7 +26,7 @@ defmodule Bond.Predicates do
       iex> xor(false, false)
       false
   """
-  @spec xor(boolean, boolean) :: boolean
+  @spec xor(as_boolean(term()), as_boolean(term())) :: boolean()
   def xor(p, q), do: (p || q) && !(p && q)
 
   @doc """
@@ -71,8 +71,8 @@ defmodule Bond.Predicates do
       iex> implies?(false, false)
       true
   """
-  @spec implies?(boolean, boolean) :: boolean
-  def implies?(p, q), do: !p || q
+  @spec implies?(as_boolean(term()), as_boolean(term())) :: boolean()
+  def implies?(p, q), do: !!(!p || q)
 
   @doc """
   Logical implication operator: `p ~> q` means `implies?(p, q)`.
