@@ -229,7 +229,7 @@ public interface for a module in the same way that function signatures and
 typespecs are. Therefore, it is essential that contracts are included as part
 of the documentation for modules and functions.
 
-Bond automatically appends `Preconditions` and `Postconditions` section to the
+Bond automatically appends `Preconditions` and `Postconditions` sections to the
 documentation for any function that defines any preconditions or postconditions
 and has a `@doc` attribute. These two generated sections include all of the
 assertions specified in the function contract as nicely formatted Elixir code.

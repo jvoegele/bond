@@ -1,7 +1,7 @@
 defmodule Bond.Assertion do
   @moduledoc internal: true
   @moduledoc """
-  Struct representing assertions that appear as part of contract specifications, such as in
+  Struct representing an assertion that appears as part of contract specifications, such as in
   preconditions or postconditions attached to functions.
 
   Assertions are constructed at compile-time and as such the fields in this struct are quoted
@@ -12,11 +12,13 @@ defmodule Bond.Assertion do
   @enforce_keys [:expression, :kind, :definition_env, :meta]
   defstruct [:label, :expression, :code, :kind, :definition_env, :meta, :context]
 
-  @type t :: %__MODULE__{
+  @type t :: t(Bond.assertion_kind())
+
+  @type t(kind) :: %__MODULE__{
           label: Bond.assertion_label(),
           expression: Bond.assertion_expression(),
           code: String.t(),
-          kind: Bond.assertion_kind(),
+          kind: kind,
           definition_env: Bond.env(),
           meta: list(),
           context: map()
