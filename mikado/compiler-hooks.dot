@@ -1,0 +1,13 @@
+digraph {
+  goal [ label = "Use compiler hooks instead of overriding Kernel macros", style = bold ]
+  delete_kernel_overrides [ label = "Delete overridden Kernel macros (def and defp)" ]
+  implement_compiler_hooks [ label = "Implement @before_compile and @on_definition" ]
+
+  replace_kernel_overrides_with_compiler_hooks [
+    label = "Replace Kernel overrides with compiler hooks"
+  ]
+
+  goal -> replace_kernel_overrides_with_compiler_hooks
+  replace_kernel_overrides_with_compiler_hooks -> delete_kernel_overrides
+  replace_kernel_overrides_with_compiler_hooks -> implement_compiler_hooks
+}
