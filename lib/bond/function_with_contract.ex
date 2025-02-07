@@ -5,7 +5,7 @@ defmodule Bond.FunctionWithContract do
   function.
   """
 
-  alias Bond.Assertion
+  alias Bond.Compiler.Assertion
   alias Bond.OldExpression
 
   defstruct [

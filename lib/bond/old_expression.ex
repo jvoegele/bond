@@ -5,21 +5,21 @@ defmodule Bond.OldExpression do
   expressions prior to execution of a function.
   """
 
-  alias Bond.Assertion
+  alias Bond.Compiler.Assertion
 
   @opaque old_context :: %{String.t() => Bond.assertion_expression()} | %{}
 
   @doc """
   Transforms `postconditions` such that any `old` expressions are in resolvable form.
 
-  The `postconditions` argument must be a list of `%Bond.Assertion{kind: :postcondition}`
+  The `postconditions` argument must be a list of `%Bond.Compiler.Assertion{kind: :postcondition}`
   structs, since old expressions are valid only in postconditions.
 
   Returns a tuple containing the transformed postconditions and an opaque value that can be
   provided to `resolve/1` for resolving old expressions to their runtime value prior to function
   execution.
   """
-  @spec precompile([%Bond.Assertion{kind: :postcondition}]) :: {Macro.t(), old_context()}
+  @spec precompile([%Bond.Compiler.Assertion{kind: :postcondition}]) :: {Macro.t(), old_context()}
   def precompile(postconditions) when is_list(postconditions) do
     {precompiled_postconditions, old_table} =
       Enum.reduce(postconditions, {[], %{}}, fn postcondition, acc ->

@@ -4,7 +4,7 @@ defmodule Bond.Assert do
   Provides assertion functions for evaluating contracts.
   """
 
-  alias Bond.Assertion
+  alias Bond.Compiler.Assertion
 
   def require!(%Assertion{kind: :precondition} = precondition) do
     assert!(precondition, Bond.PreconditionError)

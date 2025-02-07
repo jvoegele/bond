@@ -4,7 +4,7 @@ defmodule Bond.Contracts do
   Internal helper module for defining contracts for a module at compile-time.
   """
 
-  alias Bond.Assertion
+  alias Bond.Compiler.Assertion
   alias Bond.CompileStateFSM, as: FSM
   alias Bond.FunctionWithContract
 
@@ -43,8 +43,8 @@ defmodule Bond.Contracts do
   end
 
   def check_assertion(expression, label, env, meta) do
-    check = Bond.Assertion.new(:check, label, expression, env, meta)
-    Bond.Assertion.quoted_eval(check)
+    check = Bond.Compiler.Assertion.new(:check, label, expression, env, meta)
+    Bond.Compiler.Assertion.quoted_eval(check)
   end
 
   def define_function_with_contract(env, definition, body, public?) do

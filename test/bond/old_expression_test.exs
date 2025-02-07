@@ -3,7 +3,7 @@ defmodule Bond.OldExpressionTest do
 
   use ExUnit.Case
 
-  alias Bond.Assertion
+  alias Bond.Compiler.Assertion
   alias Bond.OldExpression
 
   setup [:setup_postconditions]

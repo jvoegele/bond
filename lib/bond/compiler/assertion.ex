@@ -1,4 +1,4 @@
-defmodule Bond.Assertion do
+defmodule Bond.Compiler.Assertion do
   @moduledoc internal: true
   @moduledoc """
   Struct representing an assertion that appears as part of contract specifications, such as in
@@ -83,7 +83,7 @@ defmodule Bond.Assertion do
   end
 
   defimpl String.Chars do
-    def to_string(%Bond.Assertion{label: label, expression: expression, kind: kind}) do
+    def to_string(%Bond.Compiler.Assertion{label: label, expression: expression, kind: kind}) do
       "#{kind}(#{inspect(label)}) => #{Macro.to_string(expression)}"
     end
   end

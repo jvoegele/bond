@@ -16,8 +16,8 @@ defmodule Bond.CompileStateFSM do
   @type server_ref :: pid | atom
   @type state :: :no_contracts_pending | :contracts_pending | :contracts_apply
   @type function_def :: {name :: atom, list, parameters :: list | nil}
-  @type precondition_def :: Bond.Assertion.t()
-  @type postcondition_def :: Bond.Assertion.t()
+  @type precondition_def :: Bond.Compiler.Assertion.t()
+  @type postcondition_def :: Bond.Compiler.Assertion.t()
   @type doc_attribute :: {:doc, meta :: Keyword.t(), value :: doc_attribute_value()}
   @type doc_attribute_value :: String.t() | Keyword.t()
 
