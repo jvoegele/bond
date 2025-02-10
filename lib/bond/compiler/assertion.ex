@@ -72,7 +72,7 @@ defmodule Bond.Compiler.Assertion do
   defp imports(:postcondition) do
     quote do
       import Bond.Predicates
-      # import Bond.OldExpression
+      # import Bond.Compiler.OldExpression
     end
   end
 

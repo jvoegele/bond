@@ -6,7 +6,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
   """
 
   alias Bond.Compiler.Assertion
-  alias Bond.OldExpression
+  alias Bond.Compiler.OldExpression
 
   defstruct [
     :env,

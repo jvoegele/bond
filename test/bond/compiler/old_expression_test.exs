@@ -1,10 +1,10 @@
-defmodule Bond.OldExpressionTest do
+defmodule Bond.Compiler.OldExpressionTest do
   @moduledoc false
 
   use ExUnit.Case
 
   alias Bond.Compiler.Assertion
-  alias Bond.OldExpression
+  alias Bond.Compiler.OldExpression
 
   setup [:setup_postconditions]
 

@@ -1,4 +1,4 @@
-defmodule Bond.OldExpression do
+defmodule Bond.Compiler.OldExpression do
   @moduledoc internal: true
   @moduledoc """
   Support for the `old` construct that can be used in postconditions for capturing values of
