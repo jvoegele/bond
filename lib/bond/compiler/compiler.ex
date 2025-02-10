@@ -6,7 +6,7 @@ defmodule Bond.Compiler do
 
   alias Bond.Compiler.Assertion
   alias Bond.Compiler.CompileStateFSM, as: FSM
-  alias Bond.FunctionWithContract
+  alias Bond.Compiler.AnnotatedFunction
 
   def init(module) do
     {:ok, fsm_pid} = FSM.start_link(module)
@@ -49,7 +49,7 @@ defmodule Bond.Compiler do
 
   def define_function_with_contract(env, definition, body, public?) do
     fsm = fsm(env)
-    function = FunctionWithContract.new(env, definition, body)
+    function = AnnotatedFunction.new(env, definition, body)
     FSM.function_def(fsm, definition)
 
     preconditions = FSM.pending_preconditions(fsm)
@@ -57,7 +57,7 @@ defmodule Bond.Compiler do
 
     docs = append_contract_docs(FSM.pending_doc_attributes(fsm), preconditions, postconditions)
 
-    function = FunctionWithContract.apply_contract(function, preconditions, postconditions)
+    function = AnnotatedFunction.apply_contract(function, preconditions, postconditions)
     body_with_contracts = function.body_ast
 
     result =

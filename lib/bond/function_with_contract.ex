@@ -1,4 +1,4 @@
-defmodule Bond.FunctionWithContract do
+defmodule Bond.Compiler.AnnotatedFunction do
   @moduledoc internal: true
   @moduledoc """
   Internal helper module for attaching contracts (i.e. preconditions and/or postconditions) to a
@@ -79,13 +79,13 @@ defmodule Bond.FunctionWithContract do
         # Assertion Evaluation rule (from Object-Oriented Software Construction):
         # During the process of evaluating an assertion at run-time, routine calls shall
         # be executed without any evaluation of the associated assertions.
-        if not Bond.FunctionWithContract._evaluating_assertions?() do
-          Bond.FunctionWithContract._set_evaluating_assertions(true)
+        if not Bond.Compiler.AnnotatedFunction._evaluating_assertions?() do
+          Bond.Compiler.AnnotatedFunction._set_evaluating_assertions(true)
 
           try do
             (unquote_splicing(assertions_ast))
           after
-            Bond.FunctionWithContract._set_evaluating_assertions(false)
+            Bond.Compiler.AnnotatedFunction._set_evaluating_assertions(false)
           end
         end
       end
