@@ -1,4 +1,4 @@
-defmodule Bond.Contracts do
+defmodule Bond.Compiler do
   @moduledoc internal: true
   @moduledoc """
   Internal helper module for defining contracts for a module at compile-time.
