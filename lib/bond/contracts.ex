@@ -5,7 +5,7 @@ defmodule Bond.Contracts do
   """
 
   alias Bond.Compiler.Assertion
-  alias Bond.CompileStateFSM, as: FSM
+  alias Bond.Compiler.CompileStateFSM, as: FSM
   alias Bond.FunctionWithContract
 
   def init(module) do

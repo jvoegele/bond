@@ -1,4 +1,4 @@
-defmodule Bond.CompileStateFSM do
+defmodule Bond.Compiler.CompileStateFSM do
   @moduledoc internal: true
   @moduledoc """
   Finite State Machine (FSM) holding compile-time state for modules that use `Bond`.

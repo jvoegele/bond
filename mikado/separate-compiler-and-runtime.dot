@@ -1,6 +1,6 @@
 digraph {
   goal [label="Separate Bond internals into distinct compile-time and run-time subsystems", style=bold, shape=doubleoctagon]
-  compiler_subsystem [label="Create internal `compiler` subsystem", fillcolor="green"]
+  compiler_subsystem [label="Create internal `compiler` subsystem", shape=note]
   runtime_subsystem [label="Create internal `runtime` subsystem"]
 
   compile_time [label="Use only `compiler` subsystem at compile-time", shape=parallelogram]
@@ -18,7 +18,7 @@ digraph {
   // annotated_function_multi_clause [label="AnnotatedFunction represents all clauses of a function"]
   // replace_function_with_contract_with_annotated_function [label="Replace FunctionWithContract with AnnotatedFunction"]
 
-  goal -> compile_time -> {move_assertion move_contracts move_compiler_fsm move_env move_function_with_contract move_old_expression} -> compiler_subsystem
+  goal -> compile_time -> {move_assertion move_compiler_fsm move_contracts move_env move_function_with_contract move_old_expression} -> compiler_subsystem
   // goal -> replace_function_with_contract_with_annotated_function -> annotated_function_multi_clause -> annotated_function_struct -> create_annotated_function -> compiler
   goal -> run_time -> create_bond_eval -> runtime_subsystem
   goal -> user_code
