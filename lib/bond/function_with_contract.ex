@@ -20,7 +20,7 @@ defmodule Bond.FunctionWithContract do
     {function, arity} = function_id(definition)
 
     %__MODULE__{
-      env: Bond.Env.new(env),
+      env: env,
       module: env.module,
       function: function,
       arity: arity,

@@ -50,12 +50,12 @@ defmodule BondTest.MathTest do
 
       assert error.label == :non_negative_x
       assert error.expression == "x >= 0"
-      assert %Bond.Env{} = assertion_env = error.assertion_env
+      assert %Macro.Env{} = assertion_env = error.assertion_env
       assert assertion_env.module == BondTest.Math
       assert is_nil(assertion_env.function)
       assert assertion_env.file =~ ~r{/bond_test/math.ex$}
 
-      assert %Bond.Env{} = function_env = error.function_env
+      assert %Macro.Env{} = function_env = error.function_env
       assert function_env.module == BondTest.Math
       assert function_env.function == {:sqrt, 2}
 

@@ -8,17 +8,18 @@ digraph {
   user_code [label="Ensure user-facing code is in top-level Bond namespace", shape=parallelogram]
   create_bond_eval [label="Create Bond.Runtime.Eval module"]
   move_assertion [shape=Mrecord, label="{Move Bond.Assertion|Bond.Compiler.Assertion|(add tests)}"]
-  move_contracts [shape=Mrecord, label="{Move Bond.Contracts|Bond.Compiler|(add tests)}"]
   move_compiler_fsm [shape=Mrecord, label="{Move Bond.CompileStateFSM|Bond.Compiler.CompileStateFSM}"]
-  move_env [shape=Mrecord, label="{Move Bond.Env|Bond.Compiler.Env}"]
+  move_contracts [shape=Mrecord, label="{Move Bond.Contracts|Bond.Compiler|(add tests)}"]
+  remove_env [shape=Mrecord, label="{Remove Bond.Env|Replace with Macro.Env}"]
   move_function_with_contract [shape=Mrecord, label="{Move Bond.FunctionWithContract|Bond.Compiler.AnnotatedFunction|(add tests)}"]
   move_old_expression [shape=Mrecord, label="{Move Bond.OldExpression|Bond.Compiler.OldExpression}"]
+  move_type_defs [label="Move type definitions into `compiler` subsystem"]
   // create_annotated_function [label="Create Bond.Compiler.AnnotatedFunction"]
   // annotated_function_struct [label="Add struct to AnnotatedFunction"]
   // annotated_function_multi_clause [label="AnnotatedFunction represents all clauses of a function"]
   // replace_function_with_contract_with_annotated_function [label="Replace FunctionWithContract with AnnotatedFunction"]
 
-  goal -> compile_time -> {move_assertion move_compiler_fsm move_contracts move_env move_function_with_contract move_old_expression} -> compiler_subsystem
+  goal -> compile_time -> {move_assertion move_compiler_fsm move_contracts remove_env move_function_with_contract move_old_expression move_type_defs} -> compiler_subsystem
   // goal -> replace_function_with_contract_with_annotated_function -> annotated_function_multi_clause -> annotated_function_struct -> create_annotated_function -> compiler
   goal -> run_time -> create_bond_eval -> runtime_subsystem
   goal -> user_code

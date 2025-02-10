@@ -19,7 +19,7 @@ defmodule Bond.AssertionError do
       @impl Exception
       def exception(opts) do
         assertion = Keyword.fetch!(opts, :assertion)
-        function_env = opts |> Keyword.fetch!(:env) |> Bond.Env.new()
+        function_env = Keyword.fetch!(opts, :env)
         {function, arity} = function_env.function
         binding = Keyword.fetch!(opts, :binding)
 

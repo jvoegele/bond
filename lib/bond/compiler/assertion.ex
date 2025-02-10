@@ -43,7 +43,7 @@ defmodule Bond.Compiler.Assertion do
       label: label,
       expression: expression,
       code: Macro.to_string(expression),
-      definition_env: Bond.Env.new(env),
+      definition_env: env,
       meta: meta
     }
   end
