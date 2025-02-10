@@ -11,8 +11,8 @@ defmodule Bond.AssertionError do
       @type t :: %__MODULE__{
               label: Bond.assertion_label(),
               expression: Bond.assertion_expression(),
-              assertion_env: Bond.env(),
-              function_env: Bond.env(),
+              assertion_env: Macro.Env.t(),
+              function_env: Macro.Env.t(),
               binding: keyword()
             }
 

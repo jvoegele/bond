@@ -19,7 +19,7 @@ defmodule Bond.Compiler.Assertion do
           expression: Bond.assertion_expression(),
           code: String.t(),
           kind: kind,
-          definition_env: Bond.env(),
+          definition_env: Macro.Env.t(),
           meta: list(),
           context: map()
         }

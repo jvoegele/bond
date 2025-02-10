@@ -23,20 +23,6 @@ defmodule Bond do
   """
   @type assertion_expression :: {atom(), Macro.metadata(), list()}
 
-  @typedoc """
-  Subset of `Macro.Env` struct that excludes fields that, according to the documentation, "are
-  private to Elixir's macro expansion mechanism".
-  """
-  @type env :: %{
-          optional(:__struct__) => module(),
-          context: Macro.Env.context(),
-          context_modules: Macro.Env.context_modules(),
-          file: Macro.Env.file(),
-          function: Macro.Env.name_arity() | nil,
-          line: Macro.Env.line(),
-          module: module()
-        }
-
   @doc false
   defmacro __using__(_opts) do
     Bond.Compiler.init(__CALLER__.module)
