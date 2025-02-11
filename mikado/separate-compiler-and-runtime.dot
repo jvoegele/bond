@@ -1,26 +1,26 @@
 digraph {
   goal [label="Separate Bond internals into distinct compile-time and run-time subsystems", style=bold, shape=doubleoctagon]
-  compiler_subsystem [label="Create internal `compiler` subsystem", shape=note]
-  runtime_subsystem [label="Create internal `runtime` subsystem"]
+  compiler_subsystem [label="Create internal `compiler` subsystem", fillcolor=darkgrey, style=filled]
+  runtime_subsystem [label="Create internal `runtime` subsystem", fillcolor=darkgrey, style=filled]
 
   compile_time [label="Use only `compiler` subsystem at compile-time", shape=parallelogram]
   run_time [label="Use only `runtime` subsystem at run-time", shape=parallelogram]
   user_code [label="Ensure user-facing code is in top-level Bond namespace", shape=parallelogram]
-  create_bond_eval [label="Create Bond.Runtime.Eval module"]
-  move_assertion [shape=Mrecord, label="{Move Bond.Assertion|Bond.Compiler.Assertion|(add tests)}"]
-  move_compiler_fsm [shape=Mrecord, label="{Move Bond.CompileStateFSM|Bond.Compiler.CompileStateFSM}"]
-  move_contracts [shape=Mrecord, label="{Move Bond.Contracts|Bond.Compiler|(add tests)}"]
-  remove_env [shape=Mrecord, label="{Remove Bond.Env|Replace with Macro.Env}"]
-  move_function_with_contract [shape=Mrecord, label="{Move Bond.FunctionWithContract|Bond.Compiler.AnnotatedFunction|(add tests)}"]
-  move_old_expression [shape=Mrecord, label="{Move Bond.OldExpression|Bond.Compiler.OldExpression}"]
-  move_type_defs [label="Move type definitions into `compiler` subsystem"]
-  // create_annotated_function [label="Create Bond.Compiler.AnnotatedFunction"]
-  // annotated_function_struct [label="Add struct to AnnotatedFunction"]
+  move_type_defs [label="Move type definitions into `compiler` subsystem", fillcolor=darkgrey, style=filled]
+  move_assertion [shape=Mrecord, label="{Move Bond.Assertion|Bond.Compiler.Assertion|(add tests)}", fillcolor=darkgrey, style=filled]
+  move_compiler_fsm [shape=Mrecord, label="{Move Bond.CompileStateFSM|Bond.Compiler.CompileStateFSM}", fillcolor=darkgrey, style=filled]
+  move_contracts [shape=Mrecord, label="{Move Bond.Contracts|Bond.Compiler|(add tests)}", fillcolor=darkgrey, style=filled]
+  remove_env [shape=Mrecord, label="{Remove Bond.Env|Replace with Macro.Env}", fillcolor=darkgrey, style=filled]
+  move_function_with_contract [shape=Mrecord, label="{Move Bond.FunctionWithContract|Bond.Compiler.AnnotatedFunction|(add tests)}", fillcolor=darkgrey, style=filled]
+  move_old_expression [shape=Mrecord, label="{Move Bond.OldExpression|Bond.Compiler.OldExpression}", fillcolor=darkgrey, style=filled]
+  create_bond_eval [label="Create Bond.Runtime.Eval module", fillcolor=darkgrey, style=filled]
+  add_eval_functions_to_bond_eval [shape=Mrecord, label="{Add evaluation functions to Bond.Runtime.Eval|evaluate_preconditions|evaluate_postconditions|evaluate_checks}"]
+  handle_old_expressions [label="Figure out how to handle `old` expressions (runtime vs compile-time)"]
+  replace_quoted_eval [label="Replace quoted_eval with Bond.Runtime.Eval.evaluate_*"]
   // annotated_function_multi_clause [label="AnnotatedFunction represents all clauses of a function"]
-  // replace_function_with_contract_with_annotated_function [label="Replace FunctionWithContract with AnnotatedFunction"]
 
   goal -> compile_time -> {move_assertion move_compiler_fsm move_contracts remove_env move_function_with_contract move_old_expression move_type_defs} -> compiler_subsystem
-  // goal -> replace_function_with_contract_with_annotated_function -> annotated_function_multi_clause -> annotated_function_struct -> create_annotated_function -> compiler
-  goal -> run_time -> create_bond_eval -> runtime_subsystem
+  compile_time -> {replace_quoted_eval handle_old_expressions} -> {move_function_with_contract add_eval_functions_to_bond_eval}
+  goal -> run_time -> add_eval_functions_to_bond_eval -> create_bond_eval -> runtime_subsystem
   goal -> user_code
 }
