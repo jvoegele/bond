@@ -6,21 +6,30 @@ digraph {
   compile_time [label="Use only `compiler` subsystem at compile-time", shape=parallelogram]
   run_time [label="Use only `runtime` subsystem at run-time", shape=parallelogram]
   user_code [label="Ensure user-facing code is in top-level Bond namespace", shape=parallelogram]
-  move_type_defs [label="Move type definitions into `compiler` subsystem", fillcolor=darkgrey, style=filled]
-  move_assertion [shape=Mrecord, label="{Move Bond.Assertion|Bond.Compiler.Assertion|(add tests)}", fillcolor=darkgrey, style=filled]
-  move_compiler_fsm [shape=Mrecord, label="{Move Bond.CompileStateFSM|Bond.Compiler.CompileStateFSM}", fillcolor=darkgrey, style=filled]
-  move_contracts [shape=Mrecord, label="{Move Bond.Contracts|Bond.Compiler|(add tests)}", fillcolor=darkgrey, style=filled]
-  remove_env [shape=Mrecord, label="{Remove Bond.Env|Replace with Macro.Env}", fillcolor=darkgrey, style=filled]
-  move_function_with_contract [shape=Mrecord, label="{Move Bond.FunctionWithContract|Bond.Compiler.AnnotatedFunction|(add tests)}", fillcolor=darkgrey, style=filled]
-  move_old_expression [shape=Mrecord, label="{Move Bond.OldExpression|Bond.Compiler.OldExpression}", fillcolor=darkgrey, style=filled]
-  create_bond_eval [label="Create Bond.Runtime.Eval module", fillcolor=darkgrey, style=filled]
-  add_eval_functions_to_bond_eval [shape=Mrecord, label="{Add evaluation functions to Bond.Runtime.Eval|evaluate_preconditions|evaluate_postconditions|evaluate_checks}"]
-  handle_old_expressions [label="Figure out how to handle `old` expressions (runtime vs compile-time)"]
-  replace_quoted_eval [label="Replace quoted_eval with Bond.Runtime.Eval.evaluate_*"]
+
+  subgraph cluster_move_compiler_defs {
+    move_type_defs [label="Move type definitions into `compiler` subsystem", fillcolor=darkgrey, style=filled]
+    move_assertion [shape=Mrecord, label="{Move Bond.Assertion|Bond.Compiler.Assertion|(add tests)}", fillcolor=darkgrey, style=filled]
+    move_compiler_fsm [shape=Mrecord, label="{Move Bond.CompileStateFSM|Bond.Compiler.CompileStateFSM}", fillcolor=darkgrey, style=filled]
+    move_contracts [shape=Mrecord, label="{Move Bond.Contracts|Bond.Compiler|(add tests)}", fillcolor=darkgrey, style=filled]
+    remove_env [shape=Mrecord, label="{Remove Bond.Env|Replace with Macro.Env}", fillcolor=darkgrey, style=filled]
+    move_function_with_contract [shape=Mrecord, label="{Move Bond.FunctionWithContract|Bond.Compiler.AnnotatedFunction|(add tests)}", fillcolor=darkgrey, style=filled]
+    move_old_expression [shape=Mrecord, label="{Move Bond.OldExpression|Bond.Compiler.OldExpression}", fillcolor=darkgrey, style=filled]
+  }
+
+  remove_evaluating_logic [label="Remove 'evaluating' logic from AnnotatedFunction"]
   // annotated_function_multi_clause [label="AnnotatedFunction represents all clauses of a function"]
 
+  create_bond_eval [label="Create Bond.Runtime.Eval module", fillcolor=darkgrey, style=filled]
+  add_eval_functions_to_bond_eval [label="Add evaluate_assertions/1 function to Bond.Runtime.Eval"]
+  handle_old_expressions [label="Figure out how to handle `old` expressions (runtime vs compile-time)"]
+  replace_quoted_eval [label="Replace quoted_eval with Bond.Runtime.Eval.evaluate_*"]
+  add_evaluating_logic [label="Add logic for conditional assertion evaluation into Bond.Runtime.Eval"]
+
   goal -> compile_time -> {move_assertion move_compiler_fsm move_contracts remove_env move_function_with_contract move_old_expression move_type_defs} -> compiler_subsystem
-  compile_time -> {replace_quoted_eval handle_old_expressions} -> {move_function_with_contract add_eval_functions_to_bond_eval}
+  compile_time -> remove_evaluating_logic -> add_evaluating_logic -> {move_function_with_contract add_eval_functions_to_bond_eval}
+  compile_time -> {replace_quoted_eval handle_old_expressions}
+  replace_quoted_eval -> add_eval_functions_to_bond_eval
   goal -> run_time -> add_eval_functions_to_bond_eval -> create_bond_eval -> runtime_subsystem
   goal -> user_code
 }
