@@ -46,12 +46,15 @@ defmodule Bond.Compiler.AnnotatedFunction do
     wrapped_body =
       Keyword.update!(body, :do, fn do_block ->
         quote do
+          preconditions_fun = unquote(preconditions_fun)
+          Bond.Runtime.Eval.evaluate_assertions(preconditions_fun)
+
           unquote(old_resolved_ast)
-          unquote(preconditions_fun).()
 
           var!(result) = unquote(do_block)
 
-          unquote(postconditions_fun).()
+          postconditions_fun = unquote(postconditions_fun)
+          Bond.Runtime.Eval.evaluate_assertions(postconditions_fun)
 
           var!(result)
         end
@@ -60,34 +63,12 @@ defmodule Bond.Compiler.AnnotatedFunction do
     %{function | body_ast: wrapped_body}
   end
 
-  def _set_evaluating_assertions(bool) when is_boolean(bool) do
-    Process.put(:__bond_evaluating_assertions__, bool)
-  end
-
-  def _evaluating_assertions? do
-    Process.get(:__bond_evaluating_assertions__, false)
-  end
-
   defp create_assertions_function(assertions) do
     assertions_ast = Enum.map(assertions, &Assertion.quoted_eval/1)
 
     quote do
       fn ->
-        # Mutually recursive contracts lead to infinite recursion, so don't evaluate assertions for a
-        # function if they are already being evaluated for the original function call.
-        #
-        # Assertion Evaluation rule (from Object-Oriented Software Construction):
-        # During the process of evaluating an assertion at run-time, routine calls shall
-        # be executed without any evaluation of the associated assertions.
-        if not Bond.Compiler.AnnotatedFunction._evaluating_assertions?() do
-          Bond.Compiler.AnnotatedFunction._set_evaluating_assertions(true)
-
-          try do
-            (unquote_splicing(assertions_ast))
-          after
-            Bond.Compiler.AnnotatedFunction._set_evaluating_assertions(false)
-          end
-        end
+        (unquote_splicing(assertions_ast))
       end
     end
   end

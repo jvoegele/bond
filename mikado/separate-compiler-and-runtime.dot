@@ -17,14 +17,14 @@ digraph {
     move_old_expression [shape=Mrecord, label="{Move Bond.OldExpression|Bond.Compiler.OldExpression}", fillcolor=darkgrey, style=filled]
   }
 
-  remove_evaluating_logic [label="Remove 'evaluating' logic from AnnotatedFunction"]
+  remove_evaluating_logic [label="Remove 'evaluating' logic from AnnotatedFunction", fillcolor=darkgrey style=filled]
   // annotated_function_multi_clause [label="AnnotatedFunction represents all clauses of a function"]
 
   create_bond_eval [label="Create Bond.Runtime.Eval module", fillcolor=darkgrey, style=filled]
-  add_eval_functions_to_bond_eval [label="Add evaluate_assertions/1 function to Bond.Runtime.Eval"]
+  add_eval_functions_to_bond_eval [label="Add evaluate_assertions/1 function to Bond.Runtime.Eval", fillcolor=darkgrey style=filled]
   handle_old_expressions [label="Figure out how to handle `old` expressions (runtime vs compile-time)"]
   replace_quoted_eval [label="Replace quoted_eval with Bond.Runtime.Eval.evaluate_*"]
-  add_evaluating_logic [label="Add logic for conditional assertion evaluation into Bond.Runtime.Eval"]
+  add_evaluating_logic [label="Add logic for conditional assertion evaluation into Bond.Runtime.Eval", fillcolor=darkgrey style=filled]
 
   goal -> compile_time -> {move_assertion move_compiler_fsm move_contracts remove_env move_function_with_contract move_old_expression move_type_defs} -> compiler_subsystem
   compile_time -> remove_evaluating_logic -> add_evaluating_logic -> {move_function_with_contract add_eval_functions_to_bond_eval}
