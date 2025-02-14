@@ -1,13 +1,20 @@
 digraph {
-  goal [ label = "Use compiler hooks instead of overriding Kernel macros", style = bold ]
-  delete_kernel_overrides [ label = "Delete overridden Kernel macros (def and defp)" ]
-  implement_compiler_hooks [ label = "Implement @before_compile and @on_definition" ]
+  goal [label = "Use compiler hooks instead of overriding Kernel macros", style = bold]
+  delete_kernel_overrides [label = "Delete overridden Kernel macros (def and defp)"]
+  implement_compiler_hooks [label = "Implement @before_compile and @on_definition"]
+  on_definition [label="@on_definition hook registers function definition with FSM"]
+  before_compile [label="@before_compile hook overrides functions with contracts"]
 
-  replace_kernel_overrides_with_compiler_hooks [
-    label = "Replace Kernel overrides with compiler hooks"
-  ]
+  function_definition [label="Create Bond.Compiler.FunctionDefinition module and struct"]
+  annotated_function_multi_clause [label="AnnotatedFunction represents all clauses of a function"]
+
+  fsm_multi_clause_functions [label="FSM adds clause to AnnotatedFunction for each FunctionDefinition"]
+
+  replace_kernel_overrides_with_compiler_hooks [label = "Replace Kernel overrides with compiler hooks"]
 
   goal -> replace_kernel_overrides_with_compiler_hooks
   replace_kernel_overrides_with_compiler_hooks -> delete_kernel_overrides
   replace_kernel_overrides_with_compiler_hooks -> implement_compiler_hooks
+  implement_compiler_hooks -> {on_definition before_compile}
+  on_definition -> fsm_multi_clause_functions -> {function_definition annotated_function_multi_clause}
 }

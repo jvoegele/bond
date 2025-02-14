@@ -18,7 +18,6 @@ digraph {
   }
 
   remove_evaluating_logic [label="Remove 'evaluating' logic from AnnotatedFunction", fillcolor=darkgrey style=filled]
-  // annotated_function_multi_clause [label="AnnotatedFunction represents all clauses of a function"]
 
   create_bond_eval [label="Create Bond.Runtime.Eval module", fillcolor=darkgrey, style=filled]
   add_eval_functions_to_bond_eval [shape=Mrecord, label="{Add evaluation functions to Bond.Runtime.Eval|evaluate_preconditions|evaluate_postconditions|evaluate_checks}", fillcolor=darkgrey, style=filled]
