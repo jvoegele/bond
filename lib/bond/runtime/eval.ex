@@ -4,13 +4,25 @@ defmodule Bond.Runtime.Eval do
   Internal helper module for runtime execution of contracts and assertions.
   """
 
-  def evaluate_assertions(assertions_fun) do
+  def evaluate_preconditions(preconditions_fun) do
+    evaluate_assertions(preconditions_fun)
+  end
+
+  def evaluate_postconditions(postconditions_fun) do
+    evaluate_assertions(postconditions_fun)
+  end
+
+  def evaluate_checks(checks_fun) do
+    evaluate_assertions(checks_fun)
+  end
+
+  defp evaluate_assertions(assertions_fun) do
     with_recursion_check(assertions_fun)
   end
 
   defp with_recursion_check(assertions_fun) do
     # Mutually recursive contracts lead to infinite recursion, so don't evaluate assertions for a
-    # function if they are already being evaluated for the original function call.
+    # function if other assertions are already being evaluated in the current process.
     #
     # Assertion Evaluation rule (from Object-Oriented Software Construction):
     # During the process of evaluating an assertion at run-time, routine calls shall

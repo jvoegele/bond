@@ -47,14 +47,14 @@ defmodule Bond.Compiler.AnnotatedFunction do
       Keyword.update!(body, :do, fn do_block ->
         quote do
           preconditions_fun = unquote(preconditions_fun)
-          Bond.Runtime.Eval.evaluate_assertions(preconditions_fun)
+          Bond.Runtime.Eval.evaluate_preconditions(preconditions_fun)
 
           unquote(old_resolved_ast)
 
           var!(result) = unquote(do_block)
 
           postconditions_fun = unquote(postconditions_fun)
-          Bond.Runtime.Eval.evaluate_assertions(postconditions_fun)
+          Bond.Runtime.Eval.evaluate_postconditions(postconditions_fun)
 
           var!(result)
         end

@@ -4,8 +4,8 @@ digraph {
   runtime_subsystem [label="Create internal `runtime` subsystem", fillcolor=darkgrey, style=filled]
 
   compile_time [label="Use only `compiler` subsystem at compile-time", shape=parallelogram]
-  run_time [label="Use only `runtime` subsystem at run-time", shape=parallelogram]
-  user_code [label="Ensure user-facing code is in top-level Bond namespace", shape=parallelogram]
+  run_time [label="Use only `runtime` subsystem at run-time", shape=parallelogram, fillcolor=darkgrey, style=filled]
+  user_code [label="Ensure user-facing code is in top-level Bond namespace", shape=parallelogram, fillcolor=darkgrey, style=filled]
 
   subgraph cluster_move_compiler_defs {
     move_type_defs [label="Move type definitions into `compiler` subsystem", fillcolor=darkgrey, style=filled]
@@ -21,7 +21,7 @@ digraph {
   // annotated_function_multi_clause [label="AnnotatedFunction represents all clauses of a function"]
 
   create_bond_eval [label="Create Bond.Runtime.Eval module", fillcolor=darkgrey, style=filled]
-  add_eval_functions_to_bond_eval [label="Add evaluate_assertions/1 function to Bond.Runtime.Eval", fillcolor=darkgrey style=filled]
+  add_eval_functions_to_bond_eval [shape=Mrecord, label="{Add evaluation functions to Bond.Runtime.Eval|evaluate_preconditions|evaluate_postconditions|evaluate_checks}", fillcolor=darkgrey, style=filled]
   handle_old_expressions [label="Figure out how to handle `old` expressions (runtime vs compile-time)"]
   replace_quoted_eval [label="Replace quoted_eval with Bond.Runtime.Eval.evaluate_*"]
   add_evaluating_logic [label="Add logic for conditional assertion evaluation into Bond.Runtime.Eval", fillcolor=darkgrey style=filled]
