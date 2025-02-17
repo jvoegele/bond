@@ -12,6 +12,17 @@ defmodule Bond.Compiler.AnnotatedFunction do
   function.
   """
 
+  alias Bond.Compiler.FunctionDefinition
+
+  defstruct kind: nil,
+            module: nil,
+            fun: nil,
+            arity: nil,
+            clauses: [],
+            preconditions: [],
+            postconditions: [],
+            doc_attributes: []
+
   defmodule Clause do
     @moduledoc internal: true
     @moduledoc """
@@ -25,5 +36,15 @@ defmodule Bond.Compiler.AnnotatedFunction do
     def new(%FunctionDefinition{} = function_def) do
       struct(__MODULE__, Map.take(function_def, [:env, :params, :guards, :body]))
     end
+  end
+
+  def new(%FunctionDefinition{} = function_def) do
+    %__MODULE__{
+      kind: function_def.kind,
+      module: function_def.module,
+      fun: function_def.fun,
+      arity: function_def.arity,
+      clauses: [Clause.new(function_def)]
+    }
   end
 end
