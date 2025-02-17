@@ -47,4 +47,11 @@ defmodule Bond.Compiler.AnnotatedFunction do
       clauses: [Clause.new(function_def)]
     }
   end
+
+  def add_clause(
+        %__MODULE__{module: module, fun: function, arity: arity, clauses: clauses} = function_def,
+        %FunctionDefinition{module: module, fun: function, arity: arity} = clause_def
+      ) do
+    %{function_def | clauses: clauses ++ [Clause.new(clause_def)]}
+  end
 end
