@@ -13,7 +13,7 @@ digraph {
 
   function_definition [label="Create Bond.Compiler.FunctionDefinition module and struct", fillcolor=darkgrey, style=filled]
 
-  annotated_function_multi_clause [label="AnnotatedFunction represents all clauses of a function"]
+  annotated_function_multi_clause [label="AnnotatedFunction represents all clauses of a function", fillcolor=darkgrey, style=filled]
   rename_annotated_function [label="Rename AnnotatedFunction to AnnotatedFunctionClause", fillcolor=darkgrey, style=filled]
   create_new_annotated_function [label="Create new AnnotatedFunction module to support multiple function clauses", fillcolor=darkgrey, style=filled]
   annotated_function_struct [label="Define struct for new multi-clause AnnotatedFunction", fillcolor=darkgrey, style=filled]
@@ -22,7 +22,7 @@ digraph {
   add_clause_to_annotated_function [label="Add AnnotatedFunction.add_clause/2 function", fillcolor=darkgrey, style=filled]
   add_preconditions_to_annotated_function [label="Add :preconditions and add_precondition to AnnotatedFunction", fillcolor=darkgrey, style=filled]
   add_postconditions_to_annotated_function [label="Add :postconditions and add_postcondition to AnnotatedFunction", fillcolor=darkgrey, style=filled]
-  add_doc_attributes_to_annotated_function [label="Add :doc_attributes and add_doc_attributes to AnnotatedFunction"]
+  add_doc_attributes_to_annotated_function [label="Add :doc_attributes and add_doc_attributes to AnnotatedFunction", fillcolor=darkgrey, style=filled]
 
   fsm_multi_clause_functions [label="FSM adds clause to AnnotatedFunction for each FunctionDefinition"]
 

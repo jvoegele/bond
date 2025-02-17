@@ -112,6 +112,32 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
     end
   end
 
+  describe "put_doc_attributes/2" do
+    @doc_attribute {:doc, [line: 42], "The D.O.C. and the Doctor"}
+    @doc_attribute_keyword {:doc, [line: 43],
+                            [artist: "The D.O.C.", title: "Portrait of a Master Piece"]}
+
+    test "adds doc attributes to the annotated function", %{
+      two_clause_function_clause1: clause_def1,
+      two_clause_function_clause2: clause_def2
+    } do
+      annotated_function =
+        clause_def1
+        |> AnnotatedFunction.new()
+        |> AnnotatedFunction.put_doc_attributes([@doc_attribute])
+
+      assert AnnotatedFunction.has_doc_attributes?(annotated_function)
+      assert annotated_function.doc_attributes == [@doc_attribute]
+
+      annotated_function =
+        annotated_function
+        |> AnnotatedFunction.add_clause(clause_def2)
+        |> AnnotatedFunction.put_doc_attributes([@doc_attribute_keyword])
+
+      assert annotated_function.doc_attributes == [@doc_attribute, @doc_attribute_keyword]
+    end
+  end
+
   defp setup_function_definitions(_) do
     one_clause_function =
       FunctionDefinition.new(

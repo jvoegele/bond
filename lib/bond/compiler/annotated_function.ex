@@ -78,11 +78,22 @@ defmodule Bond.Compiler.AnnotatedFunction do
     %{annotated_function | postconditions: existing_postconditions ++ postconditions}
   end
 
+  def put_doc_attributes(
+        %__MODULE__{doc_attributes: existing_doc_attributes} = annotated_function,
+        doc_attributes
+      )
+      when is_list(doc_attributes) do
+    %{annotated_function | doc_attributes: existing_doc_attributes ++ doc_attributes}
+  end
+
   def has_preconditions?(%__MODULE__{preconditions: preconditions}),
     do: not Enum.empty?(preconditions)
 
   def has_postconditions?(%__MODULE__{postconditions: postconditions}),
     do: not Enum.empty?(postconditions)
+
+  def has_doc_attributes?(%__MODULE__{doc_attributes: doc_attributes}),
+    do: not Enum.empty?(doc_attributes)
 
   def override?(%__MODULE__{} = annotated_function) do
     has_preconditions?(annotated_function) or has_postconditions?(annotated_function)
