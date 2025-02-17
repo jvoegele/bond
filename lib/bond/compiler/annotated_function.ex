@@ -12,6 +12,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
   function.
   """
 
+  alias Bond.Compiler.Assertion
   alias Bond.Compiler.FunctionDefinition
 
   defstruct kind: nil,
@@ -53,5 +54,37 @@ defmodule Bond.Compiler.AnnotatedFunction do
         %FunctionDefinition{module: module, fun: function, arity: arity} = clause_def
       ) do
     %{function_def | clauses: clauses ++ [Clause.new(clause_def)]}
+  end
+
+  def put_preconditions(
+        %__MODULE__{preconditions: existing_preconditions} = annotated_function,
+        preconditions
+      )
+      when is_list(preconditions) do
+    # Check to make sure each element in the list is a `Bond.Assertion` struct.
+    Enum.each(preconditions, fn %Assertion{} -> :ok end)
+
+    %{annotated_function | preconditions: existing_preconditions ++ preconditions}
+  end
+
+  def put_postconditions(
+        %__MODULE__{postconditions: existing_postconditions} = annotated_function,
+        postconditions
+      )
+      when is_list(postconditions) do
+    # Check to make sure each element in the list is a `Bond.Assertion` struct.
+    Enum.each(postconditions, fn %Assertion{} -> :ok end)
+
+    %{annotated_function | postconditions: existing_postconditions ++ postconditions}
+  end
+
+  def has_preconditions?(%__MODULE__{preconditions: preconditions}),
+    do: not Enum.empty?(preconditions)
+
+  def has_postconditions?(%__MODULE__{postconditions: postconditions}),
+    do: not Enum.empty?(postconditions)
+
+  def override?(%__MODULE__{} = annotated_function) do
+    has_preconditions?(annotated_function) or has_postconditions?(annotated_function)
   end
 end

@@ -2,6 +2,7 @@ digraph {
   goal [label = "Use compiler hooks instead of overriding Kernel macros", style = bold]
   replace_kernel_overrides_with_compiler_hooks [label = "Replace Kernel overrides with compiler hooks"]
 
+  delete_dead_code [label="Delete dead code"]
   delete_kernel_overrides [label = "Delete overridden Kernel macros (def and defp)"]
   delete_define_function_with_contracts [label="Delete Bond.Compiler.delete_define_function_with_contracts/4"]
   implement_compiler_hooks [label = "Implement @before_compile and @on_definition"]
@@ -18,14 +19,14 @@ digraph {
   annotated_function_struct [label="Define struct for new multi-clause AnnotatedFunction", fillcolor=darkgrey, style=filled]
   annotated_function_new [label="Define AnnotatedFunction.new to accept FunctionDefinition as arg", fillcolor=darkgrey, style=filled]
   create_annotated_function_clause [label="Create AnnotatedFunction.Clause struct", fillcolor=darkgrey, style=filled]
-  add_clause_to_annotated_function [label="Add AnnotatedFunction.add_clause/2 function"]
-  add_preconditions_to_annotated_function [label="Add :preconditions and add_precondition to AnnotatedFunction"]
-  add_postconditions_to_annotated_function [label="Add :postconditions and add_postcondition to AnnotatedFunction"]
+  add_clause_to_annotated_function [label="Add AnnotatedFunction.add_clause/2 function", fillcolor=darkgrey, style=filled]
+  add_preconditions_to_annotated_function [label="Add :preconditions and add_precondition to AnnotatedFunction", fillcolor=darkgrey, style=filled]
+  add_postconditions_to_annotated_function [label="Add :postconditions and add_postcondition to AnnotatedFunction", fillcolor=darkgrey, style=filled]
   add_doc_attributes_to_annotated_function [label="Add :doc_attributes and add_doc_attributes to AnnotatedFunction"]
 
   fsm_multi_clause_functions [label="FSM adds clause to AnnotatedFunction for each FunctionDefinition"]
 
-  goal -> replace_kernel_overrides_with_compiler_hooks
+  goal -> delete_dead_code -> replace_kernel_overrides_with_compiler_hooks
   replace_kernel_overrides_with_compiler_hooks -> delete_define_function_with_contracts -> delete_kernel_overrides
   replace_kernel_overrides_with_compiler_hooks -> implement_compiler_hooks
   implement_compiler_hooks -> {on_definition before_compile}
@@ -36,5 +37,5 @@ digraph {
   annotated_function_new -> {function_definition create_new_annotated_function}
   add_clause_to_annotated_function -> {create_annotated_function_clause annotated_function_struct}
   create_annotated_function_clause -> create_new_annotated_function
-  before_compile -> before_compile_generates_override -> on_definition
+  before_compile -> before_compile_generates_override -> {on_definition annotated_function_multi_clause}
 }

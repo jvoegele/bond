@@ -4,6 +4,7 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
   use ExUnit.Case
 
   alias Bond.Compiler.AnnotatedFunction
+  alias Bond.Compiler.Assertion
   alias Bond.Compiler.FunctionDefinition
 
   @params [{:stack, [line: 80], nil}, {:elem, [line: 80], nil}]
@@ -71,6 +72,46 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
     end
   end
 
+  describe "put_preconditions/2" do
+    setup [:setup_assertions]
+
+    test "adds preconditions to the annotated function", %{
+      function_definition: function_def,
+      preconditions: preconditions
+    } do
+      annotated_function =
+        function_def
+        |> AnnotatedFunction.new()
+        |> AnnotatedFunction.put_preconditions(preconditions)
+
+      assert AnnotatedFunction.has_preconditions?(annotated_function)
+      assert annotated_function.preconditions == preconditions
+      refute AnnotatedFunction.has_postconditions?(annotated_function)
+      assert annotated_function.postconditions == []
+      assert AnnotatedFunction.override?(annotated_function)
+    end
+  end
+
+  describe "put_postconditions/2" do
+    setup [:setup_assertions]
+
+    test "adds postconditions to the annotated function", %{
+      function_definition: function_def,
+      postconditions: postconditions
+    } do
+      annotated_function =
+        function_def
+        |> AnnotatedFunction.new()
+        |> AnnotatedFunction.put_postconditions(postconditions)
+
+      assert AnnotatedFunction.has_postconditions?(annotated_function)
+      assert annotated_function.postconditions == postconditions
+      refute AnnotatedFunction.has_preconditions?(annotated_function)
+      assert annotated_function.preconditions == []
+      assert AnnotatedFunction.override?(annotated_function)
+    end
+  end
+
   defp setup_function_definitions(_) do
     one_clause_function =
       FunctionDefinition.new(
@@ -107,5 +148,12 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
      one_clause_function: one_clause_function,
      two_clause_function_clause1: two_clause_function_clause1,
      two_clause_function_clause2: two_clause_function_clause2}
+  end
+
+  defp setup_assertions(_) do
+    preconditions = [Assertion.new(:precondition, :requires1, quote(do: x > 0), __ENV__)]
+    postconditions = [Assertion.new(:postcondition, :ensures1, quote(do: result < x), __ENV__)]
+
+    {:ok, preconditions: preconditions, postconditions: postconditions}
   end
 end
