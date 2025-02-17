@@ -1,20 +1,40 @@
 digraph {
   goal [label = "Use compiler hooks instead of overriding Kernel macros", style = bold]
+  replace_kernel_overrides_with_compiler_hooks [label = "Replace Kernel overrides with compiler hooks"]
+
   delete_kernel_overrides [label = "Delete overridden Kernel macros (def and defp)"]
+  delete_define_function_with_contracts [label="Delete Bond.Compiler.delete_define_function_with_contracts/4"]
   implement_compiler_hooks [label = "Implement @before_compile and @on_definition"]
   on_definition [label="@on_definition hook registers function definition with FSM"]
   before_compile [label="@before_compile hook overrides functions with contracts"]
 
-  function_definition [label="Create Bond.Compiler.FunctionDefinition module and struct"]
+  before_compile_generates_override [label="@before_compile hook generates function override (for all clauses) using super/1"]
+
+  function_definition [label="Create Bond.Compiler.FunctionDefinition module and struct", fillcolor=darkgrey, style=filled]
+
   annotated_function_multi_clause [label="AnnotatedFunction represents all clauses of a function"]
+  rename_annotated_function [label="Rename AnnotatedFunction to AnnotatedFunctionClause", fillcolor=darkgrey, style=filled]
+  create_new_annotated_function [label="Create new AnnotatedFunction module to support multiple function clauses", fillcolor=darkgrey, style=filled]
+  annotated_function_struct [label="Define struct for new multi-clause AnnotatedFunction"]
+  annotated_function_new [label="Define AnnotatedFunction.new to accept FunctionDefinition as arg"]
+  create_annotated_function_clause [label="Create AnnotatedFunction.Clause struct", fillcolor=darkgrey, style=filled]
+  add_clause_to_annotated_function [label="Add AnnotatedFunction.add_clause/2 function"]
+  add_preconditions_to_annotated_function [label="Add :preconditions and add_precondition to AnnotatedFunction"]
+  add_postconditions_to_annotated_function [label="Add :postconditions and add_postcondition to AnnotatedFunction"]
+  add_doc_attributes_to_annotated_function [label="Add :doc_attributes and add_doc_attributes to AnnotatedFunction"]
 
   fsm_multi_clause_functions [label="FSM adds clause to AnnotatedFunction for each FunctionDefinition"]
 
-  replace_kernel_overrides_with_compiler_hooks [label = "Replace Kernel overrides with compiler hooks"]
-
   goal -> replace_kernel_overrides_with_compiler_hooks
-  replace_kernel_overrides_with_compiler_hooks -> delete_kernel_overrides
+  replace_kernel_overrides_with_compiler_hooks -> delete_define_function_with_contracts -> delete_kernel_overrides
   replace_kernel_overrides_with_compiler_hooks -> implement_compiler_hooks
   implement_compiler_hooks -> {on_definition before_compile}
   on_definition -> fsm_multi_clause_functions -> {function_definition annotated_function_multi_clause}
+  annotated_function_multi_clause -> {rename_annotated_function add_clause_to_annotated_function annotated_function_new add_preconditions_to_annotated_function add_postconditions_to_annotated_function add_doc_attributes_to_annotated_function}
+  {add_preconditions_to_annotated_function add_postconditions_to_annotated_function add_doc_attributes_to_annotated_function} -> annotated_function_struct
+  annotated_function_struct -> create_new_annotated_function
+  annotated_function_new -> {function_definition create_new_annotated_function}
+  add_clause_to_annotated_function -> {create_annotated_function_clause annotated_function_struct}
+  create_annotated_function_clause -> create_new_annotated_function
+  before_compile -> before_compile_generates_override -> on_definition
 }
