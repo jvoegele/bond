@@ -5,7 +5,7 @@ defmodule Bond.Compiler do
   """
 
   alias Bond.Compiler.Assertion
-  alias Bond.Compiler.CompileStateFSM, as: FSM
+  alias Bond.Compiler.LegacyCompileStateFSM, as: FSM
   alias Bond.Compiler.AnnotatedFunctionClause
 
   def init(module) do

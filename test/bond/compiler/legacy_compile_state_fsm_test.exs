@@ -1,9 +1,9 @@
-defmodule Bond.Compiler.CompileStateFSMTest do
+defmodule Bond.Compiler.LegacyCompileStateFSMTest do
   @moduledoc false
 
   use ExUnit.Case
 
-  alias Bond.Compiler.CompileStateFSM, as: FSM
+  alias Bond.Compiler.LegacyCompileStateFSM, as: FSM
 
   @doc_attribute {:doc, [line: __ENV__.line], "The D.O.C. and the Doctor"}
   @doc_attribute_keyword {:doc, [line: __ENV__.line],
