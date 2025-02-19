@@ -57,4 +57,10 @@ defmodule Bond.Compiler.FunctionDefinition do
       body: body
     }
   end
+
+  def mfa(%__MODULE__{module: module, fun: function, params: params}) do
+    {module, function, length(params)}
+  end
+
+  def mfa(_), do: nil
 end
