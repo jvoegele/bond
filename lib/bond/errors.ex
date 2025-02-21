@@ -3,7 +3,15 @@ defmodule Bond.AssertionError do
 
   defmacro __using__(_opts) do
     quote generated: true do
-      defexception [:label, :expression, :assertion_env, :function_env, :binding]
+      defexception [
+        :label,
+        :expression,
+        :file,
+        :line,
+        :module,
+        :function,
+        :binding
+      ]
 
       @typedoc """
       The `#{inspect(__MODULE__)}` exception type.
@@ -11,14 +19,21 @@ defmodule Bond.AssertionError do
       @type t :: %__MODULE__{
               label: Bond.assertion_label(),
               expression: Bond.assertion_expression(),
-              assertion_env: Macro.Env.t(),
-              function_env: Macro.Env.t(),
+              file: Path.t(),
+              line: integer(),
+              module: module(),
+              function: {String.t(), non_neg_integer()},
               binding: keyword()
             }
 
       @impl Exception
-      def exception(opts) do
+      def exception(%{label: _label, binding: _binding} = assertion_failure_info) do
+        struct(__MODULE__, assertion_failure_info)
+      end
+
+      def exception(opts) when is_list(opts) do
         assertion = Keyword.fetch!(opts, :assertion)
+        assertion_env = assertion.definition_env
         function_env = Keyword.fetch!(opts, :env)
         {function, arity} = function_env.function
         binding = Keyword.fetch!(opts, :binding)
@@ -26,8 +41,10 @@ defmodule Bond.AssertionError do
         error = %__MODULE__{
           label: assertion.label,
           expression: assertion.code,
-          assertion_env: assertion.definition_env,
-          function_env: function_env,
+          file: assertion_env.file,
+          line: assertion_env.line,
+          module: assertion_env.module,
+          function: function_env.function,
           binding: binding
         }
       end
@@ -52,7 +69,7 @@ defmodule Bond.PreconditionError do
   use Bond.AssertionError
 
   @impl Exception
-  def message(%{function_env: %{module: module, function: {function, arity}}} = error) do
+  def message(%{module: module, function: {function, arity}} = error) do
     Bond.AssertionError.message(
       error,
       "precondition failed for call to #{inspect(module)}.#{function}/#{arity}"
@@ -68,7 +85,7 @@ defmodule Bond.PostconditionError do
   use Bond.AssertionError
 
   @impl Exception
-  def message(%{function_env: %{module: module, function: {function, arity}}} = error) do
+  def message(%{module: module, function: {function, arity}} = error) do
     Bond.AssertionError.message(
       error,
       "postcondition failed in #{inspect(module)}.#{function}/#{arity}"
@@ -84,7 +101,7 @@ defmodule Bond.CheckError do
   use Bond.AssertionError
 
   @impl Exception
-  def message(%{function_env: %{module: module, function: {function, arity}}} = error) do
+  def message(%{module: module, function: {function, arity}} = error) do
     Bond.AssertionError.message(
       error,
       "check failed in #{inspect(module)}.#{function}/#{arity}"
