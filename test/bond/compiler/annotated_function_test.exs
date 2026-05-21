@@ -194,6 +194,120 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
     end
   end
 
+  describe "apply_contract/2 conditional compilation" do
+    setup [:setup_assertions, :setup_annotated_functions]
+
+    test "preconditions disabled — override has no precondition eval, doc has no #### Preconditions",
+         %{one_clause_annotated_function: annotated_function} do
+      ast =
+        AnnotatedFunction.apply_contract(annotated_function, %{
+          preconditions: false,
+          postconditions: true
+        })
+
+      refute is_nil(ast)
+
+      doc = doc_put_attribute_clauses(ast) |> List.first() |> elem(1)
+      assert doc =~ ~r"#{@doc_string}"
+      refute doc =~ ~r"#### Preconditions"
+      assert doc =~ ~r"#### Postconditions"
+
+      override = override_def_clause(ast)
+      code = Macro.to_string(elem(override, 2) |> List.last() |> Keyword.get(:do))
+
+      refute code =~ ~r"preconditions_fun ="
+      refute code =~ ~r"evaluate_preconditions"
+      assert code =~ ~r"evaluate_postconditions"
+      assert code =~ ~r"var!\(result\) = super"
+    end
+
+    test "postconditions disabled — override has no postcondition eval, doc has no #### Postconditions",
+         %{one_clause_annotated_function: annotated_function} do
+      ast =
+        AnnotatedFunction.apply_contract(annotated_function, %{
+          preconditions: true,
+          postconditions: false
+        })
+
+      refute is_nil(ast)
+
+      doc = doc_put_attribute_clauses(ast) |> List.first() |> elem(1)
+      assert doc =~ ~r"#### Preconditions"
+      refute doc =~ ~r"#### Postconditions"
+
+      override = override_def_clause(ast)
+      code = Macro.to_string(elem(override, 2) |> List.last() |> Keyword.get(:do))
+
+      assert code =~ ~r"evaluate_preconditions"
+      refute code =~ ~r"postconditions_fun ="
+      refute code =~ ~r"evaluate_postconditions"
+    end
+
+    test "both disabled returns nil", %{one_clause_annotated_function: annotated_function} do
+      ast =
+        AnnotatedFunction.apply_contract(annotated_function, %{
+          preconditions: false,
+          postconditions: false
+        })
+
+      assert is_nil(ast)
+    end
+
+    test "function with only preconditions: disabling postconditions still emits override" do
+      function_def =
+        FunctionDefinition.new(
+          __ENV__,
+          :def,
+          :only_pre,
+          quote(do: [x]),
+          [],
+          quote(do: x)
+        )
+
+      preconditions = [Assertion.new(:precondition, :positive, quote(do: x > 0), __ENV__)]
+
+      annotated_function =
+        function_def
+        |> AnnotatedFunction.new()
+        |> AnnotatedFunction.put_preconditions(preconditions)
+
+      ast =
+        AnnotatedFunction.apply_contract(annotated_function, %{
+          preconditions: true,
+          postconditions: false
+        })
+
+      refute is_nil(ast)
+    end
+
+    test "function with only preconditions: disabling preconditions returns nil" do
+      function_def =
+        FunctionDefinition.new(
+          __ENV__,
+          :def,
+          :only_pre,
+          quote(do: [x]),
+          [],
+          quote(do: x)
+        )
+
+      preconditions = [Assertion.new(:precondition, :positive, quote(do: x > 0), __ENV__)]
+
+      annotated_function =
+        function_def
+        |> AnnotatedFunction.new()
+        |> AnnotatedFunction.put_preconditions(preconditions)
+
+      ast =
+        AnnotatedFunction.apply_contract(annotated_function, %{
+          preconditions: false,
+          postconditions: true
+        })
+
+      assert is_nil(ast)
+    end
+  end
+
   defp first_block_clause({:__block__, _, [first | _]}), do: first
   defp first_block_clause(ast), do: ast
 

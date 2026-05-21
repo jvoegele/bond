@@ -63,10 +63,15 @@ defmodule Bond.Compiler do
   defmacro __before_compile__(%Macro.Env{} = env) do
     :ok = FSM.module_defined(fsm(env))
 
+    config =
+      Module.get_attribute(env.module, :__bond_contract_config__) ||
+        %{preconditions: true, postconditions: true}
+
     fsm(env)
     |> FSM.annotated_functions()
     |> Enum.filter(&AnnotatedFunction.override?/1)
-    |> Enum.map(&AnnotatedFunction.apply_contract/1)
+    |> Enum.map(&AnnotatedFunction.apply_contract(&1, config))
+    |> Enum.reject(&is_nil/1)
   end
 
   @doc false
