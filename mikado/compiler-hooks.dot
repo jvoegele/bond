@@ -1,15 +1,15 @@
 digraph {
-  goal [label = "Use compiler hooks instead of overriding Kernel macros", style = bold]
-  replace_kernel_overrides_with_compiler_hooks [label = "Replace Kernel overrides with compiler hooks"]
+  goal [label = "Use compiler hooks instead of overriding Kernel macros", style = bold, fillcolor=darkgrey, style="bold,filled"]
+  replace_kernel_overrides_with_compiler_hooks [label = "Replace Kernel overrides with compiler hooks", fillcolor=darkgrey, style=filled]
 
-  delete_dead_code [label="Delete dead code"]
-  delete_kernel_overrides [label = "Delete overridden Kernel macros (def and defp)"]
-  delete_define_function_with_contracts [label="Delete Bond.Compiler.delete_define_function_with_contracts/4"]
-  implement_compiler_hooks [label = "Implement @before_compile and @on_definition"]
-  on_definition [label="@on_definition hook registers function definition with FSM"]
-  before_compile [label="@before_compile hook overrides functions with contracts"]
+  delete_dead_code [label="Delete dead code", fillcolor=darkgrey, style=filled]
+  delete_kernel_overrides [label = "Delete overridden Kernel macros (def and defp)", fillcolor=darkgrey, style=filled]
+  delete_define_function_with_contracts [label="Delete Bond.Compiler.define_function_with_contract/4", fillcolor=darkgrey, style=filled]
+  implement_compiler_hooks [label = "Implement @before_compile and @on_definition", fillcolor=darkgrey, style=filled]
+  on_definition [label="@on_definition hook registers function definition with FSM", fillcolor=darkgrey, style=filled]
+  before_compile [label="@before_compile hook overrides functions with contracts", fillcolor=darkgrey, style=filled]
 
-  before_compile_generates_override [label="@before_compile hook generates function override (for all clauses) using super/1"]
+  before_compile_generates_override [label="@before_compile hook generates function override (for all clauses) using super/1", fillcolor=darkgrey, style=filled]
 
   function_definition [label="Create Bond.Compiler.FunctionDefinition module and struct", fillcolor=darkgrey, style=filled]
 
@@ -18,6 +18,7 @@ digraph {
   create_new_annotated_function [label="Create new AnnotatedFunction module to support multiple function clauses", fillcolor=darkgrey, style=filled]
   annotated_function_struct [label="Define struct for new multi-clause AnnotatedFunction", fillcolor=darkgrey, style=filled]
   annotated_function_new [label="Define AnnotatedFunction.new to accept FunctionDefinition as arg", fillcolor=darkgrey, style=filled]
+  annotated_function_overrides [label="AnnotatedFunction generates function overrides", fillcolor=darkgrey, style=filled]
   create_annotated_function_clause [label="Create AnnotatedFunction.Clause struct", fillcolor=darkgrey, style=filled]
   add_clause_to_annotated_function [label="Add AnnotatedFunction.add_clause/2 function", fillcolor=darkgrey, style=filled]
   add_preconditions_to_annotated_function [label="Add :preconditions and add_precondition to AnnotatedFunction", fillcolor=darkgrey, style=filled]
@@ -26,8 +27,8 @@ digraph {
 
   rename_old_fsm [label="Rename Bond.Compiler.CompileStateFSM to Bond.Compiler.LegacyCompileStateFSM", fillcolor=darkgrey, style=filled]
   create_new_fsm [label="Create new Bond.Compiler.CompileStateFSM", fillcolor=darkgrey, style=filled]
-  fsm_attaches_contract [label="FSM attaches contracts to AnnotatedFunction", fillcolor=darkgrey, style=filled]
-  fsm_attaches_docs [label="FSM attaches docs to AnnotatedFunction", fillcolor=darkgrey, style=filled]
+  fsm_attaches_contract [label="FSM attaches contracts to AnnotatedFunction (by source line)", fillcolor=darkgrey, style=filled]
+  fsm_attaches_docs [label="FSM attaches docs to AnnotatedFunction (by source line)", fillcolor=darkgrey, style=filled]
   fsm_multi_clause_functions [label="FSM adds clause to AnnotatedFunction for each FunctionDefinition", fillcolor=darkgrey, style=filled]
   fsm_returns_all_annotated_functions [label="FSM annotated_functions/1 returns all AnnotatedFunctions for a module", fillcolor=darkgrey, style=filled]
 
@@ -35,7 +36,7 @@ digraph {
   replace_kernel_overrides_with_compiler_hooks -> delete_define_function_with_contracts -> delete_kernel_overrides
   replace_kernel_overrides_with_compiler_hooks -> implement_compiler_hooks
   implement_compiler_hooks -> {on_definition before_compile}
-  on_definition -> {fsm_multi_clause_functions fsm_attaches_contract fsm_attaches_docs fsm_returns_all_annotated_functions} -> {create_new_fsm function_definition annotated_function_multi_clause}
+  on_definition -> {fsm_multi_clause_functions fsm_attaches_contract fsm_attaches_docs fsm_returns_all_annotated_functions} -> {create_new_fsm annotated_function_multi_clause}
   create_new_fsm -> rename_old_fsm
   annotated_function_multi_clause -> {rename_annotated_function add_clause_to_annotated_function annotated_function_new add_preconditions_to_annotated_function add_postconditions_to_annotated_function add_doc_attributes_to_annotated_function}
   {add_preconditions_to_annotated_function add_postconditions_to_annotated_function add_doc_attributes_to_annotated_function} -> annotated_function_struct
@@ -43,5 +44,5 @@ digraph {
   annotated_function_new -> {function_definition create_new_annotated_function}
   add_clause_to_annotated_function -> {create_annotated_function_clause annotated_function_struct}
   create_annotated_function_clause -> create_new_annotated_function
-  before_compile -> before_compile_generates_override -> {on_definition annotated_function_multi_clause}
+  before_compile -> before_compile_generates_override -> {on_definition annotated_function_multi_clause annotated_function_overrides}
 }
