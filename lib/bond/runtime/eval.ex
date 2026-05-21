@@ -27,10 +27,28 @@ defmodule Bond.Runtime.Eval do
       with_recursion_check(assertions_fun)
     catch
       {:assertion_failure, %{kind: kind} = assertion_info} ->
-        exception = Map.fetch!(@assertion_errors, kind)
-        raise exception, assertion_info
+        exception_module = Map.fetch!(@assertion_errors, kind)
+        exception = exception_module.exception(assertion_info)
+
+        # Strip Bond internal frames from the stacktrace so the failure points at the user's
+        # call site rather than into Bond.Runtime.Eval.
+        :erlang.raise(:error, exception, prune_stacktrace(__STACKTRACE__))
     end
   end
+
+  defp prune_stacktrace(stacktrace) do
+    Enum.reject(stacktrace, &bond_frame?/1)
+  end
+
+  defp bond_frame?({module, _fun, _arity_or_args, _location}) when is_atom(module) do
+    case Atom.to_string(module) do
+      "Elixir.Bond" -> true
+      "Elixir.Bond." <> _ -> true
+      _ -> false
+    end
+  end
+
+  defp bond_frame?(_), do: false
 
   defp with_recursion_check(assertions_fun) do
     # Mutually recursive contracts lead to infinite recursion, so don't evaluate assertions for a
