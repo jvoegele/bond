@@ -12,7 +12,7 @@ Refer to the `Bond` module docs for detailed usage instructions and examples.
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.8.3"}
+    {:bond, "~> 0.9.1"}
   ]
 end
 ```
