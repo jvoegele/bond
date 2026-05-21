@@ -124,53 +124,62 @@ defmodule Bond.Compiler.AnnotatedFunction do
   end
 
   @typedoc """
-  Configuration controlling which kinds of contracts are emitted by `apply_contract/2`.
+  Per-kind configuration mode controlling how `apply_contract/2` emits each contract kind:
+
+    * `true` — emit the override with a runtime guard that defaults to "evaluate."
+    * `false` — emit the override with a runtime guard that defaults to "do not evaluate."
+    * `:purge` — emit no code for this kind. The override may still be emitted for the
+      *other* kind, in which case the doc section for the purged kind is also omitted.
+
+  `true` and `false` both produce code that reads `Application.get_env(:bond, <kind>, default)`
+  at every call, where `default` is the compile-time value. Anything other than `false` at
+  runtime causes evaluation to occur, so the toggle is "set to `false` to disable."
+  """
+  @type mode :: true | false | :purge
+
+  @typedoc """
+  Configuration controlling which kinds of contracts `apply_contract/2` emits and how.
 
   Used by `Bond.Compiler.__before_compile__/1` to honour the `:bond` application config keys
-  `:preconditions` and `:postconditions`. Either flag set to `false` causes the corresponding
-  evaluation to be omitted from the override clause and the corresponding section to be
-  omitted from the auto-generated documentation.
+  `:preconditions` and `:postconditions` (and any per-module `:overrides`).
   """
   @type contract_config :: %{
-          required(:preconditions) => boolean(),
-          required(:postconditions) => boolean()
+          required(:preconditions) => mode(),
+          required(:postconditions) => mode()
         }
 
   @doc """
   Returns a quoted expression that wraps the annotated function with its contract, or `nil`
   when nothing needs to be emitted.
 
-  The default `config` enables both preconditions and postconditions, matching pre-0.10.0
-  behaviour. Setting either flag to `false` suppresses the corresponding piece of the
-  override:
+  Per-kind mode (see `t:mode/0`):
 
-    * `preconditions: false` — the override clause does not build or call the preconditions
-      function, and the `#### Preconditions` section is omitted from the auto-generated docs.
-    * `postconditions: false` — the override clause does not build or call the postconditions
-      function, and the `#### Postconditions` section is omitted from the auto-generated docs.
-    * Both `false` (or the function has neither pre- nor postconditions) — returns `nil`. The
-      caller should filter `nil`s out and not emit anything for this function. The user's
-      original `def`/`defp` runs as written, with no docs added by Bond (Bond intercepts
-      `@doc` and only emits it back via the override path).
+    * `true` / `false` — the override IS emitted; each call reads
+      `Application.get_env(:bond, <kind>, <compile_time_value>)` and skips evaluation when the
+      result is exactly `false`. The auto-generated doc section for that kind appears.
+    * `:purge` — no code is emitted for that kind. The doc section is omitted.
 
-  When an override clause IS emitted, the expression contains three things:
+  When both `:preconditions` and `:postconditions` resolve to `:purge` (or when the function
+  has no contracts of either kind), `apply_contract/2` returns `nil`. The caller filters
+  `nil`s out and the user's `def`/`defp` runs as written, with zero per-call overhead.
+
+  When an override IS emitted, the expression contains three things:
 
     1. A `defoverridable` declaration making the function overridable.
-    2. Zero or more `@doc` clauses re-emitting any `@doc` attributes the user attached to the
-       function. Any string-valued doc has the auto-generated "Preconditions" and
-       "Postconditions" sections appended (filtered by `config`). If the function has
-       contracts but no user-supplied string `@doc`, a synthetic `@doc` containing just the
-       contract documentation is added.
+    2. Zero or more `@doc` clauses re-emitting the user's `@doc` attributes, with the
+       auto-generated `#### Preconditions` / `#### Postconditions` sections appended (filtered
+       by the per-kind mode). A synthetic `@doc` is emitted if the function has contracts but
+       no user-supplied string `@doc`.
     3. A single override clause for the function that:
 
-         * builds a fn evaluating the preconditions and calls
-           `Bond.Runtime.Eval.evaluate_preconditions/1` (skipped if
-           `preconditions: false`),
-         * resolves any `old(...)` expressions found in the postconditions into local bindings,
-         * delegates to the original implementation via `super(...)`, capturing the result,
-         * builds a fn evaluating the postconditions and calls
-           `Bond.Runtime.Eval.evaluate_postconditions/1` (skipped if
-           `postconditions: false`),
+         * (when `preconditions != :purge`) builds the preconditions fn and, if
+           `Application.get_env(:bond, :preconditions, …)` is not `false`, calls
+           `Bond.Runtime.Eval.evaluate_preconditions/1`;
+         * resolves any `old(...)` expressions found in the postconditions into local bindings;
+         * delegates to the original implementation via `super(...)`, capturing the result;
+         * (when `postconditions != :purge`) builds the postconditions fn and, if
+           `Application.get_env(:bond, :postconditions, …)` is not `false`, calls
+           `Bond.Runtime.Eval.evaluate_postconditions/1`;
          * returns the captured result.
 
   The override clause uses the parameter names from the function's first clause. For
@@ -181,18 +190,27 @@ defmodule Bond.Compiler.AnnotatedFunction do
   def apply_contract(annotated_function, config \\ %{preconditions: true, postconditions: true})
 
   def apply_contract(%__MODULE__{} = annotated_function, config) do
-    emit_pre? = Map.fetch!(config, :preconditions) and has_preconditions?(annotated_function)
-    emit_post? = Map.fetch!(config, :postconditions) and has_postconditions?(annotated_function)
+    pre_mode =
+      resolve_mode(Map.fetch!(config, :preconditions), has_preconditions?(annotated_function))
 
-    if emit_pre? or emit_post? do
-      build_contract_override(annotated_function, emit_pre?, emit_post?)
+    post_mode =
+      resolve_mode(Map.fetch!(config, :postconditions), has_postconditions?(annotated_function))
+
+    if pre_mode != :purge or post_mode != :purge do
+      build_contract_override(annotated_function, pre_mode, post_mode)
     end
   end
 
+  # A kind is effectively purged if either the user purged it OR the function has no
+  # assertions of that kind — there's nothing to evaluate or document either way.
+  defp resolve_mode(:purge, _has_assertions?), do: :purge
+  defp resolve_mode(_value, false), do: :purge
+  defp resolve_mode(value, true) when value in [true, false], do: value
+
   defp build_contract_override(
          %__MODULE__{kind: kind, fun: fun, arity: arity} = annotated_function,
-         emit_pre?,
-         emit_post?
+         pre_mode,
+         post_mode
        ) do
     first_clause = List.first(annotated_function.clauses)
     function_info = {fun, arity}
@@ -207,16 +225,16 @@ defmodule Bond.Compiler.AnnotatedFunction do
     old_resolved_ast = OldExpression.resolve(old_context)
 
     preconditions_fun_ast =
-      if emit_pre? do
+      if pre_mode != :purge do
         Assertion.create_assertions_function(annotated_function.preconditions, function_info)
       end
 
     postconditions_fun_ast =
-      if emit_post? do
+      if post_mode != :purge do
         Assertion.create_assertions_function(postconditions, function_info)
       end
 
-    doc_asts = doc_clauses(annotated_function, first_clause.env, emit_pre?, emit_post?)
+    doc_asts = doc_clauses(annotated_function, first_clause.env, pre_mode, post_mode)
 
     body_stmts =
       build_override_body(
@@ -224,8 +242,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
         preconditions_fun_ast,
         postconditions_fun_ast,
         old_resolved_ast,
-        emit_pre?,
-        emit_post?
+        pre_mode,
+        post_mode
       )
 
     quote file: first_clause.env.file, line: first_clause.env.line do
@@ -244,34 +262,45 @@ defmodule Bond.Compiler.AnnotatedFunction do
          preconditions_fun_ast,
          postconditions_fun_ast,
          old_resolved_ast,
-         emit_pre?,
-         emit_post?
+         pre_mode,
+         post_mode
        ) do
-    pre_stmts =
-      if emit_pre? do
-        [
-          quote(do: preconditions_fun = unquote(preconditions_fun_ast)),
-          quote(do: Bond.Runtime.Eval.evaluate_preconditions(preconditions_fun))
-        ]
-      else
-        []
-      end
-
+    pre_stmts = guarded_eval_stmts(:preconditions, preconditions_fun_ast, pre_mode)
     super_call = quote(do: var!(result) = super(unquote_splicing(call_params)))
-
-    post_stmts =
-      if emit_post? do
-        [
-          quote(do: postconditions_fun = unquote(postconditions_fun_ast)),
-          quote(do: Bond.Runtime.Eval.evaluate_postconditions(postconditions_fun))
-        ]
-      else
-        []
-      end
-
+    post_stmts = guarded_eval_stmts(:postconditions, postconditions_fun_ast, post_mode)
     return_stmt = quote(do: var!(result))
 
     pre_stmts ++ [old_resolved_ast, super_call] ++ post_stmts ++ [return_stmt]
+  end
+
+  # Emit the per-kind statements that bind the assertions fn and then conditionally invoke
+  # the runtime evaluator. The compile-time mode (`true` or `false`) is embedded as the
+  # default in the `Application.get_env/3` call, so the runtime check reflects the user's
+  # compile-time intent when no `Application.put_env/3` override is in place.
+  defp guarded_eval_stmts(_kind, _fun_ast, :purge), do: []
+
+  defp guarded_eval_stmts(:preconditions, fun_ast, mode) do
+    [
+      quote(do: preconditions_fun = unquote(fun_ast)),
+      quote do
+        case Application.get_env(:bond, :preconditions, unquote(mode)) do
+          false -> :ok
+          _ -> Bond.Runtime.Eval.evaluate_preconditions(preconditions_fun)
+        end
+      end
+    ]
+  end
+
+  defp guarded_eval_stmts(:postconditions, fun_ast, mode) do
+    [
+      quote(do: postconditions_fun = unquote(fun_ast)),
+      quote do
+        case Application.get_env(:bond, :postconditions, unquote(mode)) do
+          false -> :ok
+          _ -> Bond.Runtime.Eval.evaluate_postconditions(postconditions_fun)
+        end
+      end
+    ]
   end
 
   defp strip_default_args(params) do
@@ -284,10 +313,10 @@ defmodule Bond.Compiler.AnnotatedFunction do
   defp doc_clauses(
          %__MODULE__{doc_attributes: doc_attributes} = annotated_function,
          env,
-         emit_pre?,
-         emit_post?
+         pre_mode,
+         post_mode
        ) do
-    contract_docs = build_contract_docs(annotated_function, emit_pre?, emit_post?)
+    contract_docs = build_contract_docs(annotated_function, pre_mode, post_mode)
 
     has_string_doc? = Enum.any?(doc_attributes, fn {_meta, value} -> is_binary(value) end)
 
@@ -322,16 +351,16 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
   defp build_contract_docs(
          %__MODULE__{preconditions: preconditions, postconditions: postconditions},
-         emit_pre?,
-         emit_post?
+         pre_mode,
+         post_mode
        ) do
     precondition_docs =
-      if emit_pre?,
+      if pre_mode != :purge,
         do: generate_assertion_docs(preconditions, header: "#### Preconditions"),
         else: []
 
     postcondition_docs =
-      if emit_post?,
+      if post_mode != :purge,
         do: generate_assertion_docs(postconditions, header: "#### Postconditions"),
         else: []
 
