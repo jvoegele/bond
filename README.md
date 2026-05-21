@@ -230,62 +230,112 @@ yourself — Bond synthesises one when needed.
 
 > #### Conditional compilation and docs {: .info}
 >
-> When a function has **all** of its contracts compile-disabled (see
+> When a function has **all** of its contracts `:purge`d (see
 > [Conditional compilation](#module-conditional-compilation)), the function
 > runs with zero contract overhead and its auto-generated contract sections
 > are also suppressed. If you want the contract documentation visible in
 > production builds, leave at least one of `:preconditions` or
-> `:postconditions` enabled, or write an explicit `@doc` for the function.
+> `:postconditions` set to `true` or `false` (both emit the override; only
+> `:purge` removes it).
 
 ## Conditional compilation
 
-Contracts are evaluated on every call by default. For hot paths or
-production builds you can compile contracts out entirely via three
-application-config keys, read at compile time:
+Bond reads three application-config keys at compile time. Each accepts one
+of three values:
+
+| Value     | Compiled? | Runtime behaviour                                   | Doc section? |
+|-----------|-----------|-----------------------------------------------------|--------------|
+| `true`    | yes       | evaluated unless `Application.put_env/3` flips it   | yes          |
+| `false`   | yes       | skipped unless `Application.put_env/3` flips it     | yes          |
+| `:purge`  | no        | n/a — there is no code to run                       | no           |
+
+The keys are `:preconditions`, `:postconditions`, and `:checks`. Each
+defaults to `true`.
 
 ```elixir
-# config/prod.exs
+# config/prod.exs — purge contracts entirely from this build
 config :bond,
-  preconditions: false,
-  postconditions: false,
-  checks: false
+  preconditions: :purge,
+  postconditions: :purge,
+  checks: :purge
 ```
 
-Each key defaults to `true`. When set to `false`:
+### Runtime toggling
 
-- `:preconditions` — `@pre` evaluation is omitted from generated override
-  clauses, and the `#### Preconditions` section is omitted from the
-  auto-generated docs.
-- `:postconditions` — same for `@post`.
-- `:checks` — every `check/1,2` macro call expands to `:ok` and the wrapped
-  expression is **not evaluated**. Don't put side effects inside `check`.
-
-When **both** `:preconditions` and `:postconditions` are disabled for a
-function, Bond emits no override clause at all. The function runs exactly
-as you wrote it, with no per-call overhead.
-
-Because `Application.compile_env/3` is used to read the config, changing
-these values requires recompilation (`mix deps.compile bond --force`, or in
-practice `MIX_ENV=prod mix compile --force`). The Elixir compiler tracks
-the dependency for you in normal incremental builds.
-
-A typical pattern: enable contracts in dev and test, disable in prod.
+When a kind is compiled with `true` or `false`, Bond emits a runtime guard
+on every contract evaluation that reads
+`Application.get_env(:bond, <kind>, <compile_time_value>)`. The guard
+evaluates the contract unless the runtime value is exactly `false`. This
+means contracts can be flipped on and off without recompiling:
 
 ```elixir
-# config/config.exs
-import Config
-
-# Default: everything enabled.
-# Specific environments may override below.
-
-# config/prod.exs
-import Config
-
-config :bond,
-  preconditions: false,
-  postconditions: false,
-  checks: false
+# In IEx or a remote console, against a running release:
+Application.put_env(:bond, :preconditions, false)  # dormant
+Application.put_env(:bond, :preconditions, true)   # active again
 ```
+
+`:purge` is the only value with no runtime presence — the code isn't
+compiled in, so `Application.put_env/3` can't bring it back.
+
+The runtime check is a single `Application.get_env/3` lookup per call per
+contract kind. A trivial benchmark (a function with `@pre is_number(x)`
+called in a tight loop) shows:
+
+| Mode      | ns / call | Overhead vs `:purge` |
+|-----------|-----------|---------------------|
+| `:purge`  | ~48 ns    | —                   |
+| `false`   | ~89 ns    | ~40 ns (the guard alone) |
+| `true`    | ~155 ns   | ~107 ns (guard + assertion eval) |
+
+For genuinely hot-path code, prefer `:purge`. The benchmark itself lives at
+`bench/runtime_check_overhead.exs` if you want to reproduce it on your
+hardware.
+
+### Per-module overrides
+
+Use `:overrides` in your `:bond` config to make exceptions to the global
+defaults. Each entry is `{Module | Regex, opts}`. Module-atom keys match
+exactly; `Regex` keys match against the source-visible module name (no
+`Elixir.` prefix).
+
+```elixir
+config :bond,
+  preconditions: true,
+  postconditions: true,
+  overrides: [
+    {MyApp.HotPath, preconditions: :purge, postconditions: :purge},
+    {~r/Workers\./, postconditions: false}
+  ]
+```
+
+Precedence (most specific wins):
+
+1. `use Bond, opts` on the using module (highest).
+2. `:overrides` entry whose key is an exact module atom.
+3. `:overrides` entry whose key is a regex (first match in list order wins).
+4. Global `:bond` config (lowest).
+
+A module can also opt out (or in) directly at the `use` site:
+
+```elixir
+defmodule MyApp.HotPath do
+  use Bond, preconditions: :purge, postconditions: :purge
+end
+```
+
+### Migrating from 0.10.0
+
+Before 0.10.x, `false` meant "not compiled in" (zero overhead). In 0.11.0
+the value space changed:
+
+| 0.10.x  | 0.11.0 equivalent | Notes |
+|---------|---------------------|-------|
+| `true`  | `true`              | Same default behaviour. Now also runtime-togglable. |
+| `false` | `:purge`            | **Migration**: if you used `false` for zero-overhead, switch to `:purge`. |
+
+In 0.11.0, `false` is a *runtime default* meaning "compiled but off by
+default." If you used `false` simply to disable contracts at compile time,
+change it to `:purge` to keep the same compiled output.
 
 <!-- README END -->
 
@@ -296,7 +346,7 @@ config :bond,
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.10.0"}
+    {:bond, "~> 0.11.0"}
   ]
 end
 ```
