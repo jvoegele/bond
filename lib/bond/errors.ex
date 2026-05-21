@@ -35,10 +35,9 @@ defmodule Bond.AssertionError do
         assertion = Keyword.fetch!(opts, :assertion)
         assertion_env = assertion.definition_env
         function_env = Keyword.fetch!(opts, :env)
-        {function, arity} = function_env.function
         binding = Keyword.fetch!(opts, :binding)
 
-        error = %__MODULE__{
+        %__MODULE__{
           label: assertion.label,
           expression: assertion.code,
           file: assertion_env.file,
@@ -52,9 +51,18 @@ defmodule Bond.AssertionError do
   end
 
   def message(error, headline) do
+    location =
+      case {error.file, error.line} do
+        {nil, _} -> nil
+        {file, nil} -> file
+        {file, line} -> "#{file}:#{line}"
+      end
+
+    location_line = if location, do: "|   at: #{location}\n", else: ""
+
     """
     #{headline}
-    |   label: #{inspect(error.label)}
+    #{location_line}|   label: #{inspect(error.label)}
     |   assertion: #{error.expression}
     |   binding: #{inspect(error.binding)}
     """

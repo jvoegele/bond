@@ -12,7 +12,7 @@ defmodule Bond.Compiler.Assertion do
   alias __MODULE__
 
   @enforce_keys [:id, :expression, :kind, :definition_env, :meta]
-  defstruct [:id, :label, :expression, :code, :kind, :definition_env, :meta, :context]
+  defstruct [:id, :label, :expression, :code, :kind, :definition_env, :meta]
 
   @type t :: t(Bond.assertion_kind())
 
@@ -23,8 +23,7 @@ defmodule Bond.Compiler.Assertion do
           code: String.t(),
           kind: kind,
           definition_env: Macro.Env.t(),
-          meta: list(),
-          context: map()
+          meta: list()
         }
 
   @type function_info :: {atom(), non_neg_integer()}
@@ -98,7 +97,8 @@ defmodule Bond.Compiler.Assertion do
             :ok
           else
             assertion_info = unquote(Macro.escape(assertion_info))
-            throw({:assertion_failure, Map.put(assertion_info, :binding, binding())})
+            # Sort the binding so failure messages are stable across runs and easy to diff.
+            throw({:assertion_failure, Map.put(assertion_info, :binding, Enum.sort(binding()))})
           end
         end
       end

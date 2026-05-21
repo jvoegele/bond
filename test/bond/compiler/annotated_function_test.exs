@@ -204,8 +204,7 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
     ast
     |> block_clauses()
     |> Enum.flat_map(fn
-      {{:., _, [{:__aliases__, _, [:Module]}, :put_attribute]}, _,
-       [_module, :doc, {line, value}]} ->
+      {{:., _, [{:__aliases__, _, [:Module]}, :put_attribute]}, _, [_module, :doc, {line, value}]} ->
         [{line, value}]
 
       _ ->

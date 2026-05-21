@@ -9,8 +9,7 @@ defmodule Bond.Compiler.CompileStateFSMTest do
   alias Bond.Compiler.FunctionDefinition
 
   @doc_attribute {[line: 42], "The D.O.C. and the Doctor"}
-  @doc_attribute_keyword {[line: 43],
-                          [artist: "The D.O.C.", title: "Portrait of a Master Piece"]}
+  @doc_attribute_keyword {[line: 43], [artist: "The D.O.C.", title: "Portrait of a Master Piece"]}
 
   setup do
     {:ok, fsm: start_fsm()}

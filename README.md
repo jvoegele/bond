@@ -95,22 +95,17 @@ checks can be disabled via configuration.
 
 > #### `use Bond` {: .info}
 >
-> When you `use Bond`, the `Bond` module will override several `Kernel` macros
-> in order to support attaching preconditions and postconditions to functions.
-> Specifically:
+> `use Bond` overrides `Kernel.@/1` so that `@pre`, `@post`, and `@doc`
+> annotations can be intercepted and recorded, and installs `@on_definition`,
+> `@before_compile`, and `@after_compile` compiler hooks that wrap functions
+> with contracts via `defoverridable` at the end of module compilation. Your
+> `def`s and `defp`s are otherwise left alone.
 >
-> - `Kernel.@/1` is overridden by `Bond.@/1`
-> - `Kernel.def/2` is overridden by `Bond.def/2`
-> - `Kernel.defp/2` is overridden by `Bond.defp/2`
->
-> `use Bond` will also import the `Bond` module so that the `check/1` and
-> `check/2` macros are available for use.
->
-> Additionally, the `Bond.Predicates` module is automatically imported for all
-> preconditions, postconditions, and checks, so that the predicate functions and
-> operators that are defined therein can be used for assertions.
-> `Bond.Predicates` can be explicitly imported into modules for use outside of
-> assertions.
+> `use Bond` also imports the `Bond` module so the `check/1` and `check/2`
+> macros are available, and imports `Bond.Predicates` so the predicate
+> functions and operators defined there (such as `~>` and `|||`) can be used
+> in assertions. `Bond.Predicates` can be explicitly imported elsewhere if you
+> want the operators outside of contract expressions.
 
 ## Assertion syntax
 
@@ -252,7 +247,7 @@ on mouse hover in VS Code.
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.9.0"}
+    {:bond, "~> 0.9.1"}
   ]
 end
 ```

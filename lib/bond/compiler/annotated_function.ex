@@ -1,15 +1,18 @@
 defmodule Bond.Compiler.AnnotatedFunction do
   @moduledoc internal: true
   @moduledoc """
-  Internal helper module for attaching contracts (i.e. preconditions and/or postconditions) to a
-  function.
+  Internal model of a user function plus everything attached to it at compile time: its clauses,
+  its preconditions, its postconditions, and any `@doc` attributes that precede it.
 
-  The struct in this module represents all clauses of a function. If multiple clauses for a
-  function are defined (with `def/2` or `defp/2`), the `:clauses` field of the struct will contain
-  one `Bond.Compiler.AnnotatedFunction.Clause` struct for each clause.
+  All clauses of a function (with the same name and arity) are gathered into one
+  `AnnotatedFunction` struct. The `:clauses` field holds an ordered list of
+  `Bond.Compiler.AnnotatedFunction.Clause` structs, one per `def`/`defp` clause. The
+  `:preconditions`, `:postconditions`, and `:doc_attributes` fields apply to all clauses.
 
-  The `:preconditions`, `:postconditions`, and `:doc_attributes` fields apply to all clauses of a
-  function.
+  An `AnnotatedFunction` is produced by `Bond.Compiler.CompileStateFSM` from the
+  `Bond.Compiler.FunctionDefinition` events emitted by `@on_definition`, and consumed by
+  `apply_contract/1` in this module to generate the override that wraps the original function in
+  pre/post evaluation.
   """
 
   alias Bond.Compiler.Assertion
@@ -142,8 +145,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
     preconditions_fun_ast =
       Assertion.create_assertions_function(annotated_function.preconditions, function_info)
 
-    postconditions_fun_ast =
-      Assertion.create_assertions_function(postconditions, function_info)
+    postconditions_fun_ast = Assertion.create_assertions_function(postconditions, function_info)
 
     doc_asts = doc_clauses(annotated_function, first_clause.env)
 
@@ -178,8 +180,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
   defp doc_clauses(%__MODULE__{doc_attributes: doc_attributes} = annotated_function, env) do
     contract_docs = build_contract_docs(annotated_function)
 
-    has_string_doc? =
-      Enum.any?(doc_attributes, fn {_meta, value} -> is_binary(value) end)
+    has_string_doc? = Enum.any?(doc_attributes, fn {_meta, value} -> is_binary(value) end)
 
     augmented =
       cond do

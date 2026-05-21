@@ -1,7 +1,7 @@
 defmodule Bond.MixProject do
   use Mix.Project
 
-  @version "0.9.0"
+  @version "0.9.1"
   @source_url "https://github.com/jvoegele/bond"
 
   def project do
@@ -56,7 +56,7 @@ defmodule Bond.MixProject do
   defp package do
     [
       name: :bond,
-      files: ["lib", "mix.exs", "README.md", "LICENSE", "CHANGELOG.md"],
+      files: ["lib", "mix.exs", "README.md", "LICENSE", "CHANGELOG.md", ".formatter.exs"],
       maintainers: ["Jason Voegele"],
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url}
