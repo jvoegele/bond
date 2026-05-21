@@ -17,26 +17,65 @@ contracts catch bugs sooner with less work.
 
 ## Will contracts slow down my production code?
 
-Only if you keep them enabled in production. Bond supports
-[compile-time conditional compilation](Bond.html#module-conditional-compilation)
-of contracts:
+Not if you `:purge` them. Bond supports
+[compile-time conditional compilation](Bond.html#module-conditional-compilation):
 
 ```elixir
-# config/prod.exs
+# config/prod.exs — strip contracts entirely from this build
 config :bond,
-  preconditions: false,
-  postconditions: false,
-  checks: false
+  preconditions: :purge,
+  postconditions: :purge,
+  checks: :purge
 ```
 
-When both preconditions and postconditions are disabled for a function,
-Bond emits no override at all and the function runs with zero per-call
-overhead. The compiled BEAM contains no contract evaluation code for that
-function.
+When both `:preconditions` and `:postconditions` are `:purge`d for a
+function, Bond emits no override at all and the function runs with zero
+per-call overhead. The compiled BEAM contains no contract evaluation code
+for that function.
 
-A typical pattern is "contracts in dev/test, off in prod" — you get
-the safety net during development and the performance characteristics of
-the underlying code in production.
+A typical pattern: contracts on in dev/test, `:purge`d in prod.
+
+## Can I toggle contracts at runtime without recompiling?
+
+Yes — that's what `true` and `false` (as distinct from `:purge`) give you.
+When a kind is compiled with `true` or `false`, the override has a runtime
+guard:
+
+```elixir
+# In IEx or a remote console:
+Application.put_env(:bond, :preconditions, false)  # dormant
+Application.put_env(:bond, :preconditions, true)   # active again
+```
+
+The runtime check is a single `Application.get_env/3` lookup per call. For
+inner-loop hot paths, `:purge` is still the right choice — runtime toggle
+costs a tiny lookup; `:purge` costs nothing.
+
+## Can I disable contracts for one specific module?
+
+Yes, two ways.
+
+In the source:
+
+```elixir
+defmodule MyApp.HotPath do
+  use Bond, preconditions: :purge, postconditions: :purge
+end
+```
+
+Or in config (handy when you don't want to touch the source):
+
+```elixir
+config :bond,
+  overrides: [
+    {MyApp.HotPath, preconditions: :purge, postconditions: :purge},
+    {~r/Workers\./, postconditions: false}
+  ]
+```
+
+Exact module atoms match precisely. `Regex` patterns match against the
+source-visible module name. The `use Bond` opts override `:overrides`,
+which override the global config.
 
 ## How does Bond compare to Norm?
 

@@ -23,21 +23,46 @@ defmodule Bond do
   """
   @type assertion_expression :: {atom(), Macro.metadata(), list()}
 
-  @doc false
-  defmacro __using__(_opts) do
+  @doc """
+  `use Bond` enables `@pre`, `@post`, and `check/1,2` annotations in the using module.
+
+  ## Options
+
+  Each option is one of `true`, `false`, or `:purge`. See the "Conditional compilation"
+  section in the moduledoc for what each value means. Options passed to `use Bond` override
+  both the global `:bond` config and any `:overrides` entry that matches this module.
+
+    * `:preconditions` — mode for this module's `@pre` annotations.
+    * `:postconditions` — mode for this module's `@post` annotations.
+    * `:checks` — mode for this module's `check/1,2` calls.
+
+  Example: a hot-path module that wants contracts purged from its compiled output regardless
+  of the global config.
+
+      defmodule MyApp.HotPath do
+        use Bond, preconditions: :purge, postconditions: :purge
+      end
+  """
+  defmacro __using__(opts) when is_list(opts) do
     Bond.Compiler.init(__CALLER__.module)
 
     quote do
       # Read the `:bond` application config in the *user's* module body so
       # `Application.compile_env/3` works (it cannot be called inside a macro/function body,
       # only in a module body) and so the compile-env dependency is correctly tracked for
-      # recompilation. `Bond.Compiler.__before_compile__/1` reads this attribute back to
-      # decide which contracts to emit.
-      @__bond_contract_config__ %{
-        preconditions: Application.compile_env(:bond, :preconditions, true),
-        postconditions: Application.compile_env(:bond, :postconditions, true),
-        checks: Application.compile_env(:bond, :checks, true)
-      }
+      # recompilation. `Bond.Compiler.resolve_config/3` merges global config, `:overrides`,
+      # and the `use Bond` opts. `Bond.Compiler.__before_compile__/1` reads the final
+      # `@__bond_contract_config__` attribute when emitting contract overrides.
+      @__bond_contract_config__ Bond.Compiler.resolve_config(
+                                  __MODULE__,
+                                  unquote(opts),
+                                  preconditions:
+                                    Application.compile_env(:bond, :preconditions, true),
+                                  postconditions:
+                                    Application.compile_env(:bond, :postconditions, true),
+                                  checks: Application.compile_env(:bond, :checks, true),
+                                  overrides: Application.compile_env(:bond, :overrides, [])
+                                )
 
       import Kernel, except: [@: 1]
       import Bond
@@ -117,31 +142,32 @@ defmodule Bond do
 
   > #### Conditional compilation {: .info}
   >
-  > `check` honours the `:bond, :checks` application config. When set to `false`, every `check`
-  > call in modules that `use Bond` expands to `:ok` and the wrapped expression is **not
-  > evaluated** at all. Don't rely on side effects inside `check` expressions, and don't rely
-  > on the return value of `check` if your build may have checks disabled.
+  > `check` honours the `:bond, :checks` application config:
+  >
+  > - `:purge` — `check` calls in modules that `use Bond` expand to `:ok` at compile time and
+  >   the wrapped expression is **not evaluated** at all. Don't rely on side effects in checks.
+  > - `true` (default) — `check` calls expand to a runtime-guarded evaluation; the guard reads
+  >   `Application.get_env(:bond, :checks, true)` on every call and evaluates unless the value
+  >   is `false`.
+  > - `false` — same shape as `true`, but the runtime default flips to `false` (off unless
+  >   `Application.put_env/3` is called to turn it on).
   """
   @spec check(assertion_expression()) :: as_boolean(any())
   @spec check(Keyword.t(assertion_expression())) :: list(as_boolean(any()))
   defmacro check(assertion_or_list_of_assertions)
 
   defmacro check(keyword_list) when is_list(keyword_list) do
-    if checks_enabled?(__CALLER__.module) do
+    build_check(__CALLER__.module, fn ->
       for {label, {_, meta, _} = expression} <- keyword_list do
         Bond.Compiler.check_assertion(expression, label, __CALLER__, meta)
       end
-    else
-      :ok
-    end
+    end)
   end
 
   defmacro check({_, meta, _} = expression) do
-    if checks_enabled?(__CALLER__.module) do
+    build_check(__CALLER__.module, fn ->
       Bond.Compiler.check_assertion(expression, nil, __CALLER__, meta)
-    else
-      :ok
-    end
+    end)
   end
 
   @doc """
@@ -153,28 +179,47 @@ defmodule Bond do
 
   @spec check(assertion_label(), assertion_expression()) :: as_boolean(any())
   defmacro check(label, {_, meta, _} = expression) when is_atom(label) or is_binary(label) do
-    if checks_enabled?(__CALLER__.module) do
+    build_check(__CALLER__.module, fn ->
       Bond.Compiler.check_assertion(expression, label, __CALLER__, meta)
-    else
-      :ok
-    end
+    end)
   end
 
   @spec check(assertion_expression(), assertion_label()) :: as_boolean(any())
   defmacro check({_, meta, _} = expression, label) when is_atom(label) or is_binary(label) do
-    if checks_enabled?(__CALLER__.module) do
+    build_check(__CALLER__.module, fn ->
       Bond.Compiler.check_assertion(expression, label, __CALLER__, meta)
-    else
-      :ok
+    end)
+  end
+
+  # Build the AST for a `check` call honouring the per-module `:checks` config:
+  #
+  #   * `:purge` — expand to `:ok` at compile time; `build_inline_ast` is never called.
+  #   * `true` / `false` — call `build_inline_ast` to get the assertion-evaluation AST, then
+  #     wrap it in a runtime guard using `Application.get_env/3` defaulting to the
+  #     compile-time mode.
+  defp build_check(module, build_inline_ast) do
+    case checks_mode(module) do
+      :purge ->
+        :ok
+
+      mode when mode in [true, false] ->
+        inline = build_inline_ast.()
+
+        quote do
+          case Application.get_env(:bond, :checks, unquote(mode)) do
+            false -> :ok
+            _ -> unquote(inline)
+          end
+        end
     end
   end
 
-  # Read the per-module `:checks` config previously stashed by `__using__`. Modules that did not
-  # `use Bond` have no attribute set; in that case we default to enabled (a defensive choice —
+  # Read the per-module `:checks` config previously stashed by `__using__`. Modules that did
+  # not `use Bond` have no attribute set; in that case default to `true` (a defensive choice —
   # such a `check` call would otherwise be a no-op for surprising reasons).
-  defp checks_enabled?(module) do
+  defp checks_mode(module) do
     case Module.get_attribute(module, :__bond_contract_config__) do
-      %{checks: false} -> false
+      %{checks: mode} when mode in [true, false, :purge] -> mode
       _ -> true
     end
   end

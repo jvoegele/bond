@@ -12,7 +12,7 @@ Add `bond` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.10.0"}
+    {:bond, "~> 0.11.0"}
   ]
 end
 ```
@@ -148,22 +148,29 @@ end
 
 ## Disabling contracts in production
 
-Bond reads three application-config keys at compile time:
+Bond's three application-config keys — `:preconditions`, `:postconditions`,
+`:checks` — each accept `true`, `false`, or `:purge`:
 
 ```elixir
-# config/prod.exs
+# config/prod.exs — strip contracts entirely from the prod build
 config :bond,
-  preconditions: false,
-  postconditions: false,
-  checks: false
+  preconditions: :purge,
+  postconditions: :purge,
+  checks: :purge
 ```
 
-Each defaults to `true`. When set to `false`, the corresponding contracts
-are not evaluated at runtime. When both `:preconditions` and
-`:postconditions` are disabled for a function, Bond emits no override at
-all — the function runs exactly as you wrote it, with zero overhead.
+- **`true` (default)** — compiled in, runtime-togglable, evaluated by default.
+- **`false`** — compiled in, runtime-togglable, *not* evaluated by default.
+- **`:purge`** — not compiled at all. Zero overhead. No contract docs.
 
-See the `Bond` moduledoc's "Conditional compilation" section for more.
+When compiled with `true` or `false`, contracts can be flipped at runtime
+via `Application.put_env(:bond, :preconditions, false | true)` — no
+recompilation needed. `:purge` is the only setting with no runtime presence
+(the code isn't there).
+
+For finer control, the `:overrides` config lets you set per-module rules.
+See the `Bond` moduledoc's "Conditional compilation" and "Per-module
+overrides" sections for the full story.
 
 ## Testing contract violations
 

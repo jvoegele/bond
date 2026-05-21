@@ -5,6 +5,85 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-05-21
+
+0.11.0 reshapes the conditional-compilation config introduced in 0.10.0
+around a new value space — `true | false | :purge` per kind — and adds two
+new features that compose on top of it: runtime toggling without
+recompilation, and per-module overrides.
+
+### Breaking changes (minor)
+
+- **`config :bond, <kind>: false` no longer compiles contracts out.** It
+  now means "compiled in, runtime guard defaults to off." If you used
+  `false` in 0.10.0 to get zero-overhead behaviour, change it to `:purge`
+  to preserve that behaviour. `true` continues to work as before (with the
+  addition of runtime toggleability — see below).
+
+### Added
+
+- **`:purge` mode for each contract kind.** Setting any of `:preconditions`,
+  `:postconditions`, or `:checks` to `:purge` causes Bond to emit no code
+  for that kind. The resulting BEAM contains no contract logic; per-call
+  overhead is zero. Contract documentation for that kind is also
+  suppressed.
+
+- **Runtime toggling.** When a kind is compiled with `true` or `false`, the
+  emitted override carries a runtime guard:
+  `Application.get_env(:bond, <kind>, <compile_time_value>)`. The contract
+  is evaluated unless the runtime value is exactly `false`. Operators can
+  flip contracts on or off via `Application.put_env/3` from a remote
+  console — no recompilation needed. The compile-time value sets the
+  default for the runtime guard.
+
+  Benchmark on the project fixture (`bench/runtime_check_overhead.exs`,
+  trivial `@pre is_number(x)` in a tight loop): `:purge` ~48 ns/call,
+  `false` ~89 ns/call (~40 ns guard overhead), `true` ~155 ns/call (guard
+  plus assertion eval).
+
+- **`:overrides` config for per-module rules.** A list of
+  `{Module | Regex, opts}` tuples. Module-atom keys match exactly; `Regex`
+  keys match against the source-visible module name (no `Elixir.` prefix).
+  Use this to opt specific modules in or out of contract compilation
+  without touching their source. Example:
+
+      config :bond,
+        preconditions: true,
+        overrides: [
+          {MyApp.HotPath, preconditions: :purge, postconditions: :purge},
+          {~r/Workers\\./, postconditions: false}
+        ]
+
+- **`use Bond, opts` per-module options.** Pass any of `:preconditions`,
+  `:postconditions`, `:checks` directly at the `use` site to override
+  global and `:overrides` settings for that module.
+
+      defmodule MyApp.HotPath do
+        use Bond, preconditions: :purge, postconditions: :purge
+      end
+
+  Precedence: `use Bond` opts > exact-atom `:overrides` match > first
+  `Regex` `:overrides` match > global config.
+
+- **`Bond.Compiler.resolve_config/3`** — internal helper exposed for
+  testing that combines global config, `:overrides`, and `use Bond` opts
+  into the final per-module mode map.
+
+### Changed
+
+- `Bond.Compiler.AnnotatedFunction.apply_contract/2` now expects each kind
+  in the config map to be `true | false | :purge` rather than a boolean.
+  The function returns `nil` when both kinds resolve to `:purge`; in all
+  other cases it emits the override with the appropriate runtime guards.
+
+- `Bond.check/1,2` now expands to a runtime-guarded call when the resolved
+  `:checks` mode is `true` or `false`, and to `:ok` (a compile-time no-op)
+  when the mode is `:purge`.
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.10.0] - 2026-05-21
 
 The headline feature of 0.10.0 is **conditional compilation** of contracts.

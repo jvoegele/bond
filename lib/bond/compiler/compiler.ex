@@ -35,6 +35,97 @@ defmodule Bond.Compiler do
     :ok
   end
 
+  @typedoc """
+  Per-kind compilation mode. See `Bond.Compiler.AnnotatedFunction.mode/0`.
+  """
+  @type mode :: true | false | :purge
+
+  @typedoc """
+  Resolved per-module configuration produced by `resolve_config/3` and stashed in the
+  using module's `@__bond_contract_config__` attribute.
+  """
+  @type contract_config :: %{
+          preconditions: mode(),
+          postconditions: mode(),
+          checks: mode()
+        }
+
+  @doc """
+  Resolve the final per-module contract configuration from global defaults, `:overrides`,
+  and the options passed to `use Bond`.
+
+  Precedence (most specific wins):
+
+    1. `use Bond, preconditions: …` options on the using module.
+    2. An `:overrides` entry whose key is an exact module atom match.
+    3. An `:overrides` entry whose key is a `Regex` that matches the module name
+       (first matching pattern in list order wins).
+    4. The global `:bond, :preconditions` / `:postconditions` / `:checks` config.
+
+  `:overrides` is a list of `{Module | Regex, keyword_of_settings}` tuples, e.g.:
+
+      config :bond,
+        overrides: [
+          {MyApp.HotPath, preconditions: :purge, postconditions: :purge},
+          {~r/Workers\\./, postconditions: false}
+        ]
+  """
+  @spec resolve_config(module(), keyword(), keyword()) :: contract_config()
+  def resolve_config(module, use_opts, global) do
+    overrides = Keyword.get(global, :overrides, [])
+
+    base = %{
+      preconditions: Keyword.fetch!(global, :preconditions),
+      postconditions: Keyword.fetch!(global, :postconditions),
+      checks: Keyword.fetch!(global, :checks)
+    }
+
+    base
+    |> apply_settings(resolve_overrides_for(overrides, module))
+    |> apply_settings(use_opts)
+  end
+
+  defp resolve_overrides_for(overrides, module) do
+    case Enum.find(overrides, &exact_match?(&1, module)) do
+      {_, opts} ->
+        opts
+
+      nil ->
+        case Enum.find(overrides, &regex_match?(&1, module)) do
+          {_, opts} -> opts
+          nil -> []
+        end
+    end
+  end
+
+  defp exact_match?({atom, _opts}, module) when is_atom(atom), do: atom == module
+  defp exact_match?(_, _), do: false
+
+  defp regex_match?({%Regex{} = pattern, _opts}, module) do
+    Regex.match?(pattern, module_name_for_match(module))
+  end
+
+  defp regex_match?(_, _), do: false
+
+  # Module atoms in the BEAM are stored as `"Elixir.MyApp.Foo"`. Strip the `Elixir.` prefix
+  # before regex matching so users can write patterns against the source-visible names like
+  # `~r/^MyApp\.Workers\./` (rather than `~r/^Elixir\.MyApp\.Workers\./`).
+  defp module_name_for_match(module) do
+    case Atom.to_string(module) do
+      "Elixir." <> rest -> rest
+      other -> other
+    end
+  end
+
+  defp apply_settings(config, settings) do
+    Enum.reduce([:preconditions, :postconditions, :checks], config, fn key, acc ->
+      case Keyword.fetch(settings, key) do
+        {:ok, value} when value in [true, false, :purge] -> Map.put(acc, key, value)
+        _ -> acc
+      end
+    end)
+  end
+
   @doc false
   def __on_definition__(_env, kind, _fun, _params, _guards, _body)
       when kind in [:defmacro, :defmacrop] do

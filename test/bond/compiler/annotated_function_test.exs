@@ -197,11 +197,11 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
   describe "apply_contract/2 conditional compilation" do
     setup [:setup_assertions, :setup_annotated_functions]
 
-    test "preconditions disabled — override has no precondition eval, doc has no #### Preconditions",
+    test "preconditions purged — override has no precondition eval, doc has no #### Preconditions",
          %{one_clause_annotated_function: annotated_function} do
       ast =
         AnnotatedFunction.apply_contract(annotated_function, %{
-          preconditions: false,
+          preconditions: :purge,
           postconditions: true
         })
 
@@ -221,12 +221,12 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       assert code =~ ~r"var!\(result\) = super"
     end
 
-    test "postconditions disabled — override has no postcondition eval, doc has no #### Postconditions",
+    test "postconditions purged — override has no postcondition eval, doc has no #### Postconditions",
          %{one_clause_annotated_function: annotated_function} do
       ast =
         AnnotatedFunction.apply_contract(annotated_function, %{
           preconditions: true,
-          postconditions: false
+          postconditions: :purge
         })
 
       refute is_nil(ast)
@@ -243,17 +243,55 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       refute code =~ ~r"evaluate_postconditions"
     end
 
-    test "both disabled returns nil", %{one_clause_annotated_function: annotated_function} do
+    test "both purged returns nil", %{one_clause_annotated_function: annotated_function} do
       ast =
         AnnotatedFunction.apply_contract(annotated_function, %{
-          preconditions: false,
-          postconditions: false
+          preconditions: :purge,
+          postconditions: :purge
         })
 
       assert is_nil(ast)
     end
 
-    test "function with only preconditions: disabling postconditions still emits override" do
+    test "preconditions: false — override IS emitted with runtime guard, doc HAS section",
+         %{one_clause_annotated_function: annotated_function} do
+      ast =
+        AnnotatedFunction.apply_contract(annotated_function, %{
+          preconditions: false,
+          postconditions: true
+        })
+
+      refute is_nil(ast)
+
+      doc = doc_put_attribute_clauses(ast) |> List.first() |> elem(1)
+      assert doc =~ ~r"#### Preconditions"
+      assert doc =~ ~r"#### Postconditions"
+
+      override = override_def_clause(ast)
+      code = Macro.to_string(elem(override, 2) |> List.last() |> Keyword.get(:do))
+
+      # Override is emitted; runtime guard reads Application.get_env with default `false`.
+      assert code =~ ~r"preconditions_fun ="
+      assert code =~ ~r"Application\.get_env\(:bond, :preconditions, false\)"
+      assert code =~ ~r"evaluate_preconditions"
+    end
+
+    test "preconditions: true — override emitted with runtime guard defaulting to true",
+         %{one_clause_annotated_function: annotated_function} do
+      ast =
+        AnnotatedFunction.apply_contract(annotated_function, %{
+          preconditions: true,
+          postconditions: true
+        })
+
+      override = override_def_clause(ast)
+      code = Macro.to_string(elem(override, 2) |> List.last() |> Keyword.get(:do))
+
+      assert code =~ ~r"Application\.get_env\(:bond, :preconditions, true\)"
+      assert code =~ ~r"Application\.get_env\(:bond, :postconditions, true\)"
+    end
+
+    test "function with only preconditions: purging postconditions still emits override" do
       function_def =
         FunctionDefinition.new(
           __ENV__,
@@ -274,13 +312,13 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       ast =
         AnnotatedFunction.apply_contract(annotated_function, %{
           preconditions: true,
-          postconditions: false
+          postconditions: :purge
         })
 
       refute is_nil(ast)
     end
 
-    test "function with only preconditions: disabling preconditions returns nil" do
+    test "function with only preconditions: purging preconditions returns nil" do
       function_def =
         FunctionDefinition.new(
           __ENV__,
@@ -300,7 +338,7 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
 
       ast =
         AnnotatedFunction.apply_contract(annotated_function, %{
-          preconditions: false,
+          preconditions: :purge,
           postconditions: true
         })
 
