@@ -28,3 +28,4 @@ bond-*.tar
 *.beam
 /config/*.secret.exs
 .elixir_ls/
+.claude/
