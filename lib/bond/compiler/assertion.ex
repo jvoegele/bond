@@ -97,7 +97,8 @@ defmodule Bond.Compiler.Assertion do
             :ok
           else
             assertion_info = unquote(Macro.escape(assertion_info))
-            throw({:assertion_failure, Map.put(assertion_info, :binding, binding())})
+            # Sort the binding so failure messages are stable across runs and easy to diff.
+            throw({:assertion_failure, Map.put(assertion_info, :binding, Enum.sort(binding()))})
           end
         end
       end

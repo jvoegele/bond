@@ -46,7 +46,13 @@ defmodule BondTest.MathTest do
 
       assert is_exception(error)
       assert is_struct(error, PreconditionError)
-      assert Exception.message(error) =~ ~r{precondition failed for call to.*sqrt/2}
+
+      message = Exception.message(error)
+      assert message =~ ~r{precondition failed for call to.*sqrt/2}
+      assert message =~ ~r{at: .*/bond_test/math\.ex:\d+}
+      assert message =~ ~r{label: :non_negative_x}
+      assert message =~ ~r{assertion: x >= 0}
+      assert message =~ ~r{binding: \[trap_door: nil, x: -1\]}
 
       assert error.label == :non_negative_x
       assert error.expression == "x >= 0"
