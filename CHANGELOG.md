@@ -5,6 +5,79 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-05-21
+
+The headline feature of 0.10.0 is **conditional compilation** of contracts.
+You can now compile some or all of your contracts out entirely via
+application config, with zero per-call overhead for disabled contracts. The
+release also adds an ExUnit helper module, polishes error reporting, and
+substantially rewrites the user-facing documentation.
+
+### Added
+
+- **Conditional compilation via `:bond` application config.** Three keys,
+  read at compile time via `Application.compile_env/3`:
+  - `:preconditions` (default `true`) — when `false`, no precondition
+    evaluation is emitted in override clauses, and the auto-generated
+    `#### Preconditions` doc section is omitted.
+  - `:postconditions` (default `true`) — same for postconditions.
+  - `:checks` (default `true`) — when `false`, every `check/1,2` macro
+    call in modules that `use Bond` expands to `:ok` and the wrapped
+    expression is **not evaluated**. (Don't put side effects inside
+    `check`.)
+
+  When both `:preconditions` and `:postconditions` are disabled for a
+  function, Bond emits no override at all. The function runs exactly as
+  written, with zero per-call overhead. The function's auto-generated
+  contract docs are also suppressed in that case.
+
+  See the new "Conditional compilation" section in the `Bond` moduledoc.
+
+- **`Bond.Test` module** with `assert_precondition_violation/2`,
+  `assert_postcondition_violation/2`, and `assert_check_violation/2`
+  macros for testing contract violations in ExUnit. Field expectations
+  (`:label`, `:expression`, etc.) can be exact values or `Regex` patterns.
+
+- **New `guides/faq.md`** answering the questions that come up most: why
+  contracts when I have ExUnit, will contracts slow down prod, how does
+  Bond compare to Norm, what does Bond do that typespecs don't, the
+  Assertion Evaluation rule, default-arg behaviour, multi-clause handling.
+
+### Changed
+
+- **Assertion failure messages pretty-print the captured `binding/0`** with
+  `inspect/2 ... pretty: true, limit: 20, printable_limit: 200, width: 80`,
+  so small bindings stay compact and large structs no longer dominate the
+  failure output.
+
+- **Stack traces of raised assertion exceptions are pruned** to omit
+  `Bond.*` frames. Failures point at the user's call site rather than
+  into `Bond.Runtime.Eval`.
+
+- **`Bond` moduledoc / README restructured.** Leads with a five-line
+  `Account.withdraw` example and a one-paragraph elevator pitch. The
+  Wikipedia quote moves out. Assertion syntax recommends the keyword-list
+  form as primary. New `Conditional compilation` section. The `Math.sqrt`
+  example remains as the "showing everything" sample.
+
+- **`guides/getting-started.md` expanded** into a step-by-step walkthrough:
+  first `@pre`, postcondition with `result`, labelled assertions,
+  predicates, `old` expressions, inline checks, disabling in prod, and
+  ExUnit integration.
+
+### Internal
+
+- New private function in `Bond.Runtime.Eval` that prunes Bond frames from
+  the captured stack trace before raising.
+- `Bond.Compiler.AnnotatedFunction.apply_contract/1` is now
+  `apply_contract/2` taking a `contract_config` map.
+  The `__before_compile__/1` callback reads the config from a
+  `@__bond_contract_config__` module attribute set by Bond's `__using__/1`.
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.9.1] - 2026-05-21
 
 A patch release covering documentation cleanup left over from the 0.9.0

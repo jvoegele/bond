@@ -83,8 +83,7 @@ defmodule Bond.Test do
 
   defp assert_violation_ast(exception_module, call, opts) do
     quote do
-      error =
-        ExUnit.Assertions.assert_raise(unquote(exception_module), fn -> unquote(call) end)
+      error = ExUnit.Assertions.assert_raise(unquote(exception_module), fn -> unquote(call) end)
 
       Bond.Test.__verify_fields__(error, unquote(opts))
       error

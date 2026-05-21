@@ -234,7 +234,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
       unquote_splicing(doc_asts)
 
       unquote(kind)(unquote(fun)(unquote_splicing(call_params))) do
-        unquote_splicing(body_stmts)
+        (unquote_splicing(body_stmts))
       end
     end
   end

@@ -296,7 +296,7 @@ config :bond,
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.9.1"}
+    {:bond, "~> 0.10.0"}
   ]
 end
 ```
