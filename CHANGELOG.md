@@ -38,9 +38,9 @@ public API. `@pre`, `@post`, and `check/1,2` all behave the same as in 0.8.x.
 - New modules: `Bond.Compiler.AnnotatedFunction` (multi-clause function
   model), `Bond.Compiler.FunctionDefinition`, `Bond.Compiler.CompileStateFSM`
   (rewritten), `Bond.Runtime.Eval`.
-- Removed modules: `Bond.Compiler.AnnotatedFunctionClause`,
-  `Bond.Compiler.LegacyCompileStateFSM`,
-  `Bond.Compiler.define_function_with_contract/4`.
+- Removed internal modules `Bond.Compiler.AnnotatedFunctionClause` and
+  `Bond.Compiler.LegacyCompileStateFSM`, along with the
+  `define_function_with_contract/4` helper they used.
 - `Bond.Compiler.Assertion` now carries a stable random `:id` for use in
   error reporting and future internal tooling.
 

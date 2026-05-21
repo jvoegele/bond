@@ -289,7 +289,9 @@ defmodule Bond.Compiler.CompileStateFSM do
 
       {applicable_pre, remaining_pre} = split_by_line(data.precondition_defs, function_line)
       {applicable_post, remaining_post} = split_by_line(data.postcondition_defs, function_line)
-      {applicable_docs, remaining_docs} = split_doc_attrs_by_line(data.doc_attributes, function_line)
+
+      {applicable_docs, remaining_docs} =
+        split_doc_attrs_by_line(data.doc_attributes, function_line)
 
       annotated_function =
         function_def
