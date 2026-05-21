@@ -56,7 +56,7 @@ defmodule Bond.MixProject do
   defp package do
     [
       name: :bond,
-      files: ["lib", "mix.exs", "README.md", "LICENSE", "CHANGELOG.md"],
+      files: ["lib", "mix.exs", "README.md", "LICENSE", "CHANGELOG.md", ".formatter.exs"],
       maintainers: ["Jason Voegele"],
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url}
