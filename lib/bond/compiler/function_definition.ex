@@ -17,7 +17,7 @@ defmodule Bond.Compiler.FunctionDefinition do
             body: nil
 
   @type doc_attribute_value :: String.t() | Keyword.t()
-  @type doc_attribute :: {:doc, meta :: Keyword.t(), value :: doc_attribute_value()}
+  @type doc_attribute :: {meta :: Keyword.t(), value :: doc_attribute_value()}
 
   @type kind :: :def | :defp
 

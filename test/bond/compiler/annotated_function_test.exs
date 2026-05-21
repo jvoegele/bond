@@ -113,8 +113,9 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
   end
 
   describe "put_doc_attributes/2" do
-    @doc_attribute {:doc, [line: 42], "The D.O.C. and the Doctor"}
-    @doc_attribute_keyword {:doc, [line: 43],
+    @doc_string "The D.O.C. and the Doctor"
+    @doc_attribute {[line: 42], @doc_string}
+    @doc_attribute_keyword {[line: 43],
                             [artist: "The D.O.C.", title: "Portrait of a Master Piece"]}
 
     test "adds doc attributes to the annotated function", %{
@@ -136,6 +137,89 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
 
       assert annotated_function.doc_attributes == [@doc_attribute, @doc_attribute_keyword]
     end
+  end
+
+  describe "apply_contract/1" do
+    setup [:setup_assertions, :setup_annotated_functions]
+
+    test "makes original function overridable", %{
+      one_clause_annotated_function: annotated_function
+    } do
+      ast = AnnotatedFunction.apply_contract(annotated_function)
+      assert {:defoverridable, _, [[add: 2]]} = first_block_clause(ast)
+    end
+
+    test "emits a single @doc Module.put_attribute call for one-clause function",
+         %{one_clause_annotated_function: annotated_function} do
+      ast = AnnotatedFunction.apply_contract(annotated_function)
+      doc_clauses = doc_put_attribute_clauses(ast)
+
+      assert [{_line, doc}] = doc_clauses
+      assert doc =~ ~r"#{@doc_string}"
+      assert doc =~ ~r"#### Preconditions"
+      assert doc =~ ~r"requires1: x > 0"
+      assert doc =~ ~r"#### Postconditions"
+      assert doc =~ ~r"ensures1: result < x"
+    end
+
+    test "emits a @doc Module.put_attribute call per doc attribute for a multi-clause function",
+         %{two_clause_annotated_function: annotated_function} do
+      ast = AnnotatedFunction.apply_contract(annotated_function)
+      doc_clauses = doc_put_attribute_clauses(ast)
+
+      # The two-clause fixture has one string @doc and one keyword @doc.
+      assert [{_line1, string_doc}, {_line2, keyword_doc}] = doc_clauses
+      assert string_doc =~ ~r"#{@doc_string}"
+      assert string_doc =~ ~r"#### Preconditions"
+      assert keyword_doc == [artist: "The D.O.C.", title: "Portrait of a Master Piece"]
+    end
+
+    test "override clause delegates to super/1 with the first clause's params",
+         %{two_clause_annotated_function: annotated_function} do
+      ast = AnnotatedFunction.apply_contract(annotated_function)
+      override = override_def_clause(ast)
+
+      assert {:def, _, [{:new, _, [{:list, _, _}]}, [do: do_block]]} = override
+
+      code = Macro.to_string(do_block)
+      assert code =~ ~r"preconditions_fun ="
+      assert code =~ ~r"if x > 0"
+      assert code =~ ~r"Bond.Runtime.Eval.evaluate_preconditions\(preconditions_fun\)"
+      assert code =~ ~r"var!\(result\) = super\(list\)"
+      assert code =~ ~r"postconditions_fun ="
+      assert code =~ ~r"Bond.Runtime.Eval.evaluate_postconditions\(postconditions_fun\)"
+      assert code =~ ~r"var!\(result\)$"
+      assert code =~ ~r"throw.*:assertion_failure"
+      assert code =~ ~r"if result < x"
+    end
+  end
+
+  defp first_block_clause({:__block__, _, [first | _]}), do: first
+  defp first_block_clause(ast), do: ast
+
+  defp block_clauses({:__block__, _, clauses}), do: clauses
+  defp block_clauses(ast), do: [ast]
+
+  defp doc_put_attribute_clauses(ast) do
+    ast
+    |> block_clauses()
+    |> Enum.flat_map(fn
+      {{:., _, [{:__aliases__, _, [:Module]}, :put_attribute]}, _,
+       [_module, :doc, {line, value}]} ->
+        [{line, value}]
+
+      _ ->
+        []
+    end)
+  end
+
+  defp override_def_clause(ast) do
+    ast
+    |> block_clauses()
+    |> Enum.find(fn
+      {:def, _, _} -> true
+      _ -> false
+    end)
   end
 
   defp setup_function_definitions(_) do
@@ -181,5 +265,27 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
     postconditions = [Assertion.new(:postcondition, :ensures1, quote(do: result < x), __ENV__)]
 
     {:ok, preconditions: preconditions, postconditions: postconditions}
+  end
+
+  defp setup_annotated_functions(context) do
+    one_clause_annotated_function =
+      context.one_clause_function
+      |> AnnotatedFunction.new()
+      |> AnnotatedFunction.put_preconditions(context.preconditions)
+      |> AnnotatedFunction.put_postconditions(context.postconditions)
+      |> AnnotatedFunction.put_doc_attributes([@doc_attribute])
+
+    two_clause_annotated_function =
+      context.two_clause_function_clause1
+      |> AnnotatedFunction.new()
+      |> AnnotatedFunction.put_preconditions(context.preconditions)
+      |> AnnotatedFunction.put_postconditions(context.postconditions)
+      |> AnnotatedFunction.put_doc_attributes([@doc_attribute])
+      |> AnnotatedFunction.add_clause(context.two_clause_function_clause2)
+      |> AnnotatedFunction.put_doc_attributes([@doc_attribute_keyword])
+
+    {:ok,
+     one_clause_annotated_function: one_clause_annotated_function,
+     two_clause_annotated_function: two_clause_annotated_function}
   end
 end

@@ -285,35 +285,84 @@ defmodule Bond.Compiler.CompileStateFSM do
     end
 
     defp handle_new_function_def(function_def, :contracts_pending, data) do
-      annotated_function = AnnotatedFunction.new(function_def)
+      function_line = function_line(function_def)
+
+      {applicable_pre, remaining_pre} = split_by_line(data.precondition_defs, function_line)
+      {applicable_post, remaining_post} = split_by_line(data.postcondition_defs, function_line)
+      {applicable_docs, remaining_docs} = split_doc_attrs_by_line(data.doc_attributes, function_line)
 
       annotated_function =
-        annotated_function
-        |> AnnotatedFunction.put_preconditions(pending_preconditions(data))
-        |> AnnotatedFunction.put_postconditions(pending_postconditions(data))
-        |> AnnotatedFunction.put_doc_attributes(pending_doc_attributes(data))
+        function_def
+        |> AnnotatedFunction.new()
+        |> AnnotatedFunction.put_preconditions(Enum.reverse(applicable_pre))
+        |> AnnotatedFunction.put_postconditions(Enum.reverse(applicable_post))
+        |> AnnotatedFunction.put_doc_attributes(Enum.reverse(applicable_docs))
 
-      new_data = push_annotated_function(data, annotated_function)
-      {{:next_state, :no_contracts_pending}, clear_pending_contracts(new_data), :ok}
+      new_data =
+        data
+        |> Map.put(:precondition_defs, remaining_pre)
+        |> Map.put(:postcondition_defs, remaining_post)
+        |> Map.put(:doc_attributes, remaining_docs)
+        |> push_annotated_function(annotated_function)
+
+      next_state = if has_pending?(new_data), do: :contracts_pending, else: :no_contracts_pending
+      {{:next_state, next_state}, new_data, :ok}
     end
 
-    defp handle_function_clause(_function_def, :contracts_pending, _data) do
-      error =
-        {:error,
-         "cannot define contracts in between clauses of functions with the same name" <>
-           " and arity - move all @pre and @post attributes before the first clause"}
+    defp handle_function_clause(function_def, _state, data) do
+      function_line = function_line(function_def)
 
-      throw(error)
-    end
+      contracts_between_clauses? =
+        Enum.any?(data.precondition_defs, &assertion_below_line?(&1, function_line)) or
+          Enum.any?(data.postcondition_defs, &assertion_below_line?(&1, function_line)) or
+          Enum.any?(data.doc_attributes, &doc_attr_below_line?(&1, function_line))
 
-    defp handle_function_clause(function_def, :no_contracts_pending, data) do
+      if contracts_between_clauses? do
+        error =
+          {:error,
+           "cannot define contracts in between clauses of functions with the same name" <>
+             " and arity - move all @pre and @post attributes before the first clause"}
+
+        throw(error)
+      end
+
       annotated_function =
         data
         |> last_annotated_function()
         |> AnnotatedFunction.add_clause(function_def)
 
       new_data = update_last_annotated_function(data, annotated_function)
-      {:keep_state, new_data, :ok}
+      next_state = if has_pending?(new_data), do: :contracts_pending, else: :no_contracts_pending
+      {{:next_state, next_state}, new_data, :ok}
+    end
+
+    defp function_line(%FunctionDefinition{env: env}), do: env.line
+
+    # `items` is a list ordered newest-first (prepend on cast). Returns
+    # `{applicable_newest_first, remaining_newest_first}` where `applicable` are items declared
+    # on a source line strictly less than `line` and `remaining` are items at or after `line`.
+    defp split_by_line(items, line) do
+      Enum.split_with(items, &assertion_below_line?(&1, line))
+    end
+
+    defp split_doc_attrs_by_line(items, line) do
+      Enum.split_with(items, &doc_attr_below_line?(&1, line))
+    end
+
+    defp assertion_below_line?(%Bond.Compiler.Assertion{} = a, line) do
+      assertion_line(a) < line
+    end
+
+    defp assertion_line(%Bond.Compiler.Assertion{meta: meta, definition_env: env}) do
+      Keyword.get(meta || [], :line) || env.line
+    end
+
+    defp doc_attr_below_line?({meta, _value}, line) when is_list(meta) do
+      Keyword.get(meta, :line, 0) < line
+    end
+
+    defp has_pending?(data) do
+      data.precondition_defs != [] or data.postcondition_defs != [] or data.doc_attributes != []
     end
 
     defp last_annotated_function(%{annotated_function_stack: stack} = _data) do

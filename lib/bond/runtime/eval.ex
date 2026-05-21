@@ -4,6 +4,12 @@ defmodule Bond.Runtime.Eval do
   Internal helper module for runtime execution of contracts and assertions.
   """
 
+  @assertion_errors %{
+    precondition: Bond.PreconditionError,
+    postcondition: Bond.PostconditionError,
+    check: Bond.CheckError
+  }
+
   def evaluate_preconditions(preconditions_fun) do
     evaluate_assertions(preconditions_fun)
   end
@@ -17,7 +23,13 @@ defmodule Bond.Runtime.Eval do
   end
 
   defp evaluate_assertions(assertions_fun) do
-    with_recursion_check(assertions_fun)
+    try do
+      with_recursion_check(assertions_fun)
+    catch
+      {:assertion_failure, %{kind: kind} = assertion_info} ->
+        exception = Map.fetch!(@assertion_errors, kind)
+        raise exception, assertion_info
+    end
   end
 
   defp with_recursion_check(assertions_fun) do

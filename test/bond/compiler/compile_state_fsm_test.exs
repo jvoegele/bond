@@ -8,8 +8,8 @@ defmodule Bond.Compiler.CompileStateFSMTest do
   alias Bond.Compiler.CompileStateFSM, as: FSM
   alias Bond.Compiler.FunctionDefinition
 
-  @doc_attribute {:doc, [line: 42], "The D.O.C. and the Doctor"}
-  @doc_attribute_keyword {:doc, [line: 43],
+  @doc_attribute {[line: 42], "The D.O.C. and the Doctor"}
+  @doc_attribute_keyword {[line: 43],
                           [artist: "The D.O.C.", title: "Portrait of a Master Piece"]}
 
   setup do
@@ -179,8 +179,8 @@ defmodule Bond.Compiler.CompileStateFSMTest do
       assert %Assertion{kind: :postcondition, label: :ensures2} = postcondition2
 
       assert fn1.doc_attributes == [
-               {:doc, [line: 42], "The D.O.C. and the Doctor"},
-               {:doc, [line: 43], [artist: "The D.O.C.", title: "Portrait of a Master Piece"]}
+               {[line: 42], "The D.O.C. and the Doctor"},
+               {[line: 43], [artist: "The D.O.C.", title: "Portrait of a Master Piece"]}
              ]
 
       FSM.doc_attributes_applied(fsm)
@@ -208,8 +208,8 @@ defmodule Bond.Compiler.CompileStateFSMTest do
       assert %Assertion{kind: :postcondition, label: :ensures2} = postcondition2
 
       assert fn1.doc_attributes == [
-               {:doc, [line: 42], "The D.O.C. and the Doctor"},
-               {:doc, [line: 43], [artist: "The D.O.C.", title: "Portrait of a Master Piece"]}
+               {[line: 42], "The D.O.C. and the Doctor"},
+               {[line: 43], [artist: "The D.O.C.", title: "Portrait of a Master Piece"]}
              ]
 
       FSM.function_def(fsm, function_def(:fn2, [:x, :y]))

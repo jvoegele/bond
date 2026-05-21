@@ -28,10 +28,12 @@ defmodule Bond do
     Bond.Compiler.init(__CALLER__.module)
 
     quote do
-      import Kernel, except: [@: 1, def: 2, defp: 2]
+      import Kernel, except: [@: 1]
       import Bond
 
+      @on_definition Bond.Compiler
       @before_compile Bond.Compiler
+      @after_compile Bond.Compiler
     end
   end
 
@@ -81,20 +83,6 @@ defmodule Bond do
     quote do
       Kernel.@(unquote(attr))
     end
-  end
-
-  @doc """
-  Override `Kernel.def/2` to support wrapping with preconditions and postconditions.
-  """
-  defmacro def(definition, body) do
-    Bond.Compiler.define_function_with_contract(__CALLER__, definition, body, true)
-  end
-
-  @doc """
-  Override `Kernel.defp/2` to support wrapping with preconditions and postconditions.
-  """
-  defmacro defp(definition, body) do
-    Bond.Compiler.define_function_with_contract(__CALLER__, definition, body, false)
   end
 
   @doc """

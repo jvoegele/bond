@@ -2,22 +2,79 @@ defmodule Bond.Compiler do
   @moduledoc internal: true
   @moduledoc """
   Internal helper module for defining contracts for a module at compile-time.
+
+  Bond installs this module as the `@on_definition`, `@before_compile`, and `@after_compile`
+  handler for any module that does `use Bond`. As the user's module is being compiled:
+
+    * `@pre`, `@post`, and `@doc` annotations are intercepted by `Bond` and forwarded here via
+      `register_assertion/5` and `register_doc/3`. They accumulate in the per-module
+      `Bond.Compiler.CompileStateFSM` process.
+    * Every `def` and `defp` definition fires `__on_definition__/6`, which builds a
+      `Bond.Compiler.FunctionDefinition` and feeds it to the FSM. The FSM groups clauses by
+      `{module, fun, arity}` and attaches any pending preconditions/postconditions/docs to the
+      resulting `Bond.Compiler.AnnotatedFunction`.
+    * `__before_compile__/1` asks the FSM for every `AnnotatedFunction` that has a contract and
+      delegates to `AnnotatedFunction.apply_contract/1` to emit a `defoverridable` plus a
+      single override clause that wraps the original function in pre/post evaluation.
+    * `__after_compile__/2` stops the FSM process.
   """
 
+  alias Bond.Compiler.AnnotatedFunction
   alias Bond.Compiler.Assertion
-  alias Bond.Compiler.LegacyCompileStateFSM, as: FSM
-  alias Bond.Compiler.AnnotatedFunctionClause
+  alias Bond.Compiler.CompileStateFSM, as: FSM
+  alias Bond.Compiler.FunctionDefinition
 
+  # Functions Elixir auto-generates as a side effect of constructs like `defstruct` and
+  # `defexception`. These show up via `@on_definition` and must not be tracked as user
+  # contract candidates.
+  @generated_functions ~w[__struct__ __exception__ __info__]a
+
+  @doc false
   def init(module) do
-    {:ok, fsm_pid} = FSM.start_link(module)
-    Module.put_attribute(module, :_bond_fsm_pid, fsm_pid)
+    {:ok, _fsm_pid} = FSM.start_link(module)
+    :ok
   end
 
+  @doc false
+  def __on_definition__(_env, kind, _fun, _params, _guards, _body)
+      when kind in [:defmacro, :defmacrop] do
+    # Bond does not (yet) support contracts on macros.
+    :ok
+  end
+
+  def __on_definition__(_env, _kind, fun, _params, _guards, _body)
+      when fun in @generated_functions do
+    :ok
+  end
+
+  # Bodyless function heads (`def foo(x)` with no `do` block) are used purely to attach
+  # docs/specs/contracts to the clauses that follow. They don't produce executable code, so we
+  # skip them — the contracts will be picked up by the first body-bearing clause.
+  def __on_definition__(_env, kind, _fun, _params, _guards, nil) when kind in [:def, :defp] do
+    :ok
+  end
+
+  def __on_definition__(env, kind, fun, params, guards, body) when kind in [:def, :defp] do
+    function_def = FunctionDefinition.new(env, kind, fun, params, guards, body)
+    FSM.function_def(fsm(env), function_def)
+  end
+
+  @doc false
   defmacro __before_compile__(%Macro.Env{} = env) do
-    FSM.stop(fsm(env))
-    Module.delete_attribute(env.module, :_bond_fsm_pid)
+    :ok = FSM.module_defined(fsm(env))
+
+    fsm(env)
+    |> FSM.annotated_functions()
+    |> Enum.filter(&AnnotatedFunction.override?/1)
+    |> Enum.map(&AnnotatedFunction.apply_contract/1)
   end
 
+  @doc false
+  def __after_compile__(env, _bytecode) do
+    FSM.stop(fsm(env))
+  end
+
+  @doc false
   def register_assertion(:pre, expression, label, env, meta) do
     register_assertion(:precondition, expression, label, env, meta)
   end
@@ -38,89 +95,17 @@ defmodule Bond.Compiler do
     apply(FSM, fsm_event, [fsm(env), assertion])
   end
 
+  @doc false
   def register_doc(env, meta, value) do
     FSM.doc_attribute(fsm(env), {meta, value})
   end
 
+  @doc false
   def check_assertion(expression, label, env, meta) do
-    check = Bond.Compiler.Assertion.new(:check, label, expression, env, meta)
-    Bond.Compiler.Assertion.quoted_eval(check)
+    check = Assertion.new(:check, label, expression, env, meta)
+    Assertion.quoted_eval(check)
   end
 
-  def define_function_with_contract(env, definition, body, public?) do
-    fsm = fsm(env)
-    function = AnnotatedFunctionClause.new(env, definition, body)
-    FSM.function_def(fsm, definition)
-
-    preconditions = FSM.pending_preconditions(fsm)
-    postconditions = FSM.pending_postconditions(fsm)
-
-    docs = append_contract_docs(FSM.pending_doc_attributes(fsm), preconditions, postconditions)
-
-    function = AnnotatedFunctionClause.apply_contract(function, preconditions, postconditions)
-    body_with_contracts = function.body_ast
-
-    result =
-      if public? do
-        quote do
-          Enum.each(unquote(docs), fn {meta, doc} ->
-            Module.put_attribute(__MODULE__, :doc, {meta[:line], doc})
-          end)
-
-          Kernel.def(unquote(definition), unquote(body_with_contracts))
-        end
-      else
-        quote do
-          Kernel.defp(unquote(definition), unquote(body_with_contracts))
-        end
-      end
-
-    FSM.doc_attributes_applied(fsm)
-    result
-  end
-
-  defp append_contract_docs([], _preconditions, _postconditions), do: []
-
-  defp append_contract_docs(function_docs, preconditions, postconditions) do
-    precondition_docs = generate_docs(preconditions, header: "#### Preconditions")
-    postcondition_docs = generate_docs(postconditions, header: "#### Postconditions")
-
-    contract_docs =
-      case {Enum.empty?(precondition_docs), Enum.empty?(postcondition_docs)} do
-        {true, true} -> []
-        {true, false} -> postcondition_docs
-        {false, true} -> precondition_docs
-        {false, false} -> [precondition_docs, "\n\n", postcondition_docs]
-      end
-
-    Enum.map(function_docs, fn
-      {meta, doc} when is_binary(doc) ->
-        doc_iodata = [doc, contract_docs]
-        {meta, IO.iodata_to_binary(doc_iodata)}
-
-      {meta, keyword} when is_list(keyword) ->
-        {meta, keyword}
-    end)
-  end
-
-  defp generate_docs([], _), do: []
-
-  defp generate_docs(assertions, opts) do
-    header = if header = opts[:header], do: header <> "\n\n", else: ""
-
-    assertions
-    |> Enum.reduce([], fn
-      %{label: nil, code: code}, acc ->
-        [code | acc]
-
-      assertion, acc ->
-        label = assertion.label |> inspect() |> String.trim_leading(":")
-        [[label, ": ", assertion.code] | acc]
-    end)
-    |> Enum.reverse()
-    |> List.insert_at(0, header)
-    |> Enum.intersperse("\n    ")
-  end
-
-  defp fsm(%Macro.Env{module: module}), do: Module.get_attribute(module, :_bond_fsm_pid)
+  @spec fsm(Macro.Env.t()) :: FSM.server_ref()
+  defp fsm(%Macro.Env{module: module}), do: FSM.server_ref(module)
 end
