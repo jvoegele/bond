@@ -50,18 +50,10 @@ defmodule BondTest.MathTest do
 
       assert error.label == :non_negative_x
       assert error.expression == "x >= 0"
-      assert %Bond.Env{} = assertion_env = error.assertion_env
-      assert assertion_env.module == BondTest.Math
-      assert is_nil(assertion_env.function)
-      assert assertion_env.file =~ ~r{/bond_test/math.ex$}
-
-      assert %Bond.Env{} = function_env = error.function_env
-      assert function_env.module == BondTest.Math
-      assert function_env.function == {:sqrt, 2}
-
-      assert function_env.module == assertion_env.module
-      assert function_env.file == assertion_env.file
-      assert function_env.line > assertion_env.line
+      assert error.file =~ ~r{/bond_test/math.ex$}
+      assert is_integer(error.line)
+      assert error.module == BondTest.Math
+      assert error.function == {:sqrt, 2}
     end
 
     test "raises PostconditionError when result is not a float" do
