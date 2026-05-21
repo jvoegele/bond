@@ -70,6 +70,7 @@ defmodule Bond.MixProject do
         {"LICENSE", [title: "License"]},
         "CHANGELOG.md",
         "guides/getting-started.md",
+        "guides/faq.md",
         "guides/about.md",
         "guides/history.md",
         "guides/contracts-and-concurrency.md"

@@ -1,26 +1,75 @@
 # Getting Started
 
-This guide provides installation and basic usage information for getting started
-quickly with Bond.
+This guide walks you through adding Bond to a project, writing your first
+contract, and the most common patterns you'll encounter.
 
-Refer to the `Bond` module docs for detailed usage instructions and examples.
+For full reference material see the `Bond` module docs.
 
 ## Installation
 
-`bond` can be installed by adding it to your list of dependencies in `mix.exs`:
+Add `bond` to your dependencies in `mix.exs`:
 
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.9.1"}
+    {:bond, "~> 0.10.0"}
   ]
 end
 ```
 
-## Quick start
+Then run `mix deps.get`.
 
-Use Bond to define preconditions and postconditions (collectively referred to as
-"contracts") to functions.
+## Your first contract
+
+`use Bond` in any module to enable `@pre`, `@post`, and `check/1,2`. Add a
+precondition before a function definition:
+
+```elixir
+defmodule Calculator do
+  use Bond
+
+  @pre is_number(x)
+  def square(x), do: x * x
+end
+```
+
+`Calculator.square(2)` returns `4` as expected. `Calculator.square("two")`
+raises `Bond.PreconditionError` with a message that points at the failing
+assertion:
+
+```text
+** (Bond.PreconditionError) precondition failed for call to Calculator.square/1
+|   at: lib/calculator.ex:4
+|   label: nil
+|   assertion: is_number(x)
+|   binding: [x: "two"]
+```
+
+## Adding a postcondition
+
+Postconditions are evaluated after the function body. They have access to
+the function's parameters plus a `result` variable bound to the return
+value:
+
+```elixir
+defmodule Account do
+  use Bond
+
+  @pre amount > 0
+  @post result >= 0
+  def withdraw(balance, amount), do: balance - amount
+end
+```
+
+`Account.withdraw(100, 30)` returns `70`. `Account.withdraw(20, 50)` raises
+`Bond.PostconditionError` — the function returned a negative balance, which
+the postcondition forbids.
+
+## Labelled assertions
+
+A single `@pre` or `@post` may contain multiple labelled assertions as a
+keyword list. Labels appear in error messages so it's easy to identify
+which assertion failed:
 
 ```elixir
 defmodule Math do
@@ -28,10 +77,120 @@ defmodule Math do
 
   @pre numeric_x: is_number(x), non_negative_x: x >= 0
   @post float_result: is_float(result),
-        non_negative_result: result >= 0.0,
-        "sqrt of 0 is 0": (x == 0) ~> (result === 0.0),
-        "sqrt of 1 is 1": (x == 1) ~> (result === 1.0),
-        "x > 1 implies result smaller than x": (x > 1) ~> (result < x)
+        non_negative_result: result >= 0.0
   def sqrt(x), do: :math.sqrt(x)
 end
 ```
+
+Labels can be atoms (when they're valid Elixir identifiers) or strings (for
+phrases with spaces or punctuation):
+
+```elixir
+@post "result is integer or zero": is_integer(result) or result == 0
+```
+
+## Predicates and operators
+
+The `Bond.Predicates` module is automatically imported inside assertion
+expressions. Two operators are especially useful in contracts:
+
+- `~>` — logical implication. `(p ~> q)` means "if `p` then `q`".
+- `<~` — pattern match. `(pattern <~ expression)` is `match?(pattern, expression)`.
+
+```elixir
+@post "sqrt of 0 is 0": (x == 0) ~> (result === 0.0)
+@post {:ok, _} <~ result
+```
+
+See `Bond.Predicates` for the complete list.
+
+## `old` expressions in postconditions
+
+For functions that mutate state, a postcondition often needs to compare the
+*new* state to the *old* state. The `old/1` macro snapshots a value before
+the function body runs:
+
+```elixir
+defmodule Counter do
+  use Bond
+  use Agent
+
+  def start_link(initial), do: Agent.start_link(fn -> initial end)
+  def get(agent), do: Agent.get(agent, & &1)
+
+  @post incremented: get(agent) == old(get(agent)) + 1
+  def increment(agent), do: Agent.update(agent, &(&1 + 1))
+end
+```
+
+See the [Contracts in a Concurrent World](contracts-and-concurrency.md)
+guide for the subtleties of using `old` with stateful, concurrent code.
+
+## Inline checks
+
+For sanity checks inside a function body, use `check/1` or `check/2`:
+
+```elixir
+def total(items) do
+  raw = Enum.sum(items)
+
+  check raw >= 0
+  check "total is integer", is_integer(raw)
+
+  raw
+end
+```
+
+> #### `check` is for development confidence, not validation {: .warning}
+>
+> Don't use `check` for input validation or anything else that protects the
+> integrity of your code — it can be compiled out entirely (see below).
+
+## Disabling contracts in production
+
+Bond reads three application-config keys at compile time:
+
+```elixir
+# config/prod.exs
+config :bond,
+  preconditions: false,
+  postconditions: false,
+  checks: false
+```
+
+Each defaults to `true`. When set to `false`, the corresponding contracts
+are not evaluated at runtime. When both `:preconditions` and
+`:postconditions` are disabled for a function, Bond emits no override at
+all — the function runs exactly as you wrote it, with zero overhead.
+
+See the `Bond` moduledoc's "Conditional compilation" section for more.
+
+## Testing contract violations
+
+For testing that a contract IS raised (or that a specific contract isn't),
+`Bond.Test` provides ExUnit helpers:
+
+```elixir
+defmodule MyAppTest do
+  use ExUnit.Case
+  use Bond.Test
+
+  alias MyApp.Math
+
+  test "sqrt rejects negative input" do
+    assert_precondition_violation(Math.sqrt(-1), label: :non_negative_x)
+  end
+end
+```
+
+See `Bond.Test` for `assert_precondition_violation/2`,
+`assert_postcondition_violation/2`, and `assert_check_violation/2`.
+
+## Next steps
+
+- The `Bond` moduledoc has the full reference.
+- The [Contracts in a Concurrent World](contracts-and-concurrency.md) guide
+  covers `old`, race conditions, and how to design contracts for stateful
+  processes.
+- The [FAQ](faq.md) answers common questions: "why contracts when I have
+  ExUnit?", "how does Bond compare to Norm?", and so on.
