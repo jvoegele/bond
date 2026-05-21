@@ -28,6 +28,17 @@ defmodule Bond.Compiler.AnnotatedFunction do
             postconditions: [],
             doc_attributes: []
 
+  @type t :: %__MODULE__{
+          kind: :def | :defp | nil,
+          module: module() | nil,
+          fun: atom() | nil,
+          arity: non_neg_integer() | nil,
+          clauses: [__MODULE__.Clause.t()],
+          preconditions: [Bond.Compiler.Assertion.t()],
+          postconditions: [Bond.Compiler.Assertion.t()],
+          doc_attributes: [FunctionDefinition.doc_attribute()]
+        }
+
   defmodule Clause do
     @moduledoc internal: true
     @moduledoc """
@@ -37,6 +48,13 @@ defmodule Bond.Compiler.AnnotatedFunction do
     alias Bond.Compiler.FunctionDefinition
 
     defstruct [:env, :params, :guards, :body]
+
+    @type t :: %__MODULE__{
+            env: Macro.Env.t() | nil,
+            params: list() | nil,
+            guards: list() | nil,
+            body: keyword() | nil
+          }
 
     def new(%FunctionDefinition{} = function_def) do
       struct(__MODULE__, Map.take(function_def, [:env, :params, :guards, :body]))
@@ -105,31 +123,77 @@ defmodule Bond.Compiler.AnnotatedFunction do
     has_preconditions?(annotated_function) or has_postconditions?(annotated_function)
   end
 
-  @doc """
-  Returns a quoted expression that wraps the annotated function with its contract.
+  @typedoc """
+  Configuration controlling which kinds of contracts are emitted by `apply_contract/2`.
 
-  The expression contains three things:
+  Used by `Bond.Compiler.__before_compile__/1` to honour the `:bond` application config keys
+  `:preconditions` and `:postconditions`. Either flag set to `false` causes the corresponding
+  evaluation to be omitted from the override clause and the corresponding section to be
+  omitted from the auto-generated documentation.
+  """
+  @type contract_config :: %{
+          required(:preconditions) => boolean(),
+          required(:postconditions) => boolean()
+        }
+
+  @doc """
+  Returns a quoted expression that wraps the annotated function with its contract, or `nil`
+  when nothing needs to be emitted.
+
+  The default `config` enables both preconditions and postconditions, matching pre-0.10.0
+  behaviour. Setting either flag to `false` suppresses the corresponding piece of the
+  override:
+
+    * `preconditions: false` — the override clause does not build or call the preconditions
+      function, and the `#### Preconditions` section is omitted from the auto-generated docs.
+    * `postconditions: false` — the override clause does not build or call the postconditions
+      function, and the `#### Postconditions` section is omitted from the auto-generated docs.
+    * Both `false` (or the function has neither pre- nor postconditions) — returns `nil`. The
+      caller should filter `nil`s out and not emit anything for this function. The user's
+      original `def`/`defp` runs as written, with no docs added by Bond (Bond intercepts
+      `@doc` and only emits it back via the override path).
+
+  When an override clause IS emitted, the expression contains three things:
 
     1. A `defoverridable` declaration making the function overridable.
     2. Zero or more `@doc` clauses re-emitting any `@doc` attributes the user attached to the
        function. Any string-valued doc has the auto-generated "Preconditions" and
-       "Postconditions" sections appended. If the function has contracts but no user-supplied
-       string `@doc`, a synthetic `@doc` containing just the contract documentation is added.
+       "Postconditions" sections appended (filtered by `config`). If the function has
+       contracts but no user-supplied string `@doc`, a synthetic `@doc` containing just the
+       contract documentation is added.
     3. A single override clause for the function that:
 
          * builds a fn evaluating the preconditions and calls
-           `Bond.Runtime.Eval.evaluate_preconditions/1`,
+           `Bond.Runtime.Eval.evaluate_preconditions/1` (skipped if
+           `preconditions: false`),
          * resolves any `old(...)` expressions found in the postconditions into local bindings,
          * delegates to the original implementation via `super(...)`, capturing the result,
          * builds a fn evaluating the postconditions and calls
-           `Bond.Runtime.Eval.evaluate_postconditions/1`,
+           `Bond.Runtime.Eval.evaluate_postconditions/1` (skipped if
+           `postconditions: false`),
          * returns the captured result.
 
   The override clause uses the parameter names from the function's first clause. For
   multi-clause functions Elixir's normal pattern matching applies inside `super(...)`, so a
   single wrapper clause covers every original clause.
   """
-  def apply_contract(%__MODULE__{kind: kind, fun: fun, arity: arity} = annotated_function) do
+  @spec apply_contract(t(), contract_config()) :: Macro.t() | nil
+  def apply_contract(annotated_function, config \\ %{preconditions: true, postconditions: true})
+
+  def apply_contract(%__MODULE__{} = annotated_function, config) do
+    emit_pre? = Map.fetch!(config, :preconditions) and has_preconditions?(annotated_function)
+    emit_post? = Map.fetch!(config, :postconditions) and has_postconditions?(annotated_function)
+
+    if emit_pre? or emit_post? do
+      build_contract_override(annotated_function, emit_pre?, emit_post?)
+    end
+  end
+
+  defp build_contract_override(
+         %__MODULE__{kind: kind, fun: fun, arity: arity} = annotated_function,
+         emit_pre?,
+         emit_post?
+       ) do
     first_clause = List.first(annotated_function.clauses)
     function_info = {fun, arity}
 
@@ -143,11 +207,26 @@ defmodule Bond.Compiler.AnnotatedFunction do
     old_resolved_ast = OldExpression.resolve(old_context)
 
     preconditions_fun_ast =
-      Assertion.create_assertions_function(annotated_function.preconditions, function_info)
+      if emit_pre? do
+        Assertion.create_assertions_function(annotated_function.preconditions, function_info)
+      end
 
-    postconditions_fun_ast = Assertion.create_assertions_function(postconditions, function_info)
+    postconditions_fun_ast =
+      if emit_post? do
+        Assertion.create_assertions_function(postconditions, function_info)
+      end
 
-    doc_asts = doc_clauses(annotated_function, first_clause.env)
+    doc_asts = doc_clauses(annotated_function, first_clause.env, emit_pre?, emit_post?)
+
+    body_stmts =
+      build_override_body(
+        call_params,
+        preconditions_fun_ast,
+        postconditions_fun_ast,
+        old_resolved_ast,
+        emit_pre?,
+        emit_post?
+      )
 
     quote file: first_clause.env.file, line: first_clause.env.line do
       defoverridable([{unquote(fun), unquote(arity)}])
@@ -155,19 +234,44 @@ defmodule Bond.Compiler.AnnotatedFunction do
       unquote_splicing(doc_asts)
 
       unquote(kind)(unquote(fun)(unquote_splicing(call_params))) do
-        preconditions_fun = unquote(preconditions_fun_ast)
-        Bond.Runtime.Eval.evaluate_preconditions(preconditions_fun)
-
-        unquote(old_resolved_ast)
-
-        var!(result) = super(unquote_splicing(call_params))
-
-        postconditions_fun = unquote(postconditions_fun_ast)
-        Bond.Runtime.Eval.evaluate_postconditions(postconditions_fun)
-
-        var!(result)
+        (unquote_splicing(body_stmts))
       end
     end
+  end
+
+  defp build_override_body(
+         call_params,
+         preconditions_fun_ast,
+         postconditions_fun_ast,
+         old_resolved_ast,
+         emit_pre?,
+         emit_post?
+       ) do
+    pre_stmts =
+      if emit_pre? do
+        [
+          quote(do: preconditions_fun = unquote(preconditions_fun_ast)),
+          quote(do: Bond.Runtime.Eval.evaluate_preconditions(preconditions_fun))
+        ]
+      else
+        []
+      end
+
+    super_call = quote(do: var!(result) = super(unquote_splicing(call_params)))
+
+    post_stmts =
+      if emit_post? do
+        [
+          quote(do: postconditions_fun = unquote(postconditions_fun_ast)),
+          quote(do: Bond.Runtime.Eval.evaluate_postconditions(postconditions_fun))
+        ]
+      else
+        []
+      end
+
+    return_stmt = quote(do: var!(result))
+
+    pre_stmts ++ [old_resolved_ast, super_call] ++ post_stmts ++ [return_stmt]
   end
 
   defp strip_default_args(params) do
@@ -177,8 +281,13 @@ defmodule Bond.Compiler.AnnotatedFunction do
     end)
   end
 
-  defp doc_clauses(%__MODULE__{doc_attributes: doc_attributes} = annotated_function, env) do
-    contract_docs = build_contract_docs(annotated_function)
+  defp doc_clauses(
+         %__MODULE__{doc_attributes: doc_attributes} = annotated_function,
+         env,
+         emit_pre?,
+         emit_post?
+       ) do
+    contract_docs = build_contract_docs(annotated_function, emit_pre?, emit_post?)
 
     has_string_doc? = Enum.any?(doc_attributes, fn {_meta, value} -> is_binary(value) end)
 
@@ -211,12 +320,20 @@ defmodule Bond.Compiler.AnnotatedFunction do
     end
   end
 
-  defp build_contract_docs(%__MODULE__{
-         preconditions: preconditions,
-         postconditions: postconditions
-       }) do
-    precondition_docs = generate_assertion_docs(preconditions, header: "#### Preconditions")
-    postcondition_docs = generate_assertion_docs(postconditions, header: "#### Postconditions")
+  defp build_contract_docs(
+         %__MODULE__{preconditions: preconditions, postconditions: postconditions},
+         emit_pre?,
+         emit_post?
+       ) do
+    precondition_docs =
+      if emit_pre?,
+        do: generate_assertion_docs(preconditions, header: "#### Preconditions"),
+        else: []
+
+    postcondition_docs =
+      if emit_post?,
+        do: generate_assertion_docs(postconditions, header: "#### Postconditions"),
+        else: []
 
     contract_iodata =
       case {Enum.empty?(precondition_docs), Enum.empty?(postcondition_docs)} do

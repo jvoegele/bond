@@ -4,54 +4,36 @@
 
 Design By Contract for Elixir.
 
-Bond provides thorough support for contract programming (also known as
-"Design By Contract") for Elixir.
+Bond lets you attach preconditions and postconditions to your functions and
+verify them at runtime. A contract is a plain Elixir boolean expression with
+optional labels:
 
-As described on [Wikipedia](https://en.wikipedia.org/wiki/Design_by_contract):
+```elixir
+defmodule Account do
+  use Bond
 
-> Design by contract (DbC), also known as contract programming, programming by
-> contract and design-by-contract programming, is an approach for designing
-> software.
->
-> It prescribes that software designers should define formal, precise and
-> verifiable interface specifications for software components, which extend the
-> ordinary definition of
-> [abstract data types](https://en.wikipedia.org/wiki/Abstract_data_type) with
-> preconditions, postconditions and invariants. These specifications are referred
-> to as "contracts", in accordance with a conceptual metaphor with the conditions
-> and obligations of business contracts.
->
-> The term was coined by
-> [Bertrand Meyer](https://en.wikipedia.org/wiki/Bertrand_Meyer) in connection
-> with his design of the
-> [Eiffel programming language](https://en.wikipedia.org/wiki/Eiffel_(programming_language))
-> and first described in various articles starting in 1986 and the two successive
-> editions (1988, 1997) of his book
-> [_Object-Oriented Software Construction_](https://en.wikipedia.org/wiki/Object-Oriented_Software_Construction).
->
-> Design by contract has its roots in work on
-> [formal verification](https://en.wikipedia.org/wiki/Formal_verification),
-> [formal specification](https://en.wikipedia.org/wiki/Formal_specification) and
-> [Hoare logic](https://en.wikipedia.org/wiki/Hoare_logic).
+  @pre positive_amount: amount > 0
+  @post non_negative_balance: result >= 0
+  def withdraw(balance, amount), do: balance - amount
+end
+```
 
-Bond applies the central ideas of contract programming to Elixir and provides
-support for attaching preconditions and postconditions to function definitions
-and conditionally evaluating them based on compile-time configuration.
+When a contract fails, Bond raises a `Bond.PreconditionError` or
+`Bond.PostconditionError` with the failing assertion's label, expression,
+location, and the local binding — telling you exactly what went wrong and
+where.
+
+Bond is an implementation of the
+[Design By Contract](https://en.wikipedia.org/wiki/Design_by_contract)
+methodology (also called _programming by contract_), introduced by Bertrand
+Meyer with the Eiffel language. See the
+[About](guides/about.md) guide for background.
 
 ## Usage
 
-Bond introduces two special annotations that can be used to define
-contracts for functions:
-
-- `@pre` for defining function _preconditions_
-- `@post` for defining function _postconditions_
-
-Both of these annotations allow for attaching one or more assertions (with
-optional labels) to functions. These assertions are attached to functions at
-compile-time and evaluated at run-time.
-
-To use these annotations and other features of Bond, you must `use` the `Bond`
-module in your own module(s). For example:
+`use Bond` in any module to enable the `@pre`, `@post`, `check/1`, and
+`check/2` annotations. Contracts may use any Elixir expression that returns
+a boolean (or a truthy value).
 
 ```elixir
 defmodule Math do
@@ -67,31 +49,24 @@ defmodule Math do
 end
 ```
 
-The simple example above demonstrates how to define assertions in preconditions
-and postconditions. Assertions are simple boolean expressions, which have
-access to the bindings of the function that they precede. Assertions may have
-optional labels associated with them to aid in interpretation, either by human
-readers of the source code or in debugging assertion failures.
-
-There are several variants of the syntax for assertions
-described in the section [Assertion syntax](#module-assertion-syntax) below.
-
-Assertions are evaluated at run-time; preconditions are evaluated prior to
-execution of the function body while postconditions are evaluated after
-the function, given that the function exits normally. Both preconditions and
-postconditions have access to the parameters of the function. Postconditions
-additionally have access to the `result` variable, which is bound to the result
-of the function, as well as `old` expressions (discussed in
+`@pre` and `@post` accept one or more labelled assertions. Preconditions
+have access to the function's parameters; postconditions also have access
+to the `result` variable (bound to the function's return value) and
+`old(...)` expressions that snapshot a value before the function runs (see
 [`old` expressions](#module-old-expressions) below).
 
-Finally, `Bond` also provides a `check/1` macro that can be used to place
-assertions at arbitrary points in the code. This facility can be used as a form
-of "sanity check" to verify that assumptions (about the state of the system or
-results of calculations, for example) hold true. Note, however, that these
-checks should not be used for verifying input data, data from external
-systems, or for any purpose for which if the check were removed it would
-compromise the integrity of the system. This is particularly true if these
-checks can be disabled via configuration.
+Bond also provides a `check/1,2` macro for placing assertions at arbitrary
+points inside a function body — useful for sanity checks during development.
+`check` honours the `:bond, :checks` config (see
+[Conditional compilation](#module-conditional-compilation)) and is safe to
+disable in production builds.
+
+> #### When to use `check` {: .warning}
+>
+> Don't use `check` for input validation, validating data from external
+> systems, or anything else that protects the integrity of your code. If
+> the check were removed (or compiled out via config), the system must still
+> behave correctly. Use ordinary control flow for that.
 
 > #### `use Bond` {: .info}
 >
@@ -109,24 +84,48 @@ checks can be disabled via configuration.
 
 ## Assertion syntax
 
-Assertions in Bond are conditional Elixir expressions, optionally associated
-with a textual label (either an atom or a string). These assertions may appear
-in `@pre` or `@post` expressions, or in calls to `check/1` or `check/2`.
+An assertion is a boolean (or truthy) Elixir expression, optionally paired
+with a label. Labels are atoms or strings; they appear in error messages
+and generated documentation.
 
-Bond offers considerable flexibility in its assertion syntax; assertions may
-take any of the following forms:
+The recommended form is the **keyword list**, even for a single assertion:
 
-- `expression` - a "bare" expression without any associated label
-- `label, expression` - an expression preceded by a string or atom label
-- `expression, label` - an expression followed by a string or atom label
-- `label_1: expression_1, label_2: expression_2` - a keyword list with labels as
-  the keys and expressions as the associated values
+```elixir
+@pre positive_x: x > 0
+@post non_decreasing: result >= old(result)
+@pre numeric_x: is_number(x), non_negative_x: x >= 0
+```
 
-Bond also provides the `Bond.Predicates` module with predicates that are often
-useful in assertions. These include an "exclusive or" predicate and a logical
-implication predicate. The `Bond.Predicates` module is automatically imported
-for preconditions, postconditions, and `check` assertions. See the
-`Bond.Predicates` documentation for further details.
+For a bare assertion where a label adds no information, the **bare form** is
+also fine:
+
+```elixir
+@pre is_number(x)
+@post is_float(result)
+```
+
+For symmetry with ExUnit's `assert(value, message)` and `assert message, value`
+patterns, the `check/2` macro also accepts a label before or after the
+expression:
+
+```elixir
+check is_number(x)
+check x_is_number: is_number(x)
+check "x is a number", is_number(x)
+check is_number(x), "x is a number"
+```
+
+Bond also provides the `Bond.Predicates` module with operators that are often
+useful in assertions — notably `~>` (logical implication) and `<~` (pattern
+match). `Bond.Predicates` is automatically imported into assertion
+expressions, so you can use these operators directly:
+
+```elixir
+@post (x == 0) ~> (result == 0.0)
+@post {:ok, _} <~ result
+```
+
+See `Bond.Predicates` for the full list.
 
 ## `old` expressions
 
@@ -219,24 +218,74 @@ this is still a subject of research.
 
 ## Documenting contracts
 
-Contracts in the form of preconditions and postconditions are part of the
-public interface for a module in the same way that function signatures and
-typespecs are. Therefore, it is essential that contracts are included as part
-of the documentation for modules and functions.
+Contracts are part of a module's public interface, in the same way that
+function signatures and typespecs are. Bond treats them that way: every
+function with a contract gets a `#### Preconditions` and/or
+`#### Postconditions` section appended to its `@doc`, formatted as the
+original assertion source. The sections appear in `ex_doc` output and in
+editors that show function docs on hover (VS Code, Vim's `K`, etc.).
 
-Bond automatically appends `Preconditions` and `Postconditions` sections to the
-documentation for any function that defines any preconditions or postconditions
-and has a `@doc` attribute. These two generated sections include all of the
-assertions specified in the function contract as nicely formatted Elixir code.
-Furthermore, contract documentation is generated even if run-time assertion
-checking is disabled via configuration. Therefore, it is not necessary to
-explicitly document preconditions or postconditions in the `@doc` for a
-function unless greater detail is warranted.
+Auto-generated contract sections appear whether or not you wrote a `@doc`
+yourself — Bond synthesises one when needed.
 
-The contract documentation is visible not only in documentation generated by
-`ex_doc` but also in code editing environments that are able to display
-function docs directly in the editor, such as with the `K` command in Vim or
-on mouse hover in VS Code.
+> #### Conditional compilation and docs {: .info}
+>
+> When a function has **all** of its contracts compile-disabled (see
+> [Conditional compilation](#module-conditional-compilation)), the function
+> runs with zero contract overhead and its auto-generated contract sections
+> are also suppressed. If you want the contract documentation visible in
+> production builds, leave at least one of `:preconditions` or
+> `:postconditions` enabled, or write an explicit `@doc` for the function.
+
+## Conditional compilation
+
+Contracts are evaluated on every call by default. For hot paths or
+production builds you can compile contracts out entirely via three
+application-config keys, read at compile time:
+
+```elixir
+# config/prod.exs
+config :bond,
+  preconditions: false,
+  postconditions: false,
+  checks: false
+```
+
+Each key defaults to `true`. When set to `false`:
+
+- `:preconditions` — `@pre` evaluation is omitted from generated override
+  clauses, and the `#### Preconditions` section is omitted from the
+  auto-generated docs.
+- `:postconditions` — same for `@post`.
+- `:checks` — every `check/1,2` macro call expands to `:ok` and the wrapped
+  expression is **not evaluated**. Don't put side effects inside `check`.
+
+When **both** `:preconditions` and `:postconditions` are disabled for a
+function, Bond emits no override clause at all. The function runs exactly
+as you wrote it, with no per-call overhead.
+
+Because `Application.compile_env/3` is used to read the config, changing
+these values requires recompilation (`mix deps.compile bond --force`, or in
+practice `MIX_ENV=prod mix compile --force`). The Elixir compiler tracks
+the dependency for you in normal incremental builds.
+
+A typical pattern: enable contracts in dev and test, disable in prod.
+
+```elixir
+# config/config.exs
+import Config
+
+# Default: everything enabled.
+# Specific environments may override below.
+
+# config/prod.exs
+import Config
+
+config :bond,
+  preconditions: false,
+  postconditions: false,
+  checks: false
+```
 
 <!-- README END -->
 
@@ -247,7 +296,7 @@ on mouse hover in VS Code.
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.9.1"}
+    {:bond, "~> 0.10.0"}
   ]
 end
 ```

@@ -64,8 +64,15 @@ defmodule Bond.AssertionError do
     #{headline}
     #{location_line}|   label: #{inspect(error.label)}
     |   assertion: #{error.expression}
-    |   binding: #{inspect(error.binding)}
+    |   binding: #{format_binding(error.binding)}
     """
+  end
+
+  # The binding can include arbitrary user values — large structs, deep maps, big lists. Use
+  # `inspect/2` with conservative `limit`/`printable_limit` defaults so the failure message
+  # stays readable for both small bindings (`[x: -1]`) and giant ones.
+  defp format_binding(binding) do
+    inspect(binding, pretty: true, limit: 20, printable_limit: 200, width: 80)
   end
 end
 

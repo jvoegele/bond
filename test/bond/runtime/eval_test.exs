@@ -57,6 +57,34 @@ defmodule Bond.Runtime.EvalTest do
     end
   end
 
+  describe "stack trace pruning" do
+    test "raised exception's stack trace contains no Bond.* frames" do
+      info = %{@info | kind: :precondition}
+
+      stacktrace =
+        try do
+          Eval.evaluate_preconditions(fn -> throw({:assertion_failure, info}) end)
+          flunk("expected raise")
+        rescue
+          _ -> __STACKTRACE__
+        end
+
+      bond_frames =
+        Enum.filter(stacktrace, fn
+          {module, _fun, _arity, _loc} when is_atom(module) ->
+            module_name = Atom.to_string(module)
+
+            module_name == "Elixir.Bond" or
+              String.starts_with?(module_name, "Elixir.Bond.")
+
+          _ ->
+            false
+        end)
+
+      assert bond_frames == [], "expected no Bond.* frames, got: #{inspect(bond_frames)}"
+    end
+  end
+
   describe "Assertion Evaluation Rule (recursion guard)" do
     test "does not invoke the inner assertions function when already evaluating" do
       ref = make_ref()

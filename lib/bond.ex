@@ -28,6 +28,17 @@ defmodule Bond do
     Bond.Compiler.init(__CALLER__.module)
 
     quote do
+      # Read the `:bond` application config in the *user's* module body so
+      # `Application.compile_env/3` works (it cannot be called inside a macro/function body,
+      # only in a module body) and so the compile-env dependency is correctly tracked for
+      # recompilation. `Bond.Compiler.__before_compile__/1` reads this attribute back to
+      # decide which contracts to emit.
+      @__bond_contract_config__ %{
+        preconditions: Application.compile_env(:bond, :preconditions, true),
+        postconditions: Application.compile_env(:bond, :postconditions, true),
+        checks: Application.compile_env(:bond, :checks, true)
+      }
+
       import Kernel, except: [@: 1]
       import Bond
 
@@ -103,19 +114,34 @@ defmodule Bond do
       [true]
       iex> check "1 is 1": 1 == 1, "2 is 2": 2 == 2
       [true, true]
+
+  > #### Conditional compilation {: .info}
+  >
+  > `check` honours the `:bond, :checks` application config. When set to `false`, every `check`
+  > call in modules that `use Bond` expands to `:ok` and the wrapped expression is **not
+  > evaluated** at all. Don't rely on side effects inside `check` expressions, and don't rely
+  > on the return value of `check` if your build may have checks disabled.
   """
   @spec check(assertion_expression()) :: as_boolean(any())
   @spec check(Keyword.t(assertion_expression())) :: list(as_boolean(any()))
   defmacro check(assertion_or_list_of_assertions)
 
   defmacro check(keyword_list) when is_list(keyword_list) do
-    for {label, {_, meta, _} = expression} <- keyword_list do
-      Bond.Compiler.check_assertion(expression, label, __CALLER__, meta)
+    if checks_enabled?(__CALLER__.module) do
+      for {label, {_, meta, _} = expression} <- keyword_list do
+        Bond.Compiler.check_assertion(expression, label, __CALLER__, meta)
+      end
+    else
+      :ok
     end
   end
 
   defmacro check({_, meta, _} = expression) do
-    Bond.Compiler.check_assertion(expression, nil, __CALLER__, meta)
+    if checks_enabled?(__CALLER__.module) do
+      Bond.Compiler.check_assertion(expression, nil, __CALLER__, meta)
+    else
+      :ok
+    end
   end
 
   @doc """
@@ -127,11 +153,29 @@ defmodule Bond do
 
   @spec check(assertion_label(), assertion_expression()) :: as_boolean(any())
   defmacro check(label, {_, meta, _} = expression) when is_atom(label) or is_binary(label) do
-    Bond.Compiler.check_assertion(expression, label, __CALLER__, meta)
+    if checks_enabled?(__CALLER__.module) do
+      Bond.Compiler.check_assertion(expression, label, __CALLER__, meta)
+    else
+      :ok
+    end
   end
 
   @spec check(assertion_expression(), assertion_label()) :: as_boolean(any())
   defmacro check({_, meta, _} = expression, label) when is_atom(label) or is_binary(label) do
-    Bond.Compiler.check_assertion(expression, label, __CALLER__, meta)
+    if checks_enabled?(__CALLER__.module) do
+      Bond.Compiler.check_assertion(expression, label, __CALLER__, meta)
+    else
+      :ok
+    end
+  end
+
+  # Read the per-module `:checks` config previously stashed by `__using__`. Modules that did not
+  # `use Bond` have no attribute set; in that case we default to enabled (a defensive choice —
+  # such a `check` call would otherwise be a no-op for surprising reasons).
+  defp checks_enabled?(module) do
+    case Module.get_attribute(module, :__bond_contract_config__) do
+      %{checks: false} -> false
+      _ -> true
+    end
   end
 end

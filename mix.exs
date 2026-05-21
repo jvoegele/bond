@@ -1,7 +1,7 @@
 defmodule Bond.MixProject do
   use Mix.Project
 
-  @version "0.9.1"
+  @version "0.10.0"
   @source_url "https://github.com/jvoegele/bond"
 
   def project do
@@ -70,6 +70,7 @@ defmodule Bond.MixProject do
         {"LICENSE", [title: "License"]},
         "CHANGELOG.md",
         "guides/getting-started.md",
+        "guides/faq.md",
         "guides/about.md",
         "guides/history.md",
         "guides/contracts-and-concurrency.md"
