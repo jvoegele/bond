@@ -4,6 +4,7 @@ defmodule Bond.Runtime.TelemetryTest do
   use ExUnit.Case
 
   alias BondTest.Math
+  alias BondTest.SubjectInvariantSmoke, as: Smoke
 
   defmodule CheckFixture do
     @moduledoc false
@@ -66,6 +67,24 @@ defmodule Bond.Runtime.TelemetryTest do
       assert metadata.kind == :check
       assert metadata.module == Bond.Runtime.TelemetryTest.CheckFixture
       assert metadata.label == :positive_n
+      assert is_binary(metadata.assertion_id)
+    end
+
+    test "fires on invariant violation with kind: :invariant metadata" do
+      # SubjectInvariantSmoke has `@invariant size_within_capacity: length(subject.items)
+      # <= subject.capacity`. Hand-construct an invalid struct that violates it, then
+      # call a function whose head triggers the pre-invariant check.
+      invalid = %Smoke{items: [:a, :b, :c], capacity: 1}
+
+      assert_raise Bond.InvariantError, fn -> Smoke.push(invalid, :d) end
+
+      assert_receive {:telemetry, @event, measurements, metadata}
+      assert is_integer(measurements.system_time)
+      assert is_integer(measurements.monotonic_time)
+      assert metadata.kind == :invariant
+      assert metadata.module == BondTest.SubjectInvariantSmoke
+      assert metadata.function == {:push, 2}
+      assert metadata.label == :size_within_capacity
       assert is_binary(metadata.assertion_id)
     end
 
