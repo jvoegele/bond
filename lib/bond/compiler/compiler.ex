@@ -47,7 +47,8 @@ defmodule Bond.Compiler do
   @type contract_config :: %{
           preconditions: mode(),
           postconditions: mode(),
-          checks: mode()
+          checks: mode(),
+          invariants: mode()
         }
 
   @doc """
@@ -77,7 +78,8 @@ defmodule Bond.Compiler do
     base = %{
       preconditions: Keyword.fetch!(global, :preconditions),
       postconditions: Keyword.fetch!(global, :postconditions),
-      checks: Keyword.fetch!(global, :checks)
+      checks: Keyword.fetch!(global, :checks),
+      invariants: Keyword.get(global, :invariants, true)
     }
 
     base
@@ -118,7 +120,7 @@ defmodule Bond.Compiler do
   end
 
   defp apply_settings(config, settings) do
-    Enum.reduce([:preconditions, :postconditions, :checks], config, fn key, acc ->
+    Enum.reduce([:preconditions, :postconditions, :checks, :invariants], config, fn key, acc ->
       case Keyword.fetch(settings, key) do
         {:ok, value} when value in [true, false, :purge] -> Map.put(acc, key, value)
         _ -> acc
@@ -156,7 +158,7 @@ defmodule Bond.Compiler do
 
     config =
       Module.get_attribute(env.module, :__bond_contract_config__) ||
-        %{preconditions: true, postconditions: true}
+        %{preconditions: true, postconditions: true, invariants: true}
 
     invariants = FSM.invariants(fsm(env))
 

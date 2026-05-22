@@ -8,13 +8,20 @@ defmodule Bond.CompilerTest do
   alias Bond.Compiler
 
   describe "resolve_config/3" do
-    @global [preconditions: true, postconditions: true, checks: true, overrides: []]
+    @global [
+      preconditions: true,
+      postconditions: true,
+      checks: true,
+      invariants: true,
+      overrides: []
+    ]
 
     test "returns the global defaults when there are no overrides or use_opts" do
       assert Compiler.resolve_config(MyApp.X, [], @global) == %{
                preconditions: true,
                postconditions: true,
-               checks: true
+               checks: true,
+               invariants: true
              }
     end
 
@@ -34,8 +41,24 @@ defmodule Bond.CompilerTest do
       assert result == %{
                preconditions: :purge,
                postconditions: true,
-               checks: true
+               checks: true,
+               invariants: true
              }
+    end
+
+    test "use_opts can purge invariants for a specific module" do
+      assert Compiler.resolve_config(MyApp.X, [invariants: :purge], @global)
+             |> Map.fetch!(:invariants) == :purge
+    end
+
+    test "global :invariants is honoured" do
+      global = Keyword.put(@global, :invariants, false)
+      assert Compiler.resolve_config(MyApp.X, [], global).invariants == false
+    end
+
+    test "missing :invariants in global defaults to true" do
+      global = Keyword.delete(@global, :invariants)
+      assert Compiler.resolve_config(MyApp.X, [], global).invariants == true
     end
 
     test "exact module match in :overrides wins over global" do
@@ -92,13 +115,15 @@ defmodule Bond.CompilerTest do
         preconditions: :purge,
         postconditions: :purge,
         checks: :purge,
+        invariants: :purge,
         overrides: []
       ]
 
       assert Compiler.resolve_config(MyApp.X, [], global) == %{
                preconditions: :purge,
                postconditions: :purge,
-               checks: :purge
+               checks: :purge,
+               invariants: :purge
              }
     end
 

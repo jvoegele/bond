@@ -35,6 +35,7 @@ defmodule Bond do
     * `:preconditions` — mode for this module's `@pre` annotations.
     * `:postconditions` — mode for this module's `@post` annotations.
     * `:checks` — mode for this module's `check/1,2` calls.
+    * `:invariants` — mode for this module's `@invariant` annotations.
 
   Example: a hot-path module that wants contracts purged from its compiled output regardless
   of the global config.
@@ -61,6 +62,8 @@ defmodule Bond do
                                   postconditions:
                                     Application.compile_env(:bond, :postconditions, true),
                                   checks: Application.compile_env(:bond, :checks, true),
+                                  invariants:
+                                    Application.compile_env(:bond, :invariants, true),
                                   overrides: Application.compile_env(:bond, :overrides, [])
                                 )
 
