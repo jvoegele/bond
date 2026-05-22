@@ -192,6 +192,13 @@ defmodule Bond.Compiler do
   end
 
   @doc false
+  def register_invariant(name, expression, label, env, meta) when is_atom(name) do
+    meta_with_binding = Keyword.put(meta, :binding_name, name)
+    invariant = Assertion.new(:invariant, label, expression, env, meta_with_binding)
+    FSM.invariant_def(fsm(env), invariant)
+  end
+
+  @doc false
   def register_doc(env, meta, value) do
     FSM.doc_attribute(fsm(env), {meta, value})
   end

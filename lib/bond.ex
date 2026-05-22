@@ -109,6 +109,25 @@ defmodule Bond do
     :ok
   end
 
+  # @invariant <name>, <expression-or-keyword-list>
+  #
+  # The first arg is the name to bind the struct value to inside each invariant assertion
+  # (e.g. `stack` in `@invariant stack, size_within_capacity: ...`). The second arg is either
+  # a single bare expression or a keyword list of `label: expression` pairs, mirroring the
+  # `@pre`/`@post` keyword-list shape.
+  defmacro @{:invariant, meta, [{name, _, ctx}, expression_or_kw_list]}
+           when is_atom(name) and is_atom(ctx) do
+    if Keyword.keyword?(expression_or_kw_list) do
+      for {label, expression} <- expression_or_kw_list do
+        Bond.Compiler.register_invariant(name, expression, label, __CALLER__, meta)
+      end
+    else
+      Bond.Compiler.register_invariant(name, expression_or_kw_list, nil, __CALLER__, meta)
+    end
+
+    :ok
+  end
+
   defmacro @{:doc, meta, [value]} do
     Bond.Compiler.register_doc(__CALLER__, meta, value)
     :ok

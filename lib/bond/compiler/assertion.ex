@@ -12,7 +12,20 @@ defmodule Bond.Compiler.Assertion do
   alias __MODULE__
 
   @enforce_keys [:id, :expression, :kind, :definition_env, :meta]
-  defstruct [:id, :label, :expression, :code, :kind, :definition_env, :meta]
+  defstruct [
+    :id,
+    :label,
+    :expression,
+    :code,
+    :kind,
+    :definition_env,
+    :meta,
+    # Only set on :invariant assertions. Atom name of the local variable the invariant's
+    # expression refers to (the `stack` in `@invariant stack, ...`). Used by
+    # `Bond.Compiler.AnnotatedFunction` to rebind that name to the function's actual struct
+    # argument or extracted return value at emission time.
+    :binding_name
+  ]
 
   @type t :: t(Bond.assertion_kind())
 
@@ -23,7 +36,8 @@ defmodule Bond.Compiler.Assertion do
           code: String.t(),
           kind: kind,
           definition_env: Macro.Env.t(),
-          meta: list()
+          meta: list(),
+          binding_name: atom() | nil
         }
 
   @type function_info :: {atom(), non_neg_integer()}
@@ -50,7 +64,8 @@ defmodule Bond.Compiler.Assertion do
       expression: expression,
       code: Macro.to_string(expression),
       definition_env: env,
-      meta: meta
+      meta: meta,
+      binding_name: Keyword.get(meta, :binding_name)
     }
   end
 
