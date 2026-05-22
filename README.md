@@ -337,6 +337,63 @@ In 0.11.0, `false` is a *runtime default* meaning "compiled but off by
 default." If you used `false` simply to disable contracts at compile time,
 change it to `:purge` to keep the same compiled output.
 
+## Telemetry
+
+Bond emits a [`:telemetry`](https://hexdocs.pm/telemetry/readme.html) event
+whenever a `@pre`, `@post`, or `check` assertion is violated. The event
+fires once per failure, immediately before the corresponding
+`Bond.PreconditionError` / `Bond.PostconditionError` / `Bond.CheckError`
+is raised.
+
+**Event:** `[:bond, :assertion, :failure]`
+
+**Measurements:**
+
+- `:system_time` — `System.system_time/0` at the failure
+- `:monotonic_time` — `System.monotonic_time/0` at the failure
+
+**Metadata:**
+
+- `:kind` — `:precondition | :postcondition | :check`
+- `:module` — module the assertion is attached to
+- `:function` — `{name, arity}` of the function containing the assertion
+- `:label` — the keyword label, or `nil` if unlabelled
+- `:expression` — source text of the assertion
+- `:assertion_id` — stable per-assertion identifier; the same value
+  appears every time the same assertion fails, so it's safe to use as
+  an aggregation key
+- `:file`, `:line` — source location of the assertion
+- `:binding` — sorted snapshot of `binding()` at the failure site
+
+Attach a handler at application start:
+
+```elixir
+:telemetry.attach(
+  "bond-failure-logger",
+  [:bond, :assertion, :failure],
+  &MyApp.Telemetry.log_bond_failure/4,
+  nil
+)
+```
+
+```elixir
+defmodule MyApp.Telemetry do
+  require Logger
+
+  def log_bond_failure(_event, _measurements, metadata, _config) do
+    Logger.warning(
+      "bond #{metadata.kind} violated in " <>
+        "#{inspect(metadata.module)}.#{elem(metadata.function, 0)}/" <>
+        "#{elem(metadata.function, 1)}: #{metadata.expression}"
+    )
+  end
+end
+```
+
+Only failure events are emitted in 0.12.0. Pass events would be far too
+chatty for production use; if there's demand for them they can be added
+later behind an opt-in.
+
 <!-- README END -->
 
 ## Installation
@@ -346,7 +403,7 @@ change it to `:purge` to keep the same compiled output.
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.11.0"}
+    {:bond, "~> 0.12.0"}
   ]
 end
 ```

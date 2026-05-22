@@ -46,13 +46,28 @@ defmodule Bond.Compiler.OldExpression do
   def resolve(empty_map) when empty_map == %{}, do: []
 
   def resolve(old_context) do
-    for {key, expression} <- old_context do
-      var = make_var(key)
-
+    for {var, expression} <- pairs(old_context) do
       quote generated: true do
         var!(unquote(var)) = unquote(expression)
       end
     end
+  end
+
+  @doc """
+  Returns a stable-ordered list of `{var, expression}` tuples for the given `old_context`.
+
+  The variable AST is the same one `resolve/1` introduces into the calling scope. Used by
+  `Bond.Compiler.AnnotatedFunction` to derive consistent forwarding-args and parameter-pattern
+  lists for the generated postcondition defp, so the order of old-value parameters matches the
+  order of the assignments produced by `resolve/1`.
+  """
+  @spec pairs(old_context()) :: [{Macro.t(), Bond.assertion_expression()}]
+  def pairs(empty_map) when empty_map == %{}, do: []
+
+  def pairs(old_context) do
+    old_context
+    |> Enum.sort_by(fn {key, _} -> key end)
+    |> Enum.map(fn {key, expression} -> {make_var(key), expression} end)
   end
 
   defp make_key(old_expression), do: Macro.to_string(old_expression)
