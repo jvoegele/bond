@@ -59,8 +59,9 @@ constrains the struct itself.
   changes are needed — existing handlers attached to the event automatically
   pick up the new kind.
 
-- `Bond.Compiler.Assertion.t/0` gains a `:binding_name` field, populated only
-  on `:invariant` assertions from the declaration's first argument.
+- The internal `Bond.Compiler.Assertion` struct gains a `:binding_name` field,
+  populated only on `:invariant` assertions from the declaration's first
+  argument.
 
 - `Bond.Compiler.AnnotatedFunction` gains an `:invariants` field plus
   `put_invariants/2` and `has_invariants?/1` helpers. `override?/1` widens to
