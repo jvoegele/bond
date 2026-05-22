@@ -53,6 +53,58 @@ defmodule Bond.Compiler.Invariants do
     end
   end
 
+  @typedoc """
+  Descriptor for a single struct-bearing parameter in a function head.
+
+    * `{:bound, var_name, param_index}` — the parameter is bound to a variable in the head
+      (via `%__MODULE__{} = name`, `name = %__MODULE__{}`, or a bare `name` with an
+      `is_struct(name, __MODULE__)` guard somewhere in the guard list, including inside
+      compound `and`/`or` expressions). `param_index` is 0-based.
+
+    * `{:destructure, param_index}` — the parameter destructures `%__MODULE__{...}` but
+      does not bind the whole struct to a variable. Invariant emission rewrites the
+      override clause head at this position to capture the struct under a generated name.
+  """
+  @type struct_param ::
+          {:bound, atom(), non_neg_integer()}
+          | {:destructure, non_neg_integer()}
+
+  @doc """
+  Finds every struct-bearing parameter in a function head, in left-to-right order.
+
+  Returns a list of `t:struct_param/0` descriptors. Returns `[]` when no parameter and
+  no guard mentions the module's struct.
+
+  Recognised patterns:
+
+    * `%__MODULE__{} = name` (or destructure-and-bind, e.g. `%__MODULE__{field: x} = name`)
+    * `name = %__MODULE__{}` (reversed)
+    * bare `name` plus `is_struct(name, __MODULE__)` somewhere in the guards, including
+      inside arbitrary nesting of `and` / `or`
+    * `%__MODULE__{...}` destructure with no `= name` — returned as `{:destructure, idx}`
+
+  Multiple struct parameters in the same head (e.g. `def merge(%__MODULE__{} = a,
+  %__MODULE__{} = b)`) all appear in the result.
+
+  Fully-qualified module patterns (`%MyMod{}`) and aliased forms are not recognised —
+  invariants are scoped to the struct's own defining module, so `__MODULE__` is the
+  idiomatic form.
+  """
+  @spec detect_struct_params([Macro.t()], [Macro.t()]) :: [struct_param()]
+  def detect_struct_params(params, guards) when is_list(params) and is_list(guards) do
+    guard_vars = collect_guard_struct_vars(guards)
+
+    params
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {param, idx} ->
+      case classify_param(param, guard_vars) do
+        {:bound, name} -> [{:bound, name, idx}]
+        :destructure -> [{:destructure, idx}]
+        :none -> []
+      end
+    end)
+  end
+
   @doc """
   Resolves the per-function invariant mode given the per-module config value and the
   annotated function's `:kind` and `:invariants` list.
@@ -238,4 +290,44 @@ defmodule Bond.Compiler.Invariants do
   end
 
   defp extract_is_struct_var(_), do: nil
+
+  # ---- Helpers for detect_struct_params/2 (S1: subject-binding work) ----
+
+  defp classify_param(param, guard_vars) do
+    case param do
+      {:=, _, [{:%, _, [{:__MODULE__, _, _}, _]}, {var, _, ctx}]}
+      when is_atom(var) and is_atom(ctx) ->
+        {:bound, var}
+
+      {:=, _, [{var, _, ctx}, {:%, _, [{:__MODULE__, _, _}, _]}]}
+      when is_atom(var) and is_atom(ctx) ->
+        {:bound, var}
+
+      {var, _, ctx} when is_atom(var) and is_atom(ctx) ->
+        if MapSet.member?(guard_vars, var), do: {:bound, var}, else: :none
+
+      {:%, _, [{:__MODULE__, _, _}, _]} ->
+        :destructure
+
+      _ ->
+        :none
+    end
+  end
+
+  defp collect_guard_struct_vars(guards) do
+    guards
+    |> Enum.flat_map(&walk_guard_for_is_struct/1)
+    |> MapSet.new()
+  end
+
+  defp walk_guard_for_is_struct({:is_struct, _, [{var, _, ctx}, {:__MODULE__, _, _}]})
+       when is_atom(var) and is_atom(ctx) do
+    [var]
+  end
+
+  defp walk_guard_for_is_struct({op, _, [left, right]}) when op in [:and, :or] do
+    walk_guard_for_is_struct(left) ++ walk_guard_for_is_struct(right)
+  end
+
+  defp walk_guard_for_is_struct(_), do: []
 end

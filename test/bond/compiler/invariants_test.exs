@@ -53,6 +53,103 @@ defmodule Bond.Compiler.InvariantsTest do
     end
   end
 
+  describe "detect_struct_params/2" do
+    test "detects `%__MODULE__{} = name` at position 0" do
+      params = quote(do: [%__MODULE__{} = stack, item])
+      assert Invariants.detect_struct_params(params, []) == [{:bound, :stack, 0}]
+    end
+
+    test "detects reversed `name = %__MODULE__{}` pattern" do
+      params = quote(do: [stack = %__MODULE__{}, item])
+      assert Invariants.detect_struct_params(params, []) == [{:bound, :stack, 0}]
+    end
+
+    test "detects destructure-and-bind `%__MODULE__{field: x} = name`" do
+      params = quote(do: [%__MODULE__{field: x} = stack, item])
+      assert Invariants.detect_struct_params(params, []) == [{:bound, :stack, 0}]
+    end
+
+    test "detects struct at a non-zero parameter position" do
+      params = quote(do: [item, %__MODULE__{} = stack])
+      assert Invariants.detect_struct_params(params, []) == [{:bound, :stack, 1}]
+    end
+
+    test "detects destructure-only `%__MODULE__{...}` without binding" do
+      params = quote(do: [%__MODULE__{items: [h | _]}, item])
+      assert Invariants.detect_struct_params(params, []) == [{:destructure, 0}]
+    end
+
+    test "detects bare `name` plus `is_struct(name, __MODULE__)` guard" do
+      params = quote(do: [x, item])
+      guards = quote(do: [is_struct(x, __MODULE__)])
+      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+    end
+
+    test "detects is_struct inside left side of compound `and` guard" do
+      params = quote(do: [x, y])
+      guards = quote(do: [is_struct(x, __MODULE__) and is_integer(y)])
+      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+    end
+
+    test "detects is_struct inside right side of compound `and` guard" do
+      params = quote(do: [x, y])
+      guards = quote(do: [is_integer(y) and is_struct(x, __MODULE__)])
+      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+    end
+
+    test "detects is_struct inside `or` guard" do
+      params = quote(do: [x])
+      guards = quote(do: [is_atom(x) or is_struct(x, __MODULE__)])
+      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+    end
+
+    test "detects is_struct nested inside `and` inside `or`" do
+      params = quote(do: [x, y])
+      guards = quote(do: [is_nil(y) or (is_integer(y) and is_struct(x, __MODULE__))])
+      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+    end
+
+    test "detects is_struct across multiple `when ... when ...` guards" do
+      params = quote(do: [x])
+      guards = quote(do: [is_atom(x), is_struct(x, __MODULE__)])
+      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+    end
+
+    test "returns multiple entries for `def merge(%__MODULE__{} = a, %__MODULE__{} = b)`" do
+      params = quote(do: [%__MODULE__{} = a, %__MODULE__{} = b])
+
+      assert Invariants.detect_struct_params(params, []) ==
+               [{:bound, :a, 0}, {:bound, :b, 1}]
+    end
+
+    test "mixes bound and destructure entries in parameter order" do
+      params = quote(do: [%__MODULE__{} = a, %__MODULE__{field: x}])
+
+      assert Invariants.detect_struct_params(params, []) ==
+               [{:bound, :a, 0}, {:destructure, 1}]
+    end
+
+    test "returns [] for a bare-variable head with no relevant guard" do
+      params = quote(do: [x, item])
+      assert Invariants.detect_struct_params(params, []) == []
+    end
+
+    test "returns [] when guard mentions an unrelated module" do
+      params = quote(do: [x])
+      guards = quote(do: [is_struct(x, OtherMod)])
+      assert Invariants.detect_struct_params(params, guards) == []
+    end
+
+    test "returns [] for an unrelated struct pattern" do
+      params = quote(do: [%OtherMod{} = x])
+      assert Invariants.detect_struct_params(params, []) == []
+    end
+
+    test "returns [] for empty params" do
+      assert Invariants.detect_struct_params([], []) == []
+    end
+  end
+
   describe "resolve_mode/3" do
     test "purges when explicitly purged" do
       assert Invariants.resolve_mode(:purge, :def, some: :invariant) == :purge
