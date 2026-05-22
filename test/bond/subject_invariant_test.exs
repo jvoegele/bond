@@ -111,4 +111,30 @@ defmodule Bond.SubjectInvariantTest do
       assert {:tag, %Smoke{}} = Smoke.mismatched_pair(:tag, stack)
     end
   end
+
+  describe "compound `and` guard containing is_struct" do
+    test "pre-invariant fires for is_struct nested inside `and`" do
+      invalid = %Smoke{items: [:a, :b], capacity: 1}
+
+      assert_raise Bond.InvariantError, fn ->
+        Smoke.guarded_and(invalid, 0)
+      end
+    end
+
+    test "passes through when input satisfies the invariant" do
+      stack = Smoke.new(3)
+      assert %Smoke{capacity: 5} = Smoke.guarded_and(stack, 2)
+    end
+  end
+
+  describe "function head with no struct parameter" do
+    test "function with no struct in head doesn't fire pre-invariant" do
+      # The module has `@invariant subject.capacity >= 0` etc., but const_zero/1
+      # has no struct param. If a pre-invariant fired on the non-struct input,
+      # evaluating `subject.capacity` on `:any_atom` would crash. A clean return
+      # value proves no pre-invariant ran.
+      assert Smoke.const_zero(:any_atom) == 0
+      assert Smoke.const_zero(42) == 0
+    end
+  end
 end

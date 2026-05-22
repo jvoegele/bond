@@ -19,6 +19,10 @@ defmodule BondTest.SubjectInvariantSmoke do
     - `rotate/1` — destructure-only head returning a struct. Exercises both the
       pre-invariant (via the captured binding) and the post-invariant on the
       returned struct.
+    - `guarded_and/2` — bare param with `is_struct(_, __MODULE__)` nested inside
+      a compound `and` guard. Exercises detection through guard nesting.
+    - `const_zero/1` — no struct in the function head. Pre-invariant is skipped
+      silently; the function returns its non-struct value.
   """
 
   use Bond
@@ -62,4 +66,10 @@ defmodule BondTest.SubjectInvariantSmoke do
   def rotate(%__MODULE__{items: [first | rest], capacity: cap}) do
     %__MODULE__{items: rest ++ [first], capacity: cap}
   end
+
+  def guarded_and(x, y) when is_integer(y) and is_struct(x, __MODULE__) do
+    %{x | capacity: x.capacity + y}
+  end
+
+  def const_zero(n) when is_atom(n) or is_integer(n), do: 0
 end

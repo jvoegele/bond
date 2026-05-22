@@ -59,6 +59,29 @@ defmodule BondTest.ConditionalCompilationTest do
 
       assert PostFalse.maybe_zero(0) == 0
     end
+
+    test "invariants: false at runtime — no InvariantError is raised" do
+      # The SubjectInvariantSmoke fixture was compiled with the default
+      # `invariants: true`; flip it off at runtime via put_env. With invariants
+      # disabled, an invariant-violating struct passes through (push/2 returns
+      # `{:error, :full}` because items already exceed capacity, but no
+      # InvariantError raises).
+      Application.put_env(:bond, :invariants, false)
+      invalid = %BondTest.SubjectInvariantSmoke{items: [:a, :b, :c], capacity: 1}
+      assert {:error, :full} = BondTest.SubjectInvariantSmoke.push(invalid, :d)
+    end
+
+    test "invariants flipped false then true at runtime — InvariantError returns" do
+      Application.put_env(:bond, :invariants, false)
+      invalid = %BondTest.SubjectInvariantSmoke{items: [:a, :b, :c], capacity: 1}
+      assert {:error, :full} = BondTest.SubjectInvariantSmoke.push(invalid, :d)
+
+      Application.put_env(:bond, :invariants, true)
+
+      assert_raise Bond.InvariantError, fn ->
+        BondTest.SubjectInvariantSmoke.push(invalid, :d)
+      end
+    end
   end
 
   describe "compile-time `:purge` (no override emitted)" do
