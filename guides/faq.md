@@ -174,6 +174,29 @@ forwarder).
 This is expected. If you want the error to mention `sqrt/1`, split the
 default-arg form into explicit clauses.
 
+## When does Bond check invariants?
+
+`@invariant` declarations on a struct module are checked automatically at
+the boundaries of that module's public functions. Specifically:
+
+- **On entry**, when the function head pattern-matches `%__MODULE__{} = name`
+  or has an `is_struct(name, __MODULE__)` guard. Bond pre-checks the
+  invariant against `name`.
+- **On exit**, against the return value if it's `%__MODULE__{}` or
+  `{:ok, %__MODULE__{}}`. Other return shapes fall through without a check.
+- **Never for `defp`** — private functions are exempt by the Eiffel
+  convention (they often hold transiently-invalid state mid-operation).
+
+If you want invariant pre-checks but your function doesn't pattern-match the
+struct as an argument, add the pattern: `def foo(%__MODULE__{} = x, ...)`.
+If you destructure but don't bind the whole struct (`def foo(%__MODULE__{f: v}, ...)`),
+Bond emits a compile-time warning and skips the pre-check — add `= name` to
+the pattern to fix it.
+
+Violations raise `Bond.InvariantError` and emit `[:bond, :assertion, :failure]`
+telemetry with `:kind => :invariant`. See the
+[Invariants](Bond.html#module-invariants) section in the moduledoc.
+
 ## How are multi-clause functions handled?
 
 A single contract applies to **all clauses** of a multi-clause function.

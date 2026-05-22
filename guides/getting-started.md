@@ -12,7 +12,7 @@ Add `bond` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.12.0"}
+    {:bond, "~> 0.13.0"}
   ]
 end
 ```
@@ -195,9 +195,12 @@ See `Bond.Test` for `assert_precondition_violation/2`,
 
 ## Next steps
 
-- The `Bond` moduledoc has the full reference.
+- The `Bond` moduledoc has the full reference, including the [Invariants](Bond.html#module-invariants)
+  section if you have a struct module and want module-wide constraints on
+  every instance.
 - The [Contracts in a Concurrent World](contracts-and-concurrency.md) guide
-  covers `old`, race conditions, and how to design contracts for stateful
-  processes.
+  covers `old`, race conditions, how to design contracts for stateful
+  processes, and how `@invariant` strengthens the pure-state-struct pattern.
 - The [FAQ](faq.md) answers common questions: "why contracts when I have
-  ExUnit?", "how does Bond compare to Norm?", and so on.
+  ExUnit?", "how does Bond compare to Norm?", "when does Bond check
+  invariants?", and so on.

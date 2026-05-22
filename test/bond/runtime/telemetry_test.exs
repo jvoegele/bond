@@ -25,8 +25,7 @@ defmodule Bond.Runtime.TelemetryTest do
   setup do
     handler_id = "test-handler-#{System.unique_integer([:positive])}"
 
-    :ok =
-      :telemetry.attach(handler_id, @event, &__MODULE__.forward/4, self())
+    :ok = :telemetry.attach(handler_id, @event, &__MODULE__.forward/4, self())
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
     :ok

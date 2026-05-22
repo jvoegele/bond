@@ -17,6 +17,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
   alias Bond.Compiler.Assertion
   alias Bond.Compiler.FunctionDefinition
+  alias Bond.Compiler.Invariants
   alias Bond.Compiler.OldExpression
 
   defstruct kind: nil,
@@ -26,6 +27,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
             clauses: [],
             preconditions: [],
             postconditions: [],
+            invariants: [],
             doc_attributes: []
 
   @type t :: %__MODULE__{
@@ -36,6 +38,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
           clauses: [__MODULE__.Clause.t()],
           preconditions: [Bond.Compiler.Assertion.t()],
           postconditions: [Bond.Compiler.Assertion.t()],
+          invariants: [Bond.Compiler.Assertion.t()],
           doc_attributes: [FunctionDefinition.doc_attribute()]
         }
 
@@ -102,6 +105,16 @@ defmodule Bond.Compiler.AnnotatedFunction do
     %{annotated_function | postconditions: existing_postconditions ++ postconditions}
   end
 
+  def put_invariants(
+        %__MODULE__{invariants: existing_invariants} = annotated_function,
+        invariants
+      )
+      when is_list(invariants) do
+    Enum.each(invariants, fn %Assertion{kind: :invariant} -> :ok end)
+
+    %{annotated_function | invariants: existing_invariants ++ invariants}
+  end
+
   def put_doc_attributes(
         %__MODULE__{doc_attributes: existing_doc_attributes} = annotated_function,
         doc_attributes
@@ -116,11 +129,16 @@ defmodule Bond.Compiler.AnnotatedFunction do
   def has_postconditions?(%__MODULE__{postconditions: postconditions}),
     do: not Enum.empty?(postconditions)
 
+  def has_invariants?(%__MODULE__{invariants: invariants}),
+    do: not Enum.empty?(invariants)
+
   def has_doc_attributes?(%__MODULE__{doc_attributes: doc_attributes}),
     do: not Enum.empty?(doc_attributes)
 
   def override?(%__MODULE__{} = annotated_function) do
-    has_preconditions?(annotated_function) or has_postconditions?(annotated_function)
+    has_preconditions?(annotated_function) or
+      has_postconditions?(annotated_function) or
+      (annotated_function.kind == :def and has_invariants?(annotated_function))
   end
 
   @typedoc """
@@ -145,7 +163,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
   """
   @type contract_config :: %{
           required(:preconditions) => mode(),
-          required(:postconditions) => mode()
+          required(:postconditions) => mode(),
+          optional(:invariants) => mode()
         }
 
   @doc """
@@ -202,8 +221,15 @@ defmodule Bond.Compiler.AnnotatedFunction do
     post_mode =
       resolve_mode(Map.fetch!(config, :postconditions), has_postconditions?(annotated_function))
 
-    if pre_mode != :purge or post_mode != :purge do
-      build_contract_override(annotated_function, pre_mode, post_mode)
+    inv_mode =
+      Invariants.resolve_mode(
+        Map.get(config, :invariants, true),
+        annotated_function.kind,
+        annotated_function.invariants
+      )
+
+    if pre_mode != :purge or post_mode != :purge or inv_mode != :purge do
+      build_contract_override(annotated_function, pre_mode, post_mode, inv_mode)
     end
   end
 
@@ -214,9 +240,11 @@ defmodule Bond.Compiler.AnnotatedFunction do
   defp resolve_mode(value, true) when value in [true, false], do: value
 
   defp build_contract_override(
-         %__MODULE__{kind: kind, fun: fun, arity: arity} = annotated_function,
+         %__MODULE__{kind: kind, fun: fun, arity: arity, module: struct_module} =
+           annotated_function,
          pre_mode,
-         post_mode
+         post_mode,
+         inv_mode
        ) do
     first_clause = List.first(annotated_function.clauses)
     function_info = {fun, arity}
@@ -239,8 +267,14 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
     pre_fn_name = lifted_fn_name(:preconditions, fun, arity)
     post_fn_name = lifted_fn_name(:postconditions, fun, arity)
+    inv_fn_name = lifted_fn_name(:invariants, fun, arity)
+
+    struct_arg = Invariants.struct_arg(inv_mode, first_clause)
 
     doc_asts = doc_clauses(annotated_function, first_clause.env, pre_mode, post_mode)
+
+    pre_invariant_stmts = Invariants.pre_invariant_stmts(inv_fn_name, struct_arg, inv_mode)
+    post_invariant_stmts = Invariants.post_invariant_stmts(inv_fn_name, inv_mode, struct_module)
 
     body_stmts =
       build_override_body(
@@ -250,7 +284,9 @@ defmodule Bond.Compiler.AnnotatedFunction do
         old_assignments,
         old_pairs,
         pre_mode,
-        post_mode
+        post_mode,
+        pre_invariant_stmts,
+        post_invariant_stmts
       )
 
     assertion_defs =
@@ -273,6 +309,13 @@ defmodule Bond.Compiler.AnnotatedFunction do
             function_info,
             first_clause.env,
             post_mode
+          ),
+          Invariants.build_lifted_defp(
+            inv_fn_name,
+            annotated_function.invariants,
+            function_info,
+            first_clause.env,
+            inv_mode
           )
         ],
         &is_nil/1
@@ -313,14 +356,19 @@ defmodule Bond.Compiler.AnnotatedFunction do
          old_assignments,
          old_pairs,
          pre_mode,
-         post_mode
+         post_mode,
+         pre_invariant_stmts,
+         post_invariant_stmts
        ) do
     pre_stmts = pre_eval_stmts(call_params, pre_fn_name, pre_mode)
     super_call = quote(do: var!(result) = super(unquote_splicing(call_params)))
     post_stmts = post_eval_stmts(call_params, post_fn_name, old_pairs, post_mode)
     return_stmt = quote(do: var!(result))
 
-    pre_stmts ++ old_assignments ++ [super_call] ++ post_stmts ++ [return_stmt]
+    pre_invariant_stmts ++
+      pre_stmts ++
+      old_assignments ++
+      [super_call] ++ post_stmts ++ post_invariant_stmts ++ [return_stmt]
   end
 
   defp pre_eval_stmts(_call_params, _name, :purge), do: []

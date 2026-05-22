@@ -74,6 +74,39 @@ defmodule Bond.Compiler.CompileStateFSMTest do
     end
   end
 
+  describe "module-level invariants" do
+    test "invariant_def accumulates without leaving :no_contracts_pending", %{fsm: fsm} do
+      FSM.invariant_def(fsm, invariant_def(:non_negative))
+      FSM.invariant_def(fsm, invariant_def(:size_within_capacity))
+
+      assert FSM.current_state(fsm) == :no_contracts_pending
+
+      assert [
+               %Assertion{kind: :invariant, label: :non_negative},
+               %Assertion{kind: :invariant, label: :size_within_capacity}
+             ] = FSM.invariants(fsm)
+    end
+
+    test "invariants survive a function_def event", %{fsm: fsm} do
+      FSM.invariant_def(fsm, invariant_def(:non_negative))
+      FSM.function_def(fsm, function_def(:foo))
+
+      assert [%Assertion{kind: :invariant, label: :non_negative}] = FSM.invariants(fsm)
+    end
+
+    test "invariants survive a module_defined transition to :done", %{fsm: fsm} do
+      FSM.invariant_def(fsm, invariant_def(:non_negative))
+      FSM.module_defined(fsm)
+
+      assert FSM.current_state(fsm) == :done
+      assert [%Assertion{kind: :invariant, label: :non_negative}] = FSM.invariants(fsm)
+    end
+
+    test "empty invariants list when none have been registered", %{fsm: fsm} do
+      assert FSM.invariants(fsm) == []
+    end
+  end
+
   describe ":contracts_pending state" do
     setup %{fsm: fsm} do
       set_state(fsm, :contracts_pending)
@@ -287,5 +320,10 @@ defmodule Bond.Compiler.CompileStateFSMTest do
   defp postcondition_def(label) do
     expression = quote(do: 1 + 1 == 2)
     Assertion.new(:postcondition, label, expression)
+  end
+
+  defp invariant_def(label) do
+    expression = quote(do: 1 + 1 == 2)
+    Assertion.new(:invariant, label, expression)
   end
 end

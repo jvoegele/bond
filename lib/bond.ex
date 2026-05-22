@@ -10,7 +10,7 @@ defmodule Bond do
              |> List.first()
 
   @typedoc false
-  @type assertion_kind :: :precondition | :postcondition | :check
+  @type assertion_kind :: :precondition | :postcondition | :check | :invariant
 
   @typedoc """
   Type to represent a label for an assertion, which must be a compile-time atom or string.
@@ -35,6 +35,7 @@ defmodule Bond do
     * `:preconditions` — mode for this module's `@pre` annotations.
     * `:postconditions` — mode for this module's `@post` annotations.
     * `:checks` — mode for this module's `check/1,2` calls.
+    * `:invariants` — mode for this module's `@invariant` annotations.
 
   Example: a hot-path module that wants contracts purged from its compiled output regardless
   of the global config.
@@ -61,6 +62,7 @@ defmodule Bond do
                                   postconditions:
                                     Application.compile_env(:bond, :postconditions, true),
                                   checks: Application.compile_env(:bond, :checks, true),
+                                  invariants: Application.compile_env(:bond, :invariants, true),
                                   overrides: Application.compile_env(:bond, :overrides, [])
                                 )
 
@@ -106,6 +108,25 @@ defmodule Bond do
   defmacro @{pre_or_post, meta, [{_, _, _} = expression, label]}
            when (pre_or_post in [:pre, :post] and is_atom(label)) or is_binary(label) do
     Bond.Compiler.register_assertion(pre_or_post, expression, label, __CALLER__, meta)
+    :ok
+  end
+
+  # @invariant <name>, <expression-or-keyword-list>
+  #
+  # The first arg is the name to bind the struct value to inside each invariant assertion
+  # (e.g. `stack` in `@invariant stack, size_within_capacity: ...`). The second arg is either
+  # a single bare expression or a keyword list of `label: expression` pairs, mirroring the
+  # `@pre`/`@post` keyword-list shape.
+  defmacro @{:invariant, meta, [{name, _, ctx}, expression_or_kw_list]}
+           when is_atom(name) and is_atom(ctx) do
+    if Keyword.keyword?(expression_or_kw_list) do
+      for {label, expression} <- expression_or_kw_list do
+        Bond.Compiler.register_invariant(name, expression, label, __CALLER__, meta)
+      end
+    else
+      Bond.Compiler.register_invariant(name, expression_or_kw_list, nil, __CALLER__, meta)
+    end
+
     :ok
   end
 

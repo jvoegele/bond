@@ -47,7 +47,8 @@ defmodule Bond.Compiler do
   @type contract_config :: %{
           preconditions: mode(),
           postconditions: mode(),
-          checks: mode()
+          checks: mode(),
+          invariants: mode()
         }
 
   @doc """
@@ -77,7 +78,8 @@ defmodule Bond.Compiler do
     base = %{
       preconditions: Keyword.fetch!(global, :preconditions),
       postconditions: Keyword.fetch!(global, :postconditions),
-      checks: Keyword.fetch!(global, :checks)
+      checks: Keyword.fetch!(global, :checks),
+      invariants: Keyword.get(global, :invariants, true)
     }
 
     base
@@ -118,7 +120,7 @@ defmodule Bond.Compiler do
   end
 
   defp apply_settings(config, settings) do
-    Enum.reduce([:preconditions, :postconditions, :checks], config, fn key, acc ->
+    Enum.reduce([:preconditions, :postconditions, :checks, :invariants], config, fn key, acc ->
       case Keyword.fetch(settings, key) do
         {:ok, value} when value in [true, false, :purge] -> Map.put(acc, key, value)
         _ -> acc
@@ -156,10 +158,13 @@ defmodule Bond.Compiler do
 
     config =
       Module.get_attribute(env.module, :__bond_contract_config__) ||
-        %{preconditions: true, postconditions: true}
+        %{preconditions: true, postconditions: true, invariants: true}
+
+    invariants = FSM.invariants(fsm(env))
 
     fsm(env)
     |> FSM.annotated_functions()
+    |> Enum.map(&AnnotatedFunction.put_invariants(&1, invariants))
     |> Enum.filter(&AnnotatedFunction.override?/1)
     |> Enum.map(&AnnotatedFunction.apply_contract(&1, config))
     |> Enum.reject(&is_nil/1)
@@ -189,6 +194,29 @@ defmodule Bond.Compiler do
       end
 
     apply(FSM, fsm_event, [fsm(env), assertion])
+  end
+
+  @doc false
+  def register_invariant(name, expression, label, env, meta) when is_atom(name) do
+    # Strip the hygiene context off every reference to the binding name (`stack` in
+    # `@invariant stack, length(stack.items)`). The defp emitted in
+    # `Bond.Compiler.Invariants` declares the rebind as `Macro.var(name, nil)`; if the
+    # user's references kept their original module context, they would not resolve to
+    # that rebind.
+    normalized = normalize_binding_context(expression, name)
+    meta_with_binding = Keyword.put(meta, :binding_name, name)
+    invariant = Assertion.new(:invariant, label, normalized, env, meta_with_binding)
+    FSM.invariant_def(fsm(env), invariant)
+  end
+
+  defp normalize_binding_context(expression, binding_name) do
+    Macro.prewalk(expression, fn
+      {^binding_name, meta, ctx} when is_atom(ctx) ->
+        {binding_name, meta, nil}
+
+      other ->
+        other
+    end)
   end
 
   @doc false

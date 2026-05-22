@@ -22,6 +22,7 @@ defmodule Bond.Compiler.CompileStateFSM do
   @type function_def :: Bond.Compiler.FunctionDefinition.t()
   @type precondition_def :: Bond.Compiler.Assertion.t()
   @type postcondition_def :: Bond.Compiler.Assertion.t()
+  @type invariant_def :: Bond.Compiler.Assertion.t()
 
   @doc """
   Returns the local name registration of the FSM process for the given module.
@@ -76,6 +77,19 @@ defmodule Bond.Compiler.CompileStateFSM do
   end
 
   @doc """
+  Sends an `invariant_def` event to the FSM.
+
+  Unlike preconditions/postconditions, invariants are module-scoped: they accumulate over the
+  whole module and apply to every public function regardless of declaration order. The state
+  machine therefore does not transition into `:contracts_pending` on this event, and
+  invariants are not flushed by function definitions.
+  """
+  @spec invariant_def(server_ref(), invariant_def()) :: :ok
+  def invariant_def(fsm, invariant_def) do
+    :gen_statem.cast(fsm, {:invariant_def, invariant_def})
+  end
+
+  @doc """
   Sends a `doc_attribute` event to the FSM.
   """
   def doc_attribute(fsm, doc_value) do
@@ -118,6 +132,17 @@ defmodule Bond.Compiler.CompileStateFSM do
   end
 
   @doc """
+  Returns the module-scoped invariants, in declaration order.
+
+  Invariants are not per-function. The list returned here applies to every public function in
+  the module that qualifies for invariant checking (see `Bond.Compiler.AnnotatedFunction`).
+  """
+  @spec invariants(server_ref) :: list(invariant_def)
+  def invariants(fsm) do
+    :gen_statem.call(fsm, :invariants)
+  end
+
+  @doc """
   Returns a list containing all pending @doc attributes.
   """
   @spec pending_doc_attributes(server_ref) ::
@@ -154,6 +179,7 @@ defmodule Bond.Compiler.CompileStateFSM do
               mfa_set: MapSet.new(),
               precondition_defs: [],
               postcondition_defs: [],
+              invariant_defs: [],
               doc_attributes: [],
               functions_with_contracts: []
 
@@ -219,6 +245,15 @@ defmodule Bond.Compiler.CompileStateFSM do
       {:next_state, :contracts_pending, new_data}
     end
 
+    # Invariants are module-scoped — they don't move the FSM into :contracts_pending (which
+    # means "next def-event will absorb these"). They simply accumulate and are queried at
+    # __before_compile__ time.
+    def handle_event(:cast, {:invariant_def, invariant_def}, state, data)
+        when state in [:no_contracts_pending, :contracts_pending] do
+      new_data = update_in(data.invariant_defs, &[invariant_def | &1])
+      {:keep_state, new_data}
+    end
+
     def handle_event(:cast, {:doc_attribute, doc_value}, state, data)
         when state in [:no_contracts_pending, :contracts_pending] do
       new_data = update_in(data.doc_attributes, &[doc_value | &1])
@@ -252,6 +287,10 @@ defmodule Bond.Compiler.CompileStateFSM do
 
     def handle_event({:call, from}, :pending_postconditions, _state, data) do
       {:keep_state, data, {:reply, from, pending_postconditions(data)}}
+    end
+
+    def handle_event({:call, from}, :invariants, _state, data) do
+      {:keep_state, data, {:reply, from, invariants(data)}}
     end
 
     def handle_event({:call, from}, :pending_doc_attributes, :no_contracts_pending, data) do
@@ -420,6 +459,10 @@ defmodule Bond.Compiler.CompileStateFSM do
 
     defp pending_postconditions(data) do
       Enum.reverse(data.postcondition_defs)
+    end
+
+    defp invariants(data) do
+      Enum.reverse(data.invariant_defs)
     end
 
     defp pending_doc_attributes(data) do

@@ -117,3 +117,38 @@ pure function! Also notice that we didn't even need to use an `old` expression
 in `count_incremented_by_1` since that assertion is comparing the "old" value
 of the counter from the function argument to the "new" or "current" value of
 the counter in the function `result`.
+
+## Strengthening the State module with invariants
+
+Bond 0.13.0 added `@invariant` declarations that constrain properties of a
+struct across *every* public function in its defining module — rather than a
+single function at a time. For the `Counter.State` module above we can express
+a structural property of the state as an invariant:
+
+```elixir
+defmodule Counter.State do
+  use Bond
+
+  defstruct [:count]
+
+  @invariant state, non_negative_count: state.count >= 0
+
+  @post count_incremented_by_1: result.count == current_count + 1
+  def increment_count(%__MODULE__{count: current_count} = state) do
+    %{state | count: current_count + 1}
+  end
+end
+```
+
+The `non_negative_count` invariant is now checked automatically on the way
+into and out of `Counter.State.increment_count/1` — and on the way into and
+out of *every* other public function in `Counter.State` that takes or returns
+a `%Counter.State{}`. We didn't have to repeat it as a precondition or
+postcondition; declaring it once as an invariant covers the module's whole
+public API.
+
+This pattern — pure functional state struct with invariants, plus a thin
+stateful wrapper — gives the strongest guarantees Bond can provide for code
+that has both pure and concurrent concerns. Structure your modules this way
+when you can; the strong contracts on the State struct, plus the weakened
+postconditions on the Agent wrapper, together describe what's actually true.

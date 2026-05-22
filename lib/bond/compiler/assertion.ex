@@ -12,7 +12,20 @@ defmodule Bond.Compiler.Assertion do
   alias __MODULE__
 
   @enforce_keys [:id, :expression, :kind, :definition_env, :meta]
-  defstruct [:id, :label, :expression, :code, :kind, :definition_env, :meta]
+  defstruct [
+    :id,
+    :label,
+    :expression,
+    :code,
+    :kind,
+    :definition_env,
+    :meta,
+    # Only set on :invariant assertions. Atom name of the local variable the invariant's
+    # expression refers to (the `stack` in `@invariant stack, ...`). Used by
+    # `Bond.Compiler.AnnotatedFunction` to rebind that name to the function's actual struct
+    # argument or extracted return value at emission time.
+    :binding_name
+  ]
 
   @type t :: t(Bond.assertion_kind())
 
@@ -23,7 +36,8 @@ defmodule Bond.Compiler.Assertion do
           code: String.t(),
           kind: kind,
           definition_env: Macro.Env.t(),
-          meta: list()
+          meta: list(),
+          binding_name: atom() | nil
         }
 
   @type function_info :: {atom(), non_neg_integer()}
@@ -50,7 +64,8 @@ defmodule Bond.Compiler.Assertion do
       expression: expression,
       code: Macro.to_string(expression),
       definition_env: env,
-      meta: meta
+      meta: meta,
+      binding_name: Keyword.get(meta, :binding_name)
     }
   end
 
@@ -104,6 +119,62 @@ defmodule Bond.Compiler.Assertion do
       import Bond.Predicates
 
       (unquote_splicing(assertions_eval))
+    end
+  end
+
+  @doc """
+  Returns a quoted block intended to be used as the body of the lifted private function
+  that evaluates module-scoped `@invariant`s.
+
+  Each invariant has a `:binding_name` (e.g. `stack` in `@invariant stack, ...`) that is
+  declared local to the function via `<name> = bond_invariant_value`, so the
+  assertion's expression (which references the binding name) resolves to the value being
+  checked. On the first failure the block throws `{:assertion_failure, info}` with
+  `:kind => :invariant`, mirroring `assertions_body/2`'s shape for `@pre`/`@post`.
+
+  `function_info` is the `{name, arity}` of the function the invariant is being checked
+  around. Both the pre-invariant check (on entry, value = arg) and the post-invariant
+  check (on exit, value = extracted return) share this same defp.
+  """
+  @spec invariants_body([t(:invariant)], function_info()) :: Macro.t()
+  def invariants_body(invariants, function_info)
+      when is_list(invariants) and is_tuple(function_info) do
+    invariants_eval =
+      for %Assertion{
+            kind: :invariant,
+            expression: expression,
+            definition_env: env,
+            binding_name: binding_name
+          } = invariant <- invariants do
+        assertion_info = %{
+          assertion_id: invariant.id,
+          kind: :invariant,
+          label: invariant.label,
+          expression: invariant.code,
+          file: env.file,
+          line: env.line,
+          module: env.module,
+          function: function_info
+        }
+
+        rebind_var = Macro.var(binding_name, nil)
+
+        quote do
+          unquote(rebind_var) = var!(bond_invariant_value)
+
+          if unquote(expression) do
+            :ok
+          else
+            assertion_info = unquote(Macro.escape(assertion_info))
+            throw({:assertion_failure, Map.put(assertion_info, :binding, Enum.sort(binding()))})
+          end
+        end
+      end
+
+    quote do
+      import Bond.Predicates
+
+      (unquote_splicing(invariants_eval))
     end
   end
 

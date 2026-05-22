@@ -1,0 +1,41 @@
+%% Mikado graph for the 0.13.0 `@invariant` work.
+%%
+%% Each numbered node is a commit-sized step. Arrows point from a goal to its
+%% prerequisites — leaves (green) have no further prerequisites and are safe to
+%% start with. Depth-first per Mikado: pick a leaf, finish it, commit, repeat.
+
+flowchart TD
+    G(["**Goal**<br/>@invariant ships in 0.13.0"])
+
+    G --> S5[5. @ macro clauses + register_invariant/5]
+    G --> S7[7. Emit pre-invariant check]
+    G --> S8[8. Emit post-invariant case extraction]
+    G --> S9[9. :invariants config knob]
+    G --> S10[10. End-to-end tests]
+    G --> S11[11. Docs: README + FAQ + concurrency guide]
+    G --> S12[12. CHANGELOG + version bump]
+
+    S5 --> S3[3. CompileStateFSM tracks invariants]
+    S5 --> S4[4. AnnotatedFunction :invariants field]
+    S5 --> S2[2. :invariant kind in Assertion + Eval]
+
+    S7 --> S5
+    S7 --> S6[6. arg_for_invariant/2 AST helper]
+    S7 --> S4
+
+    S8 --> S5
+    S8 --> S4
+
+    S9 --> S4
+
+    S2 --> S1[1. Bond.InvariantError exception]
+
+    S10 --> S7
+    S10 --> S8
+    S10 --> S9
+
+    S11 --> S5
+    S12 --> S10
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S1,S2,S3,S4,S6,S11 leaf;
