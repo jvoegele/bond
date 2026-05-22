@@ -19,12 +19,7 @@ defmodule Bond.Compiler.Assertion do
     :code,
     :kind,
     :definition_env,
-    :meta,
-    # Only set on :invariant assertions. Atom name of the local variable the invariant's
-    # expression refers to (the `stack` in `@invariant stack, ...`). Used by
-    # `Bond.Compiler.AnnotatedFunction` to rebind that name to the function's actual struct
-    # argument or extracted return value at emission time.
-    :binding_name
+    :meta
   ]
 
   @type t :: t(Bond.assertion_kind())
@@ -36,8 +31,7 @@ defmodule Bond.Compiler.Assertion do
           code: String.t(),
           kind: kind,
           definition_env: Macro.Env.t(),
-          meta: list(),
-          binding_name: atom() | nil
+          meta: list()
         }
 
   @type function_info :: {atom(), non_neg_integer()}
@@ -64,8 +58,7 @@ defmodule Bond.Compiler.Assertion do
       expression: expression,
       code: Macro.to_string(expression),
       definition_env: env,
-      meta: meta,
-      binding_name: Keyword.get(meta, :binding_name)
+      meta: meta
     }
   end
 
@@ -126,9 +119,8 @@ defmodule Bond.Compiler.Assertion do
   Returns a quoted block intended to be used as the body of the lifted private function
   that evaluates module-scoped `@invariant`s.
 
-  Each invariant has a `:binding_name` (e.g. `stack` in `@invariant stack, ...`) that is
-  declared local to the function via `<name> = bond_invariant_value`, so the
-  assertion's expression (which references the binding name) resolves to the value being
+  `subject` is declared local to the body via `subject = bond_invariant_value`, so each
+  invariant's expression (which references `subject`) resolves to the value being
   checked. On the first failure the block throws `{:assertion_failure, info}` with
   `:kind => :invariant`, mirroring `assertions_body/2`'s shape for `@pre`/`@post`.
 
@@ -139,12 +131,13 @@ defmodule Bond.Compiler.Assertion do
   @spec invariants_body([t(:invariant)], function_info()) :: Macro.t()
   def invariants_body(invariants, function_info)
       when is_list(invariants) and is_tuple(function_info) do
+    subject_var = Macro.var(:subject, nil)
+
     invariants_eval =
       for %Assertion{
             kind: :invariant,
             expression: expression,
-            definition_env: env,
-            binding_name: binding_name
+            definition_env: env
           } = invariant <- invariants do
         assertion_info = %{
           assertion_id: invariant.id,
@@ -157,10 +150,8 @@ defmodule Bond.Compiler.Assertion do
           function: function_info
         }
 
-        rebind_var = Macro.var(binding_name, nil)
-
         quote do
-          unquote(rebind_var) = var!(bond_invariant_value)
+          unquote(subject_var) = var!(bond_invariant_value)
 
           if unquote(expression) do
             :ok

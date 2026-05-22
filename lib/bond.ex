@@ -113,17 +113,16 @@ defmodule Bond do
 
   # @invariant <expression-or-keyword-list>
   #
-  # The new 0.16.0 shape: no binding-name argument. Invariant expressions reference the
-  # implicit `subject` binding, which Bond rebinds at every check site to whichever struct
-  # parameter the function head exposes (detected via `Bond.Compiler.Invariants.
-  # detect_struct_params/2`).
+  # Invariant expressions reference the implicit `subject` binding, which Bond rebinds at
+  # every check site to whichever struct parameter the function head exposes (detected
+  # via `Bond.Compiler.Invariants.detect_struct_params/2`).
   defmacro @{:invariant, meta, [expression_or_kw_list]} do
     if Keyword.keyword?(expression_or_kw_list) do
       for {label, expression} <- expression_or_kw_list do
-        Bond.Compiler.register_invariant(:subject, expression, label, __CALLER__, meta)
+        Bond.Compiler.register_invariant(expression, label, __CALLER__, meta)
       end
     else
-      Bond.Compiler.register_invariant(:subject, expression_or_kw_list, nil, __CALLER__, meta)
+      Bond.Compiler.register_invariant(expression_or_kw_list, nil, __CALLER__, meta)
     end
 
     :ok
@@ -131,20 +130,18 @@ defmodule Bond do
 
   # @invariant <name>, <expression-or-keyword-list>
   #
-  # Legacy 0.13–0.15 shape, still accepted during the 0.16.0 migration window. S5 of the
-  # 0.16.0 mikado removes this clause and turns it into a CompileError. New code should use
-  # the 1-arg form above.
-  defmacro @{:invariant, meta, [{name, _, ctx}, expression_or_kw_list]}
+  # Removed in Bond 0.16.0. The legacy 2-arg shape now raises a CompileError pointing at
+  # the migration. Drop the binding name; invariant expressions reference the implicit
+  # `subject` binding.
+  defmacro @{:invariant, _meta, [{name, _, ctx}, _expression_or_kw_list]}
            when is_atom(name) and is_atom(ctx) do
-    if Keyword.keyword?(expression_or_kw_list) do
-      for {label, expression} <- expression_or_kw_list do
-        Bond.Compiler.register_invariant(name, expression, label, __CALLER__, meta)
-      end
-    else
-      Bond.Compiler.register_invariant(name, expression_or_kw_list, nil, __CALLER__, meta)
-    end
-
-    :ok
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description:
+        "@invariant <name>, <expr> was removed in Bond 0.16.0. Drop the binding name; " <>
+          "invariant expressions reference the implicit `subject` binding. Example: " <>
+          "`@invariant subject.field > 0` instead of `@invariant stack, stack.field > 0`."
   end
 
   defmacro @{:doc, meta, [value]} do

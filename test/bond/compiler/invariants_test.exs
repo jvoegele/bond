@@ -5,54 +5,6 @@ defmodule Bond.Compiler.InvariantsTest do
 
   alias Bond.Compiler.Invariants
 
-  describe "find_struct_arg/2" do
-    test "returns {:ok, name} for `%__MODULE__{} = name` pattern" do
-      params = quote(do: [%__MODULE__{} = stack, item])
-      assert Invariants.find_struct_arg(params, []) == {:ok, :stack}
-    end
-
-    test "returns {:ok, name} for `name = %__MODULE__{}` (reversed) pattern" do
-      params = quote(do: [stack = %__MODULE__{}, item])
-      assert Invariants.find_struct_arg(params, []) == {:ok, :stack}
-    end
-
-    test "returns {:ok, name} for destructured-and-bound pattern" do
-      params = quote(do: [%__MODULE__{field: x} = stack, item])
-      assert Invariants.find_struct_arg(params, []) == {:ok, :stack}
-    end
-
-    test "returns {:warn, :unbound_destructure} for destructure without binding" do
-      params = quote(do: [%__MODULE__{field: x}, item])
-      assert Invariants.find_struct_arg(params, []) == {:warn, :unbound_destructure}
-    end
-
-    test "returns {:ok, name} for `is_struct(name, __MODULE__)` guard" do
-      params = quote(do: [x, item])
-      guards = quote(do: [is_struct(x, __MODULE__)])
-      assert Invariants.find_struct_arg(params, guards) == {:ok, :x}
-    end
-
-    test "returns {:ok, name} for `is_struct/2` combined with `and`" do
-      params = quote(do: [x, y])
-      guards = quote(do: [is_struct(x, __MODULE__) and is_integer(y)])
-      assert Invariants.find_struct_arg(params, guards) == {:ok, :x}
-    end
-
-    test "returns :none for a bare-variable function head" do
-      params = quote(do: [x, item])
-      assert Invariants.find_struct_arg(params, []) == :none
-    end
-
-    test "returns :none for an unrelated struct pattern" do
-      params = quote(do: [%OtherMod{} = x])
-      assert Invariants.find_struct_arg(params, []) == :none
-    end
-
-    test "returns :none for empty params" do
-      assert Invariants.find_struct_arg([], []) == :none
-    end
-  end
-
   describe "detect_struct_params/2" do
     test "detects `%__MODULE__{} = name` at position 0" do
       params = quote(do: [%__MODULE__{} = stack, item])
@@ -169,21 +121,64 @@ defmodule Bond.Compiler.InvariantsTest do
     end
   end
 
-  describe "pre_invariant_stmts/5" do
+  describe "all_pre_invariant_stmts/5" do
     test "returns [] when mode is :purge" do
-      assert Invariants.pre_invariant_stmts(:any, :stack, :purge, true, true) == []
+      assert Invariants.all_pre_invariant_stmts(
+               :any,
+               [{:bound, :stack, 0}],
+               :purge,
+               true,
+               true
+             ) == []
     end
 
-    test "returns [] when struct_arg is nil" do
-      assert Invariants.pre_invariant_stmts(:any, nil, true, true, true) == []
+    test "returns [] when struct_params is empty" do
+      assert Invariants.all_pre_invariant_stmts(:any, [], true, true, true) == []
     end
 
-    test "emits a should_evaluate? + evaluate_invariants block otherwise" do
-      [ast] = Invariants.pre_invariant_stmts(:my_inv_fn, :stack, true, true, true)
+    test "emits one should_evaluate? + evaluate_invariants block per bound param" do
+      [ast] =
+        Invariants.all_pre_invariant_stmts(
+          :my_inv_fn,
+          [{:bound, :stack, 0}],
+          true,
+          true,
+          true
+        )
+
       code = Macro.to_string(ast)
       assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:invariants,\s*true"
       assert code =~ ~r"Bond\.Runtime\.Eval\.evaluate_invariants"
       assert code =~ ~r"my_inv_fn\(stack\)"
+    end
+
+    test "emits separate statements for multi-struct heads, in parameter order" do
+      stmts =
+        Invariants.all_pre_invariant_stmts(
+          :my_inv_fn,
+          [{:bound, :a, 0}, {:bound, :b, 1}],
+          true,
+          true,
+          true
+        )
+
+      assert length(stmts) == 2
+      [first, second] = stmts
+      assert Macro.to_string(first) =~ ~r"my_inv_fn\(a\)"
+      assert Macro.to_string(second) =~ ~r"my_inv_fn\(b\)"
+    end
+
+    test "uses __bond_subject_<idx>__ for destructure entries" do
+      [ast] =
+        Invariants.all_pre_invariant_stmts(
+          :my_inv_fn,
+          [{:destructure, 0}],
+          true,
+          true,
+          true
+        )
+
+      assert Macro.to_string(ast) =~ ~r"my_inv_fn\(__bond_subject_0__\)"
     end
   end
 

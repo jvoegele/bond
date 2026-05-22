@@ -25,35 +25,6 @@ defmodule Bond.Compiler.Invariants do
   alias Bond.Compiler.Assertion
 
   @typedoc """
-  Result of analysing a function head for an invariant-bearing argument.
-
-    * `{:ok, var_name}` — the function pattern-matches `%__MODULE__{} = name` (in either
-      order) or has an `is_struct(name, __MODULE__)` guard. `name` is the bound variable
-      that the pre-invariant check should run against.
-    * `{:warn, :unbound_destructure}` — the function destructures `%__MODULE__{...}` but
-      doesn't bind the whole struct to a variable. Pre-invariant check is skipped.
-    * `:none` — neither pattern nor guard mentions `%__MODULE__{}`. Skip silently.
-  """
-  @type struct_arg_result :: {:ok, atom()} | {:warn, atom()} | :none
-
-  @doc """
-  Inspects a function's parameter list and guards for a binding to this module's struct.
-
-  Only matches the `%__MODULE__{}` form. Fully-qualified module patterns (`%MyMod{}`) and
-  aliased forms are not recognised in 0.13.0 — users who want invariant pre-checks should
-  use `__MODULE__` idiomatically.
-  """
-  @spec find_struct_arg([Macro.t()], [Macro.t()]) :: struct_arg_result()
-  def find_struct_arg(params, guards) when is_list(params) and is_list(guards) do
-    cond do
-      name = bound_struct_param(params) -> {:ok, name}
-      name = is_struct_guard_var(guards) -> {:ok, name}
-      unbound_struct_param?(params) -> {:warn, :unbound_destructure}
-      true -> :none
-    end
-  end
-
-  @typedoc """
   Descriptor for a single struct-bearing parameter in a function head.
 
     * `{:bound, var_name, param_index}` — the parameter is bound to a variable in the head
@@ -125,22 +96,6 @@ defmodule Bond.Compiler.Invariants do
   def resolve_mode(value, _kind, _invariants) when value in [true, false], do: value
 
   @doc """
-  Picks the variable name to pre-check (if any) given the resolved mode and a function
-  clause. Returns the var-name atom on a clean detection, or `nil` when invariants are
-  purged or the function head doesn't expose a struct arg we can pre-check.
-  """
-  @spec struct_arg(Bond.Compiler.AnnotatedFunction.mode(), term()) :: atom() | nil
-  def struct_arg(:purge, _clause), do: nil
-
-  def struct_arg(_mode, clause) do
-    case find_struct_arg(clause.params || [], clause.guards || []) do
-      {:ok, name} -> name
-      {:warn, :unbound_destructure} -> nil
-      :none -> nil
-    end
-  end
-
-  @doc """
   Detects every struct-bearing parameter in a function clause, or returns `[]` when
   invariants are purged for the function.
 
@@ -157,15 +112,16 @@ defmodule Bond.Compiler.Invariants do
   end
 
   @doc """
-  Emits one pre-invariant statement per detected `{:bound, var, _}` struct parameter, in
-  left-to-right order. Each statement calls the lifted invariants defp with the bound
-  variable; the defp rebinds the assertion-side binding (e.g. `subject`) to that value
-  and runs every `@invariant` assertion against it.
+  Emits one pre-invariant statement per detected struct parameter, in left-to-right
+  order. Each statement calls the lifted invariants defp with the appropriate variable:
 
-  `{:destructure, _}` entries are skipped — capturing the destructured struct requires
-  rewriting the override clause head, which is wired in S4 of the mikado.
+    * `{:bound, var, _}` — the bound variable from the function head.
+    * `{:destructure, idx}` — `__bond_subject_<idx>__`, which the override clause head
+      binds via `Invariants.rewrite_call_params/2`.
 
-  Returns `[]` when the kind is purged or when no bound struct parameters were detected.
+  The defp rebinds `subject` to that value and runs every `@invariant` assertion
+  against it. Returns `[]` when the kind is purged or when no struct parameters were
+  detected.
   """
   @spec all_pre_invariant_stmts(
           atom(),
@@ -261,41 +217,6 @@ defmodule Bond.Compiler.Invariants do
   end
 
   @doc """
-  Emits the pre-invariant statements that go at the *start* of the override body.
-
-  Gated on `Bond.Runtime.Eval.should_evaluate?/2`. Returns an empty list when the kind is
-  purged or when there's no struct arg to check against.
-  """
-  @spec pre_invariant_stmts(
-          atom(),
-          atom() | nil,
-          Bond.Compiler.AnnotatedFunction.mode(),
-          Bond.Compiler.AnnotatedFunction.mode(),
-          Bond.Compiler.AnnotatedFunction.mode()
-        ) :: [Macro.t()]
-  def pre_invariant_stmts(_name, _struct_arg, :purge, _pre_mode, _post_mode), do: []
-  def pre_invariant_stmts(_name, nil, _mode, _pre_mode, _post_mode), do: []
-
-  def pre_invariant_stmts(name, struct_arg, mode, pre_mode, post_mode) do
-    arg_var = Macro.var(struct_arg, nil)
-    chain = %{preconditions: pre_mode, postconditions: post_mode}
-
-    [
-      quote do
-        if Bond.Runtime.Eval.should_evaluate?(
-             :invariants,
-             unquote(mode),
-             unquote(Macro.escape(chain))
-           ) do
-          Bond.Runtime.Eval.evaluate_invariants(fn ->
-            unquote(name)(unquote(arg_var))
-          end)
-        end
-      end
-    ]
-  end
-
-  @doc """
   Emits the post-invariant case-extraction statements that go *after* the postconditions
   and before the return.
 
@@ -371,47 +292,6 @@ defmodule Bond.Compiler.Invariants do
       end
     end
   end
-
-  # ---- AST helpers (moved from AnnotatedFunction in step 6) ----
-
-  defp bound_struct_param(params) do
-    Enum.find_value(params, fn
-      {:=, _, [{:%, _, [{:__MODULE__, _, _}, _]}, {var, _, ctx}]}
-      when is_atom(var) and is_atom(ctx) ->
-        var
-
-      {:=, _, [{var, _, ctx}, {:%, _, [{:__MODULE__, _, _}, _]}]}
-      when is_atom(var) and is_atom(ctx) ->
-        var
-
-      _ ->
-        nil
-    end)
-  end
-
-  defp unbound_struct_param?(params) do
-    Enum.any?(params, fn
-      {:%, _, [{:__MODULE__, _, _}, _]} -> true
-      _ -> false
-    end)
-  end
-
-  defp is_struct_guard_var(guards) do
-    Enum.find_value(guards, &extract_is_struct_var/1)
-  end
-
-  defp extract_is_struct_var({:is_struct, _, [{var, _, ctx}, {:__MODULE__, _, _}]})
-       when is_atom(var) and is_atom(ctx) do
-    var
-  end
-
-  defp extract_is_struct_var({:and, _, [left, right]}) do
-    extract_is_struct_var(left) || extract_is_struct_var(right)
-  end
-
-  defp extract_is_struct_var(_), do: nil
-
-  # ---- Helpers for detect_struct_params/2 (S1: subject-binding work) ----
 
   defp classify_param(param, guard_vars) do
     case param do
