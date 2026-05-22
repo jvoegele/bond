@@ -26,6 +26,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
             clauses: [],
             preconditions: [],
             postconditions: [],
+            invariants: [],
             doc_attributes: []
 
   @type t :: %__MODULE__{
@@ -36,6 +37,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
           clauses: [__MODULE__.Clause.t()],
           preconditions: [Bond.Compiler.Assertion.t()],
           postconditions: [Bond.Compiler.Assertion.t()],
+          invariants: [Bond.Compiler.Assertion.t()],
           doc_attributes: [FunctionDefinition.doc_attribute()]
         }
 
@@ -102,6 +104,16 @@ defmodule Bond.Compiler.AnnotatedFunction do
     %{annotated_function | postconditions: existing_postconditions ++ postconditions}
   end
 
+  def put_invariants(
+        %__MODULE__{invariants: existing_invariants} = annotated_function,
+        invariants
+      )
+      when is_list(invariants) do
+    Enum.each(invariants, fn %Assertion{kind: :invariant} -> :ok end)
+
+    %{annotated_function | invariants: existing_invariants ++ invariants}
+  end
+
   def put_doc_attributes(
         %__MODULE__{doc_attributes: existing_doc_attributes} = annotated_function,
         doc_attributes
@@ -115,6 +127,9 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
   def has_postconditions?(%__MODULE__{postconditions: postconditions}),
     do: not Enum.empty?(postconditions)
+
+  def has_invariants?(%__MODULE__{invariants: invariants}),
+    do: not Enum.empty?(invariants)
 
   def has_doc_attributes?(%__MODULE__{doc_attributes: doc_attributes}),
     do: not Enum.empty?(doc_attributes)
