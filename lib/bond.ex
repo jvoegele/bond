@@ -10,7 +10,7 @@ defmodule Bond do
              |> List.first()
 
   @typedoc false
-  @type assertion_kind :: :precondition | :postcondition | :check
+  @type assertion_kind :: :precondition | :postcondition | :check | :invariant
 
   @typedoc """
   Type to represent a label for an assertion, which must be a compile-time atom or string.

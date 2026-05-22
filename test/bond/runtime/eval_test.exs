@@ -89,6 +89,16 @@ defmodule Bond.Runtime.EvalTest do
     end
   end
 
+  describe "evaluate_invariants/1" do
+    test "raises InvariantError when the assertions function throws" do
+      info = %{@info | kind: :invariant}
+
+      assert_raise Bond.InvariantError, fn ->
+        Eval.evaluate_invariants(fn -> throw({:assertion_failure, info}) end)
+      end
+    end
+  end
+
   describe "stack trace pruning" do
     test "raised exception's stack trace contains no Bond.* frames" do
       info = %{@info | kind: :precondition}

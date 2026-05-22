@@ -25,12 +25,13 @@ defmodule Bond.Runtime.Eval do
   @assertion_errors %{
     precondition: Bond.PreconditionError,
     postcondition: Bond.PostconditionError,
-    check: Bond.CheckError
+    check: Bond.CheckError,
+    invariant: Bond.InvariantError
   }
 
   @type assertion_fun :: (() -> term())
   @type compile_default :: boolean()
-  @type kind :: :preconditions | :postconditions | :checks
+  @type kind :: :preconditions | :postconditions | :checks | :invariants
 
   @doc """
   Returns `true` when assertions of `kind` should be evaluated at this call site.
@@ -57,6 +58,11 @@ defmodule Bond.Runtime.Eval do
   @spec evaluate_check(assertion_fun()) :: term()
   def evaluate_check(check_fun) when is_function(check_fun, 0) do
     evaluate_assertions(check_fun)
+  end
+
+  @spec evaluate_invariants(assertion_fun()) :: term()
+  def evaluate_invariants(invariants_fun) when is_function(invariants_fun, 0) do
+    evaluate_assertions(invariants_fun)
   end
 
   defp evaluate_assertions(assertions_fun) do
