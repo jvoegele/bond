@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-05-24
+
+0.14.0 adds **`Bond.PropertyTest`** — a property-based testing layer that
+uses Bond's contracts as the oracle. The hard part of PBT is usually
+writing the predicate that distinguishes right from wrong outputs;
+contracts already supply that at every call site. PBT just feeds random
+inputs through already-instrumented code.
+
+### Added
+
+- **`Bond.PropertyTest.contract_holds/2`** — single macro, two forms:
+
+  - **Form 1 (single function).** `contract_holds &Mod.fn/N, args: [gen0, ...]`
+    expands to a property block that calls the function with random
+    arguments and lets Bond's runtime contracts fail the property on
+    any violation. StreamData shrinks to the minimal counterexample.
+
+  - **Form 2 (module sequence).**
+    `contract_holds Module, constructors:, transformers:, observers:`
+    expands to a property block that generates random sequences of
+    operations over a struct module and runs them. State is threaded
+    through transformers; observers don't advance state but the
+    pre-invariant still fires. The module's `@invariant`s are the
+    oracle. Supports `%Mod{}` and `{:ok, %Mod{}}` return shapes;
+    `{:error, _}` terminates the sequence cleanly. Common option
+    `:name` overrides the auto-generated property description.
+
+  The macro dispatches by first-arg AST shape (function reference vs
+  module alias).
+
+- **`use Bond.PropertyTest`** — brings in `ExUnitProperties` and imports
+  the `contract_holds` macro. Raises a `CompileError` at the use site
+  with installation instructions if `:stream_data` isn't available.
+
+- **`Bond.PropertyTest.Sequence`** — internal helper module owning the
+  sequence generator and runner used by Form 2.
+
+- New FAQ entry: "How does Bond compose with StreamData /
+  property-based testing?".
+
+### Changed
+
+- `:stream_data` moves from `only: [:dev, :test]` to a regular dep with
+  `optional: true`. Users who want PBT now add `{:stream_data, "~> 0.6"}`
+  to their own deps; users who don't pay no cost.
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.13.0] - 2026-05-23
 
 0.13.0 adds **`@invariant`** declarations for struct modules — module-scoped

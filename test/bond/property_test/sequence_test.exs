@@ -65,18 +65,14 @@ defmodule Bond.PropertyTest.SequenceTest do
     end
 
     test "extracts the struct from a constructor that returns {:ok, struct}" do
-      sequence =
-        {{:constructor, :try_new, [3]},
-         [{:transformer, :push, [:a]}]}
+      sequence = {{:constructor, :try_new, [3]}, [{:transformer, :push, [:a]}]}
 
       assert :ok = Sequence.run(InvariantSmoke, sequence)
     end
 
     test "raises ArgumentError when a transformer returns an unsupported shape" do
       # capacity/1 returns an integer, not a struct — invalid as a transformer.
-      sequence =
-        {{:constructor, :new, [3]},
-         [{:transformer, :capacity, []}]}
+      sequence = {{:constructor, :new, [3]}, [{:transformer, :capacity, []}]}
 
       assert_raise ArgumentError, ~r/unsupported shape/, fn ->
         Sequence.run(InvariantSmoke, sequence)
@@ -86,9 +82,7 @@ defmodule Bond.PropertyTest.SequenceTest do
     test "lets Bond.InvariantError propagate when the invariant is violated" do
       # broken_push/2 in the fixture intentionally produces a struct that violates
       # `size_within_capacity`. The post-invariant check on the def fires and raises.
-      sequence =
-        {{:constructor, :new, [2]},
-         [{:transformer, :broken_push, [:item]}]}
+      sequence = {{:constructor, :new, [2]}, [{:transformer, :broken_push, [:item]}]}
 
       assert_raise Bond.InvariantError, fn ->
         Sequence.run(InvariantSmoke, sequence)

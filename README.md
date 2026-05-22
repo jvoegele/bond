@@ -578,7 +578,7 @@ end
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.13.0"}
+    {:bond, "~> 0.14.0"}
   ]
 end
 ```
