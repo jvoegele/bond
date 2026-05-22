@@ -131,7 +131,7 @@ defmodule Counter.State do
 
   defstruct [:count]
 
-  @invariant state, non_negative_count: state.count >= 0
+  @invariant non_negative_count: subject.count >= 0
 
   @post count_incremented_by_1: result.count == current_count + 1
   def increment_count(%__MODULE__{count: current_count} = state) do

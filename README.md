@@ -31,9 +31,9 @@ Meyer with the Eiffel language. See the
 
 ## Usage
 
-`use Bond` in any module to enable the `@pre`, `@post`, `check/1`, and
-`check/2` annotations. Contracts may use any Elixir expression that returns
-a boolean (or a truthy value).
+`use Bond` in any module to enable the `@pre`, `@post`, and `@invariant`
+annotations plus the `check/1` macro. Contracts may use any Elixir
+expression that returns a boolean (or a truthy value).
 
 ```elixir
 defmodule Math do
@@ -55,32 +55,19 @@ to the `result` variable (bound to the function's return value) and
 `old(...)` expressions that snapshot a value before the function runs (see
 [`old` expressions](#module-old-expressions) below).
 
-Bond also provides a `check/1,2` macro for placing assertions at arbitrary
-points inside a function body — useful for sanity checks during development.
-`check` honours the `:bond, :checks` config (see
-[Conditional compilation](#module-conditional-compilation)) and is safe to
-disable in production builds.
-
-> #### When to use `check` {: .warning}
->
-> Don't use `check` for input validation, validating data from external
-> systems, or anything else that protects the integrity of your code. If
-> the check were removed (or compiled out via config), the system must still
-> behave correctly. Use ordinary control flow for that.
-
 > #### `use Bond` {: .info}
 >
-> `use Bond` overrides `Kernel.@/1` so that `@pre`, `@post`, and `@doc`
-> annotations can be intercepted and recorded, and installs `@on_definition`,
-> `@before_compile`, and `@after_compile` compiler hooks that wrap functions
-> with contracts via `defoverridable` at the end of module compilation. Your
-> `def`s and `defp`s are otherwise left alone.
+> `use Bond` overrides `Kernel.@/1` so that `@pre`, `@post`, `@invariant`,
+> and `@doc` annotations can be intercepted and recorded, and installs
+> `@on_definition`, `@before_compile`, and `@after_compile` compiler hooks
+> that wrap functions with contracts via `defoverridable` at the end of
+> module compilation. Your `def`s and `defp`s are otherwise left alone.
 >
-> `use Bond` also imports the `Bond` module so the `check/1` and `check/2`
-> macros are available, and imports `Bond.Predicates` so the predicate
-> functions and operators defined there (such as `~>` and `|||`) can be used
-> in assertions. `Bond.Predicates` can be explicitly imported elsewhere if you
-> want the operators outside of contract expressions.
+> `use Bond` also imports the `Bond` module so the `check/1` macro is
+> available, and imports `Bond.Predicates` so the predicate functions and
+> operators defined there (such as `~>` and `|||`) can be used in
+> assertions. `Bond.Predicates` can be explicitly imported elsewhere if
+> you want the operators outside of contract expressions.
 
 ## Assertion syntax
 
@@ -96,29 +83,30 @@ The recommended form is the **keyword list**, even for a single assertion:
 @pre numeric_x: is_number(x), non_negative_x: x >= 0
 ```
 
-For a bare assertion where a label adds no information, the **bare form** is
-also fine:
+For a bare assertion where a label adds no information, the **bare form**
+is also fine:
 
 ```elixir
 @pre is_number(x)
 @post is_float(result)
 ```
 
-For symmetry with ExUnit's `assert(value, message)` and `assert message, value`
-patterns, the `check/2` macro also accepts a label before or after the
-expression:
+The same two forms work for `@invariant` declarations and inside function
+bodies via the `check/1` macro:
 
 ```elixir
+@invariant subject.capacity >= 0
+@invariant non_negative_capacity: subject.capacity >= 0,
+           size_within_capacity: length(subject.items) <= subject.capacity
+
 check is_number(x)
 check x_is_number: is_number(x)
-check "x is a number", is_number(x)
-check is_number(x), "x is a number"
 ```
 
-Bond also provides the `Bond.Predicates` module with operators that are often
-useful in assertions — notably `~>` (logical implication) and `<~` (pattern
-match). `Bond.Predicates` is automatically imported into assertion
-expressions, so you can use these operators directly:
+Bond also provides the `Bond.Predicates` module with operators that are
+often useful in assertions — notably `~>` (logical implication) and `<~`
+(pattern match). `Bond.Predicates` is automatically imported into
+assertion expressions, so you can use these operators directly:
 
 ```elixir
 @post (x == 0) ~> (result == 0.0)
@@ -127,96 +115,147 @@ expressions, so you can use these operators directly:
 
 See `Bond.Predicates` for the full list.
 
+## `@invariant` for struct modules
+
+`@invariant` declarations specify properties that hold for every value of
+a struct, checked automatically on the way *into* and *out of* every
+public function in the struct's defining module.
+
+Where `@pre`/`@post` constrain a single function call, `@invariant`
+constrains the struct itself — every instance produced by the module's
+public API satisfies the invariant, every instance entering its public
+API is expected to.
+
+```elixir
+defmodule BoundedStack do
+  use Bond
+
+  defstruct [:items, :capacity]
+
+  @invariant non_negative_capacity: subject.capacity >= 0,
+             size_within_capacity: length(subject.items) <= subject.capacity
+
+  def new(capacity) when is_integer(capacity) and capacity >= 0 do
+    %__MODULE__{items: [], capacity: capacity}
+  end
+
+  def push(%__MODULE__{} = stack, item) do
+    %{stack | items: [item | stack.items]}
+  end
+end
+```
+
+### The `subject` binding
+
+Inside an `@invariant` expression, **`subject` refers to the struct
+instance being checked**. Bond rebinds `subject` at every check site to
+whichever struct parameter the function head exposes — you write the
+invariant once against `subject` and Bond handles the rest, regardless of
+what each function names its struct parameter.
+
+### When invariants fire
+
+Invariants check at the boundaries of public functions in the struct's
+module — the places a struct value crosses between "internal" (possibly
+transient) and "external" (must be valid). Bond auto-detects the struct
+parameter in any of these head shapes:
+
+| Function head shape | Detected? | Pre-check on entry |
+|---|---|---|
+| `def foo(%__MODULE__{} = name, ...)` | yes | yes, on the captured struct |
+| `def foo(x, ...) when is_struct(x, __MODULE__)` | yes | yes, on `x` |
+| `def foo(%__MODULE__{field: ...}, ...)` (destructure-only) | yes | yes, on the captured struct |
+| `def foo(x, ...)` (no pattern, no guard) | no | skipped silently |
+| `defp ...` (any shape) | no | skipped — private functions exempt by Eiffel convention |
+
+The post-check on exit matches both `%__MODULE__{}` and `{:ok,
+%__MODULE__{}}` return shapes. Other shapes (`{:error, _}`, bare
+integers, etc.) fall through with no check. If your function returns the
+struct under a different wrapper, add an explicit `@post`.
+
+Multiple struct parameters in the same head (e.g. `def
+merge(%__MODULE__{} = a, %__MODULE__{} = b)`) are all checked in
+left-to-right order; `subject` rebinds to each in turn.
+
+### Violation behaviour
+
+A violated invariant raises `Bond.InvariantError` with the same metadata
+shape as `Bond.PreconditionError` / `Bond.PostconditionError`, and fires
+the same telemetry event (`[:bond, :assertion, :failure]` with
+`:kind => :invariant`). Test with
+`Bond.Test.assert_invariant_violation/2`.
+
+### What's not supported
+
+Invariants are scoped to the **struct's own defining module**. External
+modules that operate on the struct can't declare invariants for it —
+this matches Eiffel's class-locality and keeps cross-module ownership
+clean.
+
+Process-level invariants (for `GenServer`/`Agent` state) aren't a
+separate feature. The recommended pattern is to keep the process state
+in a struct and declare invariants on that struct's module. See the
+[Contracts in a Concurrent World](contracts-and-concurrency.html) guide.
+
+## Inline `check/1` assertions
+
+Bond's `check/1` macro places assertions at arbitrary points inside a
+function body — useful for sanity checks during development. It honours
+the `:bond, :checks` config (see [Conditional
+compilation](#module-conditional-compilation)) and is safe to disable in
+production builds.
+
+```elixir
+def total(items) do
+  raw = Enum.sum(items)
+
+  check raw >= 0
+  check total_is_integer: is_integer(raw)
+
+  raw
+end
+```
+
+On success `check` returns the assertion's value (or list of values for
+the keyword-list form). On failure it raises `Bond.CheckError`.
+
+> #### When to use `check` {: .warning}
+>
+> Don't use `check` for input validation, validating data from external
+> systems, or anything else that protects the integrity of your code. If
+> the check were removed (or compiled out via config), the system must
+> still behave correctly. Use ordinary control flow for that.
+
 ## `old` expressions
 
-`old` expressions allow postconditions to access the value of any arbitrary
-expression _prior to_ execution of the function body. Postconditions are
-"pre-compiled" in such a way that any `old` expressions that appear in
-assertions are resolved to the value that they had at the start of function
-execution.
-
-While this facility is not particularly relevant for purely functional code,
-it can be useful for stateful components of an application.
-
-For example, imagine a simple, stateful `Counter` module that uses an `Agent`
-to store the current count (some Agent code omitted for brevity):
+`old` expressions in postconditions snapshot a value before the function
+body runs, so the postcondition can compare the after-state to the
+before-state.
 
 ```elixir
 defmodule Counter do
   use Bond
 
-  def get_count(agent) do
-    Agent.get(agent, & &1)
-  end
+  def get_count(agent), do: Agent.get(agent, & &1)
 
-  @post count_incremented_by_1: get_count(agent) == old(get_count(agent)) + 1
+  @post incremented: get_count(agent) == old(get_count(agent)) + 1
   def increment_count(agent) do
     Agent.update(agent, &(&1 + 1))
   end
 end
 ```
 
-Notice how the `old` expression captures the value of `get_count/1` prior to
-execution of the function, and this value is used to verify that the value of
-`get_count/1` has been updated as expected.
+Bond resolves every `old(...)` expression at the start of function
+execution and threads the captured value into the postcondition. `old`
+is only available inside `@post`.
 
-Note, however, that there is a potential race condition in the above code.
-Since Agents are inherently concurrent, it is possible that another call to
-`increment_count/1` is interleaved between execution of the function body and
-the call to `get_count/1` that appears in the postcondition. In this scenario
-the postcondition would fail because the new value of `get_count/1` would be
-at least 2 greater than the old value captured in the postcondition, rather
-than exactly 1 greater as specified in the `count_incremented_by_1` assertion.
-
-As a first attempt to alleviate this race condition we can update the
-`increment_count/1` function so that it returns the updated count as its result
-and use that result in the postcondition directly:
-
-```elixir
-  @post returns_updated_count: result == old(get_count(agent)) + 1
-  def increment_count(agent) do
-    Agent.get_and_update(agent, fn count ->
-      new_count = count + 1
-      {new_count, new_count}
-    end)
-  end
-```
-
-In this version we utilize `Agent.get_and_update/3` to update the counter and
-return the updated counter value in one operation. The new counter value is the
-`result` of the function which can be used in postconditions. The
-`returns_updated_count` assertion compares this `result` to the `old` value of
-`get_count/1` to ensure that it was incremented by exactly 1.
-
-However, as you may have noticed, it is still possible for another call to
-`increment_count/1` to be interleaved between the call to `get_count/1` in the
-`old` expression of the postcondition and the call to `Agent.get_and_update/3`
-in the function body. Alas, there is no way to "lock" an Agent over multiple
-operations to ensure that there are no concurrent updates to the Agent state.
-Therefore, our only choice is to soften the guarantee made by our
-postcondition:
-
-```elixir
-  @post count_increased: get_count(agent) > old(get_count(agent))
-  def increment_count(agent) do
-    Agent.update(agent, &(&1 + 1))
-  end
-```
-
-The `count_increased` assertion in the postcondition now guarantees only that
-the new value of `get_count/1` is strictly greater than the old value. This
-assertion always holds true regardless of the number of concurrent state
-updates to the counter.
-
-Although this assertion is not as strong as the `count_incremented_by_1`
-assertion in the original version, it is the strongest we can provide given
-the possibility of concurrent state updates.
-
-Bond 0.13.0 added a related but distinct facility — `@invariant`
-declarations for struct modules. Where postconditions like
-`count_increased` constrain a single operation, invariants constrain
-*every* operation's input and output struct. See the
-[Invariants](#module-invariants) section below.
+The naive form above has a race condition when used against stateful
+concurrent components — another `increment_count/1` can interleave
+between the `old` snapshot and the postcondition evaluation. See the
+[Contracts in a Concurrent World](contracts-and-concurrency.html) guide
+for the pattern that handles this. For struct-based state machines,
+`@invariant` is usually a better fit than `old` — it constrains every
+operation's input and output struct rather than a single delta.
 
 ## Documenting contracts
 
@@ -233,114 +272,12 @@ yourself — Bond synthesises one when needed.
 > #### Conditional compilation and docs {: .info}
 >
 > When a function has **all** of its contracts `:purge`d (see
-> [Conditional compilation](#module-conditional-compilation)), the function
-> runs with zero contract overhead and its auto-generated contract sections
-> are also suppressed. If you want the contract documentation visible in
-> production builds, leave at least one of `:preconditions` or
-> `:postconditions` set to `true` or `false` (both emit the override; only
-> `:purge` removes it).
-
-## Invariants
-
-`@invariant` declarations specify properties that must hold for every value of
-a struct. They're checked automatically on the way *into* and *out of* every
-public function in the struct's defining module that handles the struct.
-
-Where `@pre`/`@post` constrain a single function call, `@invariant` constrains
-the struct itself — every instance produced by the module's public API
-satisfies the invariant, every instance entering the module's public API is
-expected to.
-
-```elixir
-defmodule BoundedStack do
-  use Bond
-
-  defstruct [:items, :capacity]
-
-  @invariant stack,
-             non_negative_capacity: stack.capacity >= 0,
-             size_within_capacity: length(stack.items) <= stack.capacity
-
-  def new(capacity) when is_integer(capacity) and capacity >= 0 do
-    %__MODULE__{items: [], capacity: capacity}
-  end
-
-  def push(%__MODULE__{} = stack, item) do
-    %{stack | items: [item | stack.items]}
-  end
-end
-```
-
-### Syntax
-
-`@invariant <name>, <kw_or_expression>` where `<name>` is the variable that
-the invariant's expression refers to. Both single-expression and keyword-list
-forms are supported, identical to `@pre`/`@post`:
-
-```elixir
-@invariant stack, length(stack.items) <= stack.capacity
-
-@invariant stack,
-           non_negative_capacity: stack.capacity >= 0,
-           size_within_capacity: length(stack.items) <= stack.capacity
-```
-
-You can declare multiple `@invariant`s with the same or different binding
-names; the convention is one binding name per module.
-
-### When invariants fire
-
-Invariants are checked at the boundaries of public functions in the struct's
-module — exactly the places a struct value crosses between "internal"
-(possibly transient) and "external" (must be valid).
-
-| Function head shape | Pre-check on entry | Post-check on exit |
-|---|---|---|
-| `def foo(%__MODULE__{} = name, ...)` | yes, on `name` | yes, if result is `%__MODULE__{}` or `{:ok, %__MODULE__{}}` |
-| `def foo(x, ...) when is_struct(x, __MODULE__)` | yes, on `x` | same |
-| `def foo(%__MODULE__{field: ...}, ...)` (no `= name`) | skipped, compile-time warning | same |
-| `def foo(x, ...)` (no pattern, no guard) | skipped | same |
-| `defp ...` | skipped — private functions exempt by Eiffel convention | skipped |
-
-The post-check matches both `%__MODULE__{}` and `{:ok, %__MODULE__{}}`
-returns. Other shapes (e.g. `{:error, _}`, bare integers) fall through and
-no check fires. If your function returns the struct under a different
-wrapper, add an explicit `@post`.
-
-### Violation behaviour
-
-A violated invariant raises `Bond.InvariantError`, with the same metadata
-shape as `Bond.PreconditionError` / `Bond.PostconditionError` and the same
-telemetry event (`[:bond, :assertion, :failure]` with `:kind => :invariant`).
-Test with `Bond.Test.assert_invariant_violation/2`.
-
-### Compile-time configuration
-
-Invariants share the same `true | false | :purge` value space as the other
-three kinds, controlled by `:bond, :invariants` in your config:
-
-```elixir
-# config/prod.exs — invariants compile in but default off; flip on
-# remotely via Application.put_env(:bond, :invariants, true)
-config :bond, invariants: false
-
-# config/prod.exs — invariants purged entirely, zero per-call cost
-config :bond, invariants: :purge
-```
-
-You can also set `:invariants` per-module via `use Bond, invariants: …`,
-or via an `:overrides` entry.
-
-### What's not supported
-
-Invariants are scoped to the **struct's own defining module**. External
-modules that operate on the struct can't declare invariants for it — that
-matches Eiffel's class-locality and keeps cross-module ownership clean.
-
-Process-level invariants (for `GenServer`/`Agent` state) aren't a separate
-feature — the recommended pattern is to keep the process state in a struct
-and declare invariants on that struct's module. See the
-[`Contracts in a Concurrent World`](contracts-and-concurrency.html) guide.
+> [Conditional compilation](#module-conditional-compilation)), the
+> function runs with zero contract overhead and its auto-generated
+> contract sections are also suppressed. If you want the contract
+> documentation visible in production builds, leave at least one of
+> `:preconditions` or `:postconditions` set to `true` or `false` (both
+> emit the override; only `:purge` removes it).
 
 ## Conditional compilation
 
@@ -374,8 +311,8 @@ preconditions ≤ postconditions ≤ invariants
 ```
 
 A `:postconditions` failure is only diagnostically meaningful if
-`:preconditions` held first — without preconditions, an "incorrect" output
-might really be the caller's fault, not the callee's. Same for
+`:preconditions` held first — without preconditions, an "incorrect"
+output might really be the caller's fault, not the callee's. Same for
 `:invariants` resting on both. Bond enforces this in two ways:
 
 - **Compile time.** If a lower kind is `:purge`d, every higher kind must
@@ -384,12 +321,13 @@ might really be the caller's fault, not the callee's. Same for
   without removing the code, use `false` instead of `:purge`.
 
 - **Runtime.** If a lower kind is `false` at runtime
-  (`Application.put_env(:bond, :preconditions, false)`), the higher kinds
-  are also skipped — even if they're set to `true` themselves. Bond emits
-  a one-time-per-process `Logger.warning` the first time this happens
-  for a given (higher, lower) pair, so the diagnostic is visible.
+  (`Application.put_env(:bond, :preconditions, false)`), the higher
+  kinds are also skipped — even if they're set to `true` themselves.
+  Bond emits a one-time-per-process `Logger.warning` the first time
+  this happens for a given (higher, lower) pair, so the diagnostic is
+  visible.
 
-`:checks` is *independent* of the chain. A `check/1,2` is an internal
+`:checks` is *independent* of the chain. A `check/1` is an internal
 assertion about your computation, not a contract with a caller, so it
 remains meaningful regardless of any other kind's settings.
 
@@ -406,8 +344,8 @@ config :bond, preconditions: :purge   # postconditions and invariants still :tru
 
 ### Runtime toggling
 
-When a kind is compiled with `true` or `false`, Bond emits a runtime guard
-on every contract evaluation that reads
+When a kind is compiled with `true` or `false`, Bond emits a runtime
+guard on every contract evaluation that reads
 `Application.get_env(:bond, <kind>, <compile_time_value>)`. The guard
 evaluates the contract unless the runtime value is exactly `false`. This
 means contracts can be flipped on and off without recompiling:
@@ -421,9 +359,9 @@ Application.put_env(:bond, :preconditions, true)   # active again
 `:purge` is the only value with no runtime presence — the code isn't
 compiled in, so `Application.put_env/3` can't bring it back.
 
-The runtime check is a single `Application.get_env/3` lookup per call per
-contract kind. A trivial benchmark (a function with `@pre is_number(x)`
-called in a tight loop) shows:
+The runtime check is a single `Application.get_env/3` lookup per call
+per contract kind. A trivial benchmark (a function with `@pre
+is_number(x)` called in a tight loop) shows:
 
 | Mode      | ns / call | Overhead vs `:purge` |
 |-----------|-----------|---------------------|
@@ -431,9 +369,9 @@ called in a tight loop) shows:
 | `false`   | ~89 ns    | ~40 ns (the guard alone) |
 | `true`    | ~155 ns   | ~107 ns (guard + assertion eval) |
 
-For genuinely hot-path code, prefer `:purge`. The benchmark itself lives at
-`bench/runtime_check_overhead.exs` if you want to reproduce it on your
-hardware.
+For genuinely hot-path code, prefer `:purge`. The benchmark itself
+lives at `bench/runtime_check_overhead.exs` if you want to reproduce it
+on your hardware.
 
 ### Per-module overrides
 
@@ -467,27 +405,13 @@ defmodule MyApp.HotPath do
 end
 ```
 
-### Migrating from 0.10.0
-
-Before 0.10.x, `false` meant "not compiled in" (zero overhead). In 0.11.0
-the value space changed:
-
-| 0.10.x  | 0.11.0 equivalent | Notes |
-|---------|---------------------|-------|
-| `true`  | `true`              | Same default behaviour. Now also runtime-togglable. |
-| `false` | `:purge`            | **Migration**: if you used `false` for zero-overhead, switch to `:purge`. |
-
-In 0.11.0, `false` is a *runtime default* meaning "compiled but off by
-default." If you used `false` simply to disable contracts at compile time,
-change it to `:purge` to keep the same compiled output.
-
 ## Telemetry
 
-Bond emits a [`:telemetry`](https://hexdocs.pm/telemetry/readme.html) event
-whenever a `@pre`, `@post`, or `check` assertion is violated. The event
-fires once per failure, immediately before the corresponding
-`Bond.PreconditionError` / `Bond.PostconditionError` / `Bond.CheckError`
-is raised.
+Bond emits a [`:telemetry`](https://hexdocs.pm/telemetry/readme.html)
+event whenever a `@pre`, `@post`, `@invariant`, or `check` assertion is
+violated. The event fires once per failure, immediately before the
+corresponding `Bond.PreconditionError` / `Bond.PostconditionError` /
+`Bond.InvariantError` / `Bond.CheckError` is raised.
 
 **Event:** `[:bond, :assertion, :failure]`
 
@@ -498,7 +422,7 @@ is raised.
 
 **Metadata:**
 
-- `:kind` — `:precondition | :postcondition | :check`
+- `:kind` — `:precondition | :postcondition | :invariant | :check`
 - `:module` — module the assertion is attached to
 - `:function` — `{name, arity}` of the function containing the assertion
 - `:label` — the keyword label, or `nil` if unlabelled
@@ -534,18 +458,18 @@ defmodule MyApp.Telemetry do
 end
 ```
 
-Only failure events are emitted in 0.12.0. Pass events would be far too
-chatty for production use; if there's demand for them they can be added
-later behind an opt-in.
+Only failure events are emitted. Pass events would be far too chatty for
+production use; if there's demand for them they can be added later
+behind an opt-in.
 
 ## Property-based testing
 
 Bond contracts compose naturally with
-[StreamData](https://hex.pm/packages/stream_data) property-based testing.
-The usual hard parts of PBT are generating inputs and writing an oracle
-that distinguishes right answers from wrong ones; Bond's contracts
-already supply the oracle at every call site. PBT then just feeds random
-inputs through already-instrumented code.
+[StreamData](https://hex.pm/packages/stream_data) property-based
+testing. The usual hard parts of PBT are generating inputs and writing
+an oracle that distinguishes right answers from wrong ones; Bond's
+contracts already supply the oracle at every call site. PBT then just
+feeds random inputs through already-instrumented code.
 
 `Bond.PropertyTest.contract_holds/2` ships in two forms.
 
@@ -581,16 +505,16 @@ end
 
 Generates random *sequences* of operations over a struct module. The
 constructor produces an initial struct; transformers thread state
-forward (they take the current struct as their first argument); observers
-take the struct but don't advance state. The module's `@invariant`s fire
-on every operation entry and exit, so any violation in any operation
-shrinks back to the minimal failing sequence.
+forward (they take the current struct as their first argument);
+observers take the struct but don't advance state. The module's
+`@invariant`s fire on every operation entry and exit, so any violation
+in any operation shrinks back to the minimal failing sequence.
 
 Form 2 supports `%Mod{}` and `{:ok, %Mod{}}` return shapes from
 constructors and transformers. `{:error, _}` terminates the sequence
-cleanly (an operation refusing isn't a contract violation). Other return
-shapes raise an `ArgumentError` — wrap your function or test it with
-Form 1.
+cleanly (an operation refusing isn't a contract violation). Other
+return shapes raise an `ArgumentError` — wrap your function or test it
+with Form 1.
 
 ### Setup
 
@@ -600,7 +524,7 @@ enable PBT:
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.15.0"},
+    {:bond, "~> 0.16.0"},
     {:stream_data, "~> 0.6", only: [:dev, :test]}
   ]
 end
@@ -618,7 +542,7 @@ end
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.15.0"}
+    {:bond, "~> 0.16.0"}
   ]
 end
 ```

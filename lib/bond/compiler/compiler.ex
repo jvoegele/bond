@@ -245,22 +245,20 @@ defmodule Bond.Compiler do
   end
 
   @doc false
-  def register_invariant(name, expression, label, env, meta) when is_atom(name) do
-    # Strip the hygiene context off every reference to the binding name (`stack` in
-    # `@invariant stack, length(stack.items)`). The defp emitted in
-    # `Bond.Compiler.Invariants` declares the rebind as `Macro.var(name, nil)`; if the
-    # user's references kept their original module context, they would not resolve to
-    # that rebind.
-    normalized = normalize_binding_context(expression, name)
-    meta_with_binding = Keyword.put(meta, :binding_name, name)
-    invariant = Assertion.new(:invariant, label, normalized, env, meta_with_binding)
+  def register_invariant(expression, label, env, meta) do
+    # Strip the hygiene context off every reference to `subject` so they resolve to the
+    # `subject` variable rebound by `Bond.Compiler.Assertion.invariants_body/2`
+    # (which uses `Macro.var(:subject, nil)`). Without this, references inherited from
+    # the macro's expansion context would not resolve to the rebind.
+    normalized = normalize_subject_context(expression)
+    invariant = Assertion.new(:invariant, label, normalized, env, meta)
     FSM.invariant_def(fsm(env), invariant)
   end
 
-  defp normalize_binding_context(expression, binding_name) do
+  defp normalize_subject_context(expression) do
     Macro.prewalk(expression, fn
-      {^binding_name, meta, ctx} when is_atom(ctx) ->
-        {binding_name, meta, nil}
+      {:subject, meta, ctx} when is_atom(ctx) ->
+        {:subject, meta, nil}
 
       other ->
         other

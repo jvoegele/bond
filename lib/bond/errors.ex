@@ -110,7 +110,7 @@ end
 
 defmodule Bond.CheckError do
   @moduledoc """
-  Exception raised when a `Bond.check/2` assertion fails.
+  Exception raised when a `Bond.check/1` assertion fails.
   """
 
   use Bond.AssertionError

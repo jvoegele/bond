@@ -1,0 +1,46 @@
+%% Mikado graph for the 0.16.0 work bundle:
+%%   1. @invariant subject-binding redesign (Move A+B; clean break)
+%%   2. check/2 syntax pruning (bare + kw forms only)
+%%
+%% Arrows point from a goal to its prerequisites. Leaves (green) have no
+%% further prerequisites. Depth-first per Mikado: pick a leaf, finish it,
+%% commit, repeat.
+%%
+%% Design:
+%%   - `@invariant <expr_or_kw>` — no binding-name argument.
+%%   - `subject` is the implicit binding in invariant expressions.
+%%   - Bond auto-detects struct params: `%__MODULE__{} = x`,
+%%     `is_struct(x, __MODULE__)` guard, or `%__MODULE__{...}` destructure.
+%%   - Multiple struct params: pre-check fires on each, rebinding subject.
+%%   - Destructure-only heads: warning lifted; Bond injects the binding
+%%     in its override clause.
+%%   - No struct in head: silent (no pre-check); post-check still fires
+%%     if return shape matches.
+%%   - Clean break: old `@invariant <name>, <expr>` raises CompileError
+%%     with a migration message.
+%%   - check/2 keeps `check expr` and `check label: expr`; drops the
+%%     `check "str", expr` / `check expr, "str"` forms.
+
+flowchart TD
+    G(["**Goal**<br/>0.16.0 — @invariant subject-binding + check/2 pruning"])
+
+    G --> S1[1. Detection helpers in Bond.Compiler.Invariants]
+    G --> S2[2. Wire new @invariant emission: subject auto-binding]
+    G --> S3[3. Migrate internal/test @invariant declarations to new form]
+    G --> S4[4. Lift destructure-only warning; tests for destructure-only]
+    G --> S5[5. Old @invariant form → CompileError; drop :binding_name]
+    G --> C1[6. Prune check/2 to bare + keyword forms]
+    G --> D1[7. Rewrite README/moduledoc affected sections]
+    G --> R1[8. CHANGELOG + 0.16.0 version bump]
+
+    S2 --> S1
+    S3 --> S2
+    S4 --> S2
+    S5 --> S3
+    D1 --> S5
+    D1 --> S4
+    D1 --> C1
+    R1 --> D1
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S1,C1 leaf;

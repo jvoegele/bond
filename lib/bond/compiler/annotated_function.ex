@@ -16,6 +16,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
   """
 
   alias Bond.Compiler.Assertion
+  alias Bond.Compiler.ContractDocs
   alias Bond.Compiler.FunctionDefinition
   alias Bond.Compiler.Invariants
   alias Bond.Compiler.OldExpression
@@ -249,11 +250,13 @@ defmodule Bond.Compiler.AnnotatedFunction do
     first_clause = List.first(annotated_function.clauses)
     function_info = {fun, arity}
 
-    # If any params in the original use default-arg syntax (`trap_door \\ nil`), strip the
-    # default so the override is a plain arity-N def with no default args. Elixir's
-    # auto-generated forwarding clauses for the original still dispatch by name+arity, so
-    # they end up calling our override.
-    call_params = strip_default_args(first_clause.params)
+    # `strip_default_args` removes `\\` defaults so the override is a plain arity-N def;
+    # `params_split/3` then partitions into head_params (for def/defp heads) and
+    # super_args (for super/eval call sites). See Invariants.rewrite_call_params/2.
+    clean_params = strip_default_args(first_clause.params)
+
+    {struct_params, head_params, super_args} =
+      Invariants.params_split(clean_params, first_clause, inv_mode)
 
     {postconditions, old_context} =
       if post_mode != :purge do
@@ -269,19 +272,23 @@ defmodule Bond.Compiler.AnnotatedFunction do
     post_fn_name = lifted_fn_name(:postconditions, fun, arity)
     inv_fn_name = lifted_fn_name(:invariants, fun, arity)
 
-    struct_arg = Invariants.struct_arg(inv_mode, first_clause)
-
-    doc_asts = doc_clauses(annotated_function, first_clause.env, pre_mode, post_mode)
+    doc_asts = ContractDocs.doc_clauses(annotated_function, first_clause.env, pre_mode, post_mode)
 
     pre_invariant_stmts =
-      Invariants.pre_invariant_stmts(inv_fn_name, struct_arg, inv_mode, pre_mode, post_mode)
+      Invariants.all_pre_invariant_stmts(
+        inv_fn_name,
+        struct_params,
+        inv_mode,
+        pre_mode,
+        post_mode
+      )
 
     post_invariant_stmts =
       Invariants.post_invariant_stmts(inv_fn_name, inv_mode, struct_module, pre_mode, post_mode)
 
     body_stmts =
       build_override_body(
-        call_params,
+        super_args,
         pre_fn_name,
         post_fn_name,
         old_assignments,
@@ -297,7 +304,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
         [
           maybe_build_assertion_defp(
             pre_fn_name,
-            call_params,
+            head_params,
             [],
             annotated_function.preconditions,
             function_info,
@@ -306,7 +313,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
           ),
           maybe_build_assertion_defp(
             post_fn_name,
-            call_params,
+            head_params,
             postcondition_extra_params(old_pairs),
             postconditions,
             function_info,
@@ -329,7 +336,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
       unquote_splicing(doc_asts)
 
-      unquote(kind)(unquote(fun)(unquote_splicing(call_params))) do
+      unquote(kind)(unquote(fun)(unquote_splicing(head_params))) do
         (unquote_splicing(body_stmts))
       end
 
@@ -437,89 +444,5 @@ defmodule Bond.Compiler.AnnotatedFunction do
       {:\\, _meta, [param, _default]} -> param
       other -> other
     end)
-  end
-
-  defp doc_clauses(
-         %__MODULE__{doc_attributes: doc_attributes} = annotated_function,
-         env,
-         pre_mode,
-         post_mode
-       ) do
-    contract_docs = build_contract_docs(annotated_function, pre_mode, post_mode)
-
-    has_string_doc? = Enum.any?(doc_attributes, fn {_meta, value} -> is_binary(value) end)
-
-    augmented =
-      cond do
-        has_string_doc? ->
-          Enum.map(doc_attributes, fn
-            {meta, value} when is_binary(value) and contract_docs != "" ->
-              {meta, value <> "\n\n" <> contract_docs}
-
-            other ->
-              other
-          end)
-
-        contract_docs != "" ->
-          # No user-supplied string doc; synthesise one containing just the contract docs so
-          # the contracts always appear in generated documentation.
-          [{[line: env.line], contract_docs} | doc_attributes]
-
-        true ->
-          doc_attributes
-      end
-
-    for {meta, value} <- augmented do
-      line = Keyword.get(meta, :line, env.line)
-
-      quote do
-        Module.put_attribute(__MODULE__, :doc, {unquote(line), unquote(Macro.escape(value))})
-      end
-    end
-  end
-
-  defp build_contract_docs(
-         %__MODULE__{preconditions: preconditions, postconditions: postconditions},
-         pre_mode,
-         post_mode
-       ) do
-    precondition_docs =
-      if pre_mode != :purge,
-        do: generate_assertion_docs(preconditions, header: "#### Preconditions"),
-        else: []
-
-    postcondition_docs =
-      if post_mode != :purge,
-        do: generate_assertion_docs(postconditions, header: "#### Postconditions"),
-        else: []
-
-    contract_iodata =
-      case {Enum.empty?(precondition_docs), Enum.empty?(postcondition_docs)} do
-        {true, true} -> []
-        {true, false} -> postcondition_docs
-        {false, true} -> precondition_docs
-        {false, false} -> [precondition_docs, "\n\n", postcondition_docs]
-      end
-
-    IO.iodata_to_binary(contract_iodata)
-  end
-
-  defp generate_assertion_docs([], _opts), do: []
-
-  defp generate_assertion_docs(assertions, opts) do
-    header = if header = opts[:header], do: header <> "\n\n", else: ""
-
-    assertions
-    |> Enum.reduce([], fn
-      %{label: nil, code: code}, acc ->
-        [code | acc]
-
-      assertion, acc ->
-        label = assertion.label |> inspect() |> String.trim_leading(":")
-        [[label, ": ", assertion.code] | acc]
-    end)
-    |> Enum.reverse()
-    |> List.insert_at(0, header)
-    |> Enum.intersperse("\n    ")
   end
 end

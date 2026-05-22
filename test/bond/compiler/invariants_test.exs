@@ -5,51 +5,100 @@ defmodule Bond.Compiler.InvariantsTest do
 
   alias Bond.Compiler.Invariants
 
-  describe "find_struct_arg/2" do
-    test "returns {:ok, name} for `%__MODULE__{} = name` pattern" do
+  describe "detect_struct_params/2" do
+    test "detects `%__MODULE__{} = name` at position 0" do
       params = quote(do: [%__MODULE__{} = stack, item])
-      assert Invariants.find_struct_arg(params, []) == {:ok, :stack}
+      assert Invariants.detect_struct_params(params, []) == [{:bound, :stack, 0}]
     end
 
-    test "returns {:ok, name} for `name = %__MODULE__{}` (reversed) pattern" do
+    test "detects reversed `name = %__MODULE__{}` pattern" do
       params = quote(do: [stack = %__MODULE__{}, item])
-      assert Invariants.find_struct_arg(params, []) == {:ok, :stack}
+      assert Invariants.detect_struct_params(params, []) == [{:bound, :stack, 0}]
     end
 
-    test "returns {:ok, name} for destructured-and-bound pattern" do
+    test "detects destructure-and-bind `%__MODULE__{field: x} = name`" do
       params = quote(do: [%__MODULE__{field: x} = stack, item])
-      assert Invariants.find_struct_arg(params, []) == {:ok, :stack}
+      assert Invariants.detect_struct_params(params, []) == [{:bound, :stack, 0}]
     end
 
-    test "returns {:warn, :unbound_destructure} for destructure without binding" do
-      params = quote(do: [%__MODULE__{field: x}, item])
-      assert Invariants.find_struct_arg(params, []) == {:warn, :unbound_destructure}
+    test "detects struct at a non-zero parameter position" do
+      params = quote(do: [item, %__MODULE__{} = stack])
+      assert Invariants.detect_struct_params(params, []) == [{:bound, :stack, 1}]
     end
 
-    test "returns {:ok, name} for `is_struct(name, __MODULE__)` guard" do
+    test "detects destructure-only `%__MODULE__{...}` without binding" do
+      params = quote(do: [%__MODULE__{items: [h | _]}, item])
+      assert Invariants.detect_struct_params(params, []) == [{:destructure, 0}]
+    end
+
+    test "detects bare `name` plus `is_struct(name, __MODULE__)` guard" do
       params = quote(do: [x, item])
       guards = quote(do: [is_struct(x, __MODULE__)])
-      assert Invariants.find_struct_arg(params, guards) == {:ok, :x}
+      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
     end
 
-    test "returns {:ok, name} for `is_struct/2` combined with `and`" do
+    test "detects is_struct inside left side of compound `and` guard" do
       params = quote(do: [x, y])
       guards = quote(do: [is_struct(x, __MODULE__) and is_integer(y)])
-      assert Invariants.find_struct_arg(params, guards) == {:ok, :x}
+      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
     end
 
-    test "returns :none for a bare-variable function head" do
+    test "detects is_struct inside right side of compound `and` guard" do
+      params = quote(do: [x, y])
+      guards = quote(do: [is_integer(y) and is_struct(x, __MODULE__)])
+      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+    end
+
+    test "detects is_struct inside `or` guard" do
+      params = quote(do: [x])
+      guards = quote(do: [is_atom(x) or is_struct(x, __MODULE__)])
+      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+    end
+
+    test "detects is_struct nested inside `and` inside `or`" do
+      params = quote(do: [x, y])
+      guards = quote(do: [is_nil(y) or (is_integer(y) and is_struct(x, __MODULE__))])
+      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+    end
+
+    test "detects is_struct across multiple `when ... when ...` guards" do
+      params = quote(do: [x])
+      guards = quote(do: [is_atom(x), is_struct(x, __MODULE__)])
+      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+    end
+
+    test "returns multiple entries for `def merge(%__MODULE__{} = a, %__MODULE__{} = b)`" do
+      params = quote(do: [%__MODULE__{} = a, %__MODULE__{} = b])
+
+      assert Invariants.detect_struct_params(params, []) ==
+               [{:bound, :a, 0}, {:bound, :b, 1}]
+    end
+
+    test "mixes bound and destructure entries in parameter order" do
+      params = quote(do: [%__MODULE__{} = a, %__MODULE__{field: x}])
+
+      assert Invariants.detect_struct_params(params, []) ==
+               [{:bound, :a, 0}, {:destructure, 1}]
+    end
+
+    test "returns [] for a bare-variable head with no relevant guard" do
       params = quote(do: [x, item])
-      assert Invariants.find_struct_arg(params, []) == :none
+      assert Invariants.detect_struct_params(params, []) == []
     end
 
-    test "returns :none for an unrelated struct pattern" do
+    test "returns [] when guard mentions an unrelated module" do
+      params = quote(do: [x])
+      guards = quote(do: [is_struct(x, OtherMod)])
+      assert Invariants.detect_struct_params(params, guards) == []
+    end
+
+    test "returns [] for an unrelated struct pattern" do
       params = quote(do: [%OtherMod{} = x])
-      assert Invariants.find_struct_arg(params, []) == :none
+      assert Invariants.detect_struct_params(params, []) == []
     end
 
-    test "returns :none for empty params" do
-      assert Invariants.find_struct_arg([], []) == :none
+    test "returns [] for empty params" do
+      assert Invariants.detect_struct_params([], []) == []
     end
   end
 
@@ -72,21 +121,64 @@ defmodule Bond.Compiler.InvariantsTest do
     end
   end
 
-  describe "pre_invariant_stmts/5" do
+  describe "all_pre_invariant_stmts/5" do
     test "returns [] when mode is :purge" do
-      assert Invariants.pre_invariant_stmts(:any, :stack, :purge, true, true) == []
+      assert Invariants.all_pre_invariant_stmts(
+               :any,
+               [{:bound, :stack, 0}],
+               :purge,
+               true,
+               true
+             ) == []
     end
 
-    test "returns [] when struct_arg is nil" do
-      assert Invariants.pre_invariant_stmts(:any, nil, true, true, true) == []
+    test "returns [] when struct_params is empty" do
+      assert Invariants.all_pre_invariant_stmts(:any, [], true, true, true) == []
     end
 
-    test "emits a should_evaluate? + evaluate_invariants block otherwise" do
-      [ast] = Invariants.pre_invariant_stmts(:my_inv_fn, :stack, true, true, true)
+    test "emits one should_evaluate? + evaluate_invariants block per bound param" do
+      [ast] =
+        Invariants.all_pre_invariant_stmts(
+          :my_inv_fn,
+          [{:bound, :stack, 0}],
+          true,
+          true,
+          true
+        )
+
       code = Macro.to_string(ast)
       assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:invariants,\s*true"
       assert code =~ ~r"Bond\.Runtime\.Eval\.evaluate_invariants"
       assert code =~ ~r"my_inv_fn\(stack\)"
+    end
+
+    test "emits separate statements for multi-struct heads, in parameter order" do
+      stmts =
+        Invariants.all_pre_invariant_stmts(
+          :my_inv_fn,
+          [{:bound, :a, 0}, {:bound, :b, 1}],
+          true,
+          true,
+          true
+        )
+
+      assert length(stmts) == 2
+      [first, second] = stmts
+      assert Macro.to_string(first) =~ ~r"my_inv_fn\(a\)"
+      assert Macro.to_string(second) =~ ~r"my_inv_fn\(b\)"
+    end
+
+    test "uses __bond_subject_<idx>__ for destructure entries" do
+      [ast] =
+        Invariants.all_pre_invariant_stmts(
+          :my_inv_fn,
+          [{:destructure, 0}],
+          true,
+          true,
+          true
+        )
+
+      assert Macro.to_string(ast) =~ ~r"my_inv_fn\(__bond_subject_0__\)"
     end
   end
 

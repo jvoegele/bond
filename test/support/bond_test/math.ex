@@ -43,8 +43,6 @@ defmodule BondTest.Math do
   def pow(x, y) do
     check is_number(x)
     check y_is_number: is_number(y)
-    check "x is number", is_number(x)
-    check is_number(y), "y is number"
     # x2 = x + y
     :math.pow(x, y)
   end

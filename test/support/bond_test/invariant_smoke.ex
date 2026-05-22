@@ -20,11 +20,9 @@ defmodule BondTest.InvariantSmoke do
 
   defstruct [:items, :capacity]
 
-  @invariant(stack,
-    non_negative_capacity: stack.capacity >= 0,
-    size_within_capacity: length(stack.items) <= stack.capacity,
-    non_negative_size: length(stack.items) >= 0
-  )
+  @invariant non_negative_capacity: subject.capacity >= 0,
+             size_within_capacity: length(subject.items) <= subject.capacity,
+             non_negative_size: length(subject.items) >= 0
 
   def new(capacity) when is_integer(capacity) and capacity >= 0 do
     %__MODULE__{items: [], capacity: capacity}

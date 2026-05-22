@@ -117,7 +117,7 @@ Concretely:
   emits a one-time `Logger.warning` per process per (higher, lower)
   pair so you know it happened.
 
-`:checks` is independent of the chain — `check/1,2` is an internal
+`:checks` is independent of the chain — `check/1` is an internal
 sanity assertion, not a contract with a caller.
 
 If you genuinely want to skip a higher kind's *evaluation* without

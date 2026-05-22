@@ -12,7 +12,7 @@ Add `bond` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.15.0"}
+    {:bond, "~> 0.16.0"}
   ]
 end
 ```
@@ -21,7 +21,7 @@ Then run `mix deps.get`.
 
 ## Your first contract
 
-`use Bond` in any module to enable `@pre`, `@post`, and `check/1,2`. Add a
+`use Bond` in any module to enable `@pre`, `@post`, and `check/1`. Add a
 precondition before a function definition:
 
 ```elixir
@@ -128,14 +128,14 @@ guide for the subtleties of using `old` with stateful, concurrent code.
 
 ## Inline checks
 
-For sanity checks inside a function body, use `check/1` or `check/2`:
+For sanity checks inside a function body, use `check/1`:
 
 ```elixir
 def total(items) do
   raw = Enum.sum(items)
 
   check raw >= 0
-  check "total is integer", is_integer(raw)
+  check total_is_integer: is_integer(raw)
 
   raw
 end

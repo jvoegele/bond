@@ -24,7 +24,7 @@ defmodule Bond do
   @type assertion_expression :: {atom(), Macro.metadata(), list()}
 
   @doc """
-  `use Bond` enables `@pre`, `@post`, and `check/1,2` annotations in the using module.
+  `use Bond` enables `@pre`, `@post`, and `check/1` annotations in the using module.
 
   ## Options
 
@@ -34,7 +34,7 @@ defmodule Bond do
 
     * `:preconditions` — mode for this module's `@pre` annotations.
     * `:postconditions` — mode for this module's `@post` annotations.
-    * `:checks` — mode for this module's `check/1,2` calls.
+    * `:checks` — mode for this module's `check/1` calls.
     * `:invariants` — mode for this module's `@invariant` annotations.
 
   Example: a hot-path module that wants contracts purged from its compiled output regardless
@@ -111,23 +111,37 @@ defmodule Bond do
     :ok
   end
 
-  # @invariant <name>, <expression-or-keyword-list>
+  # @invariant <expression-or-keyword-list>
   #
-  # The first arg is the name to bind the struct value to inside each invariant assertion
-  # (e.g. `stack` in `@invariant stack, size_within_capacity: ...`). The second arg is either
-  # a single bare expression or a keyword list of `label: expression` pairs, mirroring the
-  # `@pre`/`@post` keyword-list shape.
-  defmacro @{:invariant, meta, [{name, _, ctx}, expression_or_kw_list]}
-           when is_atom(name) and is_atom(ctx) do
+  # Invariant expressions reference the implicit `subject` binding, which Bond rebinds at
+  # every check site to whichever struct parameter the function head exposes (detected
+  # via `Bond.Compiler.Invariants.detect_struct_params/2`).
+  defmacro @{:invariant, meta, [expression_or_kw_list]} do
     if Keyword.keyword?(expression_or_kw_list) do
       for {label, expression} <- expression_or_kw_list do
-        Bond.Compiler.register_invariant(name, expression, label, __CALLER__, meta)
+        Bond.Compiler.register_invariant(expression, label, __CALLER__, meta)
       end
     else
-      Bond.Compiler.register_invariant(name, expression_or_kw_list, nil, __CALLER__, meta)
+      Bond.Compiler.register_invariant(expression_or_kw_list, nil, __CALLER__, meta)
     end
 
     :ok
+  end
+
+  # @invariant <name>, <expression-or-keyword-list>
+  #
+  # Removed in Bond 0.16.0. The legacy 2-arg shape now raises a CompileError pointing at
+  # the migration. Drop the binding name; invariant expressions reference the implicit
+  # `subject` binding.
+  defmacro @{:invariant, _meta, [{name, _, ctx}, _expression_or_kw_list]}
+           when is_atom(name) and is_atom(ctx) do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description:
+        "@invariant <name>, <expr> was removed in Bond 0.16.0. Drop the binding name; " <>
+          "invariant expressions reference the implicit `subject` binding. Example: " <>
+          "`@invariant subject.field > 0` instead of `@invariant stack, stack.field > 0`."
   end
 
   defmacro @{:doc, meta, [value]} do
@@ -151,10 +165,6 @@ defmodule Bond do
   ## Examples
 
       iex> check 1 == 1.0
-      true
-      iex> check 1 == 1.0, "integer 1 is equal to float 1.0"
-      true
-      iex> check "integer 1 is equal to float 1.0", 1 == 1.0
       true
       iex> check tautology: 1 == 1
       [true]
@@ -191,25 +201,19 @@ defmodule Bond do
     end)
   end
 
-  @doc """
-  Check a single labelled assertion for validity.
-
-  See `check/1` for details and examples.
-  """
-  defmacro check(label_or_expression, expression_or_label)
-
-  @spec check(assertion_label(), assertion_expression()) :: as_boolean(any())
-  defmacro check(label, {_, meta, _} = expression) when is_atom(label) or is_binary(label) do
-    build_check(__CALLER__.module, fn mode ->
-      Bond.Compiler.check_assertion(expression, label, __CALLER__, meta, mode)
-    end)
-  end
-
-  @spec check(assertion_expression(), assertion_label()) :: as_boolean(any())
-  defmacro check({_, meta, _} = expression, label) when is_atom(label) or is_binary(label) do
-    build_check(__CALLER__.module, fn mode ->
-      Bond.Compiler.check_assertion(expression, label, __CALLER__, meta, mode)
-    end)
+  @doc false
+  # `check/2` was removed in Bond 0.16.0. The two string-label forms (`check "lbl", expr`
+  # and `check expr, "lbl"`) and the atom-label form (`check :lbl, expr`) collapse to the
+  # keyword-list form: `check lbl: expr`. This shim raises a clear migration error for any
+  # arity-2 call at the use site.
+  defmacro check(_label_or_expression, _expression_or_label) do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description:
+        "check/2 was removed in Bond 0.16.0. Use `check expr` or `check label: expr` " <>
+          "instead. The string-label forms `check \"label\", expr` and " <>
+          "`check expr, \"label\"` are no longer supported."
   end
 
   # Build the AST for a `check` call honouring the per-module `:checks` config:
