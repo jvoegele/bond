@@ -75,6 +75,28 @@ defmodule Bond.SubjectInvariantTest do
     end
   end
 
+  describe "destructure-only struct param" do
+    test "pre-invariant fires on a destructure-only head when input violates" do
+      invalid = %Smoke{items: [:a, :b], capacity: 1}
+      assert_raise Bond.InvariantError, fn -> Smoke.head(invalid) end
+    end
+
+    test "destructure-only head passes through and returns the destructured value" do
+      stack = Smoke.push(Smoke.new(3), :a)
+      assert :a == Smoke.head(stack)
+    end
+
+    test "destructure-only head with post-invariant: invalid input raises pre-check" do
+      invalid = %Smoke{items: [:a, :b], capacity: 1}
+      assert_raise Bond.InvariantError, fn -> Smoke.rotate(invalid) end
+    end
+
+    test "destructure-only head with post-invariant: result struct passes both checks" do
+      stack = Smoke.push(Smoke.push(Smoke.new(3), :a), :b)
+      assert %Smoke{items: [:a, :b]} = Smoke.rotate(stack)
+    end
+  end
+
   describe "non-zero-position struct param" do
     test "detects struct at parameter index 1" do
       invalid = %Smoke{items: [:a, :b], capacity: 1}

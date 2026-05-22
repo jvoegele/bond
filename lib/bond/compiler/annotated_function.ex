@@ -250,11 +250,13 @@ defmodule Bond.Compiler.AnnotatedFunction do
     first_clause = List.first(annotated_function.clauses)
     function_info = {fun, arity}
 
-    # If any params in the original use default-arg syntax (`trap_door \\ nil`), strip the
-    # default so the override is a plain arity-N def with no default args. Elixir's
-    # auto-generated forwarding clauses for the original still dispatch by name+arity, so
-    # they end up calling our override.
-    call_params = strip_default_args(first_clause.params)
+    # `strip_default_args` removes `\\` defaults so the override is a plain arity-N def;
+    # `params_split/3` then partitions into head_params (for def/defp heads) and
+    # super_args (for super/eval call sites). See Invariants.rewrite_call_params/2.
+    clean_params = strip_default_args(first_clause.params)
+
+    {struct_params, head_params, super_args} =
+      Invariants.params_split(clean_params, first_clause, inv_mode)
 
     {postconditions, old_context} =
       if post_mode != :purge do
@@ -269,8 +271,6 @@ defmodule Bond.Compiler.AnnotatedFunction do
     pre_fn_name = lifted_fn_name(:preconditions, fun, arity)
     post_fn_name = lifted_fn_name(:postconditions, fun, arity)
     inv_fn_name = lifted_fn_name(:invariants, fun, arity)
-
-    struct_params = Invariants.struct_params_for_clause(inv_mode, first_clause)
 
     doc_asts = ContractDocs.doc_clauses(annotated_function, first_clause.env, pre_mode, post_mode)
 
@@ -288,7 +288,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
     body_stmts =
       build_override_body(
-        call_params,
+        super_args,
         pre_fn_name,
         post_fn_name,
         old_assignments,
@@ -304,7 +304,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
         [
           maybe_build_assertion_defp(
             pre_fn_name,
-            call_params,
+            head_params,
             [],
             annotated_function.preconditions,
             function_info,
@@ -313,7 +313,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
           ),
           maybe_build_assertion_defp(
             post_fn_name,
-            call_params,
+            head_params,
             postcondition_extra_params(old_pairs),
             postconditions,
             function_info,
@@ -336,7 +336,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
       unquote_splicing(doc_asts)
 
-      unquote(kind)(unquote(fun)(unquote_splicing(call_params))) do
+      unquote(kind)(unquote(fun)(unquote_splicing(head_params))) do
         (unquote_splicing(body_stmts))
       end
 

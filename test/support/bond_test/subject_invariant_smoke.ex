@@ -13,6 +13,12 @@ defmodule BondTest.SubjectInvariantSmoke do
     - `mismatched_pair/2` — second struct parameter only; non-zero-position detection.
     - `broken_push/2` — intentionally produces an invalid struct so tests can drive
       a post-invariant violation.
+    - `head/1` — destructure-only head (`%__MODULE__{items: [first | _]}`, no `= name`).
+      Exercises S4's override-clause rewrite that captures the struct under
+      `__bond_subject_0__` so the pre-invariant can fire.
+    - `rotate/1` — destructure-only head returning a struct. Exercises both the
+      pre-invariant (via the captured binding) and the post-invariant on the
+      returned struct.
   """
 
   use Bond
@@ -49,5 +55,11 @@ defmodule BondTest.SubjectInvariantSmoke do
 
   def broken_push(%__MODULE__{} = stack, item) do
     %{stack | items: [item, item, item, item | stack.items]}
+  end
+
+  def head(%__MODULE__{items: [first | _]}), do: first
+
+  def rotate(%__MODULE__{items: [first | rest], capacity: cap}) do
+    %__MODULE__{items: rest ++ [first], capacity: cap}
   end
 end
