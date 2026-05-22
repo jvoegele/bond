@@ -12,7 +12,7 @@ Add `bond` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.11.0"}
+    {:bond, "~> 0.12.0"}
   ]
 end
 ```

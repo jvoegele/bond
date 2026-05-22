@@ -5,6 +5,87 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-05-22
+
+0.12.0 lands two internal-shape changes that compose on top of the
+0.11.0 conditional-compilation work: contract closures move out of
+override clauses into named private functions on the user's module
+(reducing injected code per contract'd function), and `:telemetry`
+events fire on assertion failures.
+
+### Added
+
+- **`[:bond, :assertion, :failure]` telemetry event.** Fires once per
+  contract violation — `@pre`, `@post`, or `check` — immediately before
+  the corresponding `Bond.PreconditionError` / `Bond.PostconditionError`
+  / `Bond.CheckError` is raised. Single event family for all three
+  kinds; consumers filter on the `:kind` metadata. Measurements carry
+  `:system_time` and `:monotonic_time`; metadata carries `:kind`,
+  `:module`, `:function`, `:label`, `:expression`, `:assertion_id`,
+  `:file`, `:line`, and `:binding`. See the new "Telemetry" section in
+  the `Bond` moduledoc / README. `{:telemetry, "~> 1.0"}` is now a
+  regular dependency.
+
+- **`Bond.Runtime.Eval.should_evaluate?/2`** — internal helper that
+  performs the `Application.get_env/3` runtime guard. Used by the
+  emission shape (see "Internal" below) to avoid allocating the
+  assertion-evaluation closure when the runtime guard says skip.
+
+### Changed
+
+- **Per-function assertion closures are lifted into named `defp`s** on
+  the using module: `__bond_preconditions__<fun>__<arity>` and
+  `__bond_postconditions__<fun>__<arity>`. The override clause itself
+  is now a small wrapper that calls these via
+  `Bond.Runtime.Eval.evaluate_preconditions/1` /
+  `evaluate_postconditions/1`. The big inline assertion-evaluation AST
+  that used to be re-emitted into every override is gone; the BEAM
+  carries one tiny override + one defp per non-purged kind, rather
+  than the whole eval body inlined per function.
+
+- **Runtime guard moved into `Bond.Runtime.Eval`.** The override calls
+  `should_evaluate?(:preconditions, <compile_time_mode>)` and only
+  builds the assertion-evaluation closure when that returns `true`.
+  The `Application.get_env/3` lookup logic lives entirely in
+  `Bond.Runtime` rather than being inlined at every contract'd
+  function.
+
+- **`Bond.check/1,2` routes through the same throw/catch path as
+  `@pre`/`@post`.** All three kinds now produce
+  `{:assertion_failure, info}` throws caught by `Bond.Runtime.Eval`,
+  which fires the telemetry event and raises. This unifies the
+  plumbing across the three kinds; previously `check` raised inline.
+
+- **Stacktrace pruning** now also filters frames whose function name
+  starts with `__bond_` (the lifted defps), so failures continue to
+  point at the user's call site rather than into Bond-generated
+  plumbing.
+
+- **Benchmark** on the project fixture
+  (`bench/runtime_check_overhead.exs`, trivial `@pre is_number(x)` in a
+  tight loop):
+
+  | mode    | 0.11.0   | 0.12.0   |
+  |---------|----------|----------|
+  | `:purge`  | ~48 ns   | ~34 ns   |
+  | `true`    | ~155 ns  | ~143 ns  |
+  | `false`   | ~89 ns   | ~91 ns   |
+
+  The `true` path improves because the override no longer re-emits the
+  full assertion-eval AST inline. The `false` (runtime-skip) path is
+  flat within noise — `should_evaluate?/2` short-circuits before the
+  closure is allocated.
+
+### Fixed
+
+- `Bond.CheckError`'s `message/1` no longer crashes when the error's
+  `:function` metadata is missing (regression introduced and fixed
+  internally during the `check` plumbing unification).
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.11.0] - 2026-05-21
 
 0.11.0 reshapes the conditional-compilation config introduced in 0.10.0
