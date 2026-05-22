@@ -1,0 +1,39 @@
+%% Mikado graph for the 0.15.0 contract-chain partial-order work.
+%%
+%% Each numbered node is a commit-sized step. Arrows point from a goal to its
+%% prerequisites — leaves (green) have no further prerequisites and are safe to
+%% start with. Depth-first per Mikado: pick a leaf, finish it, commit, repeat.
+%%
+%% Chain: preconditions ≤ postconditions ≤ invariants. `:checks` is orthogonal.
+%% Constraints:
+%%   - Compile-time: `:purge` of a lower kind ⇒ all higher kinds must also be `:purge`.
+%%   - Runtime: `false` for a lower kind ⇒ all higher kinds are skipped.
+
+flowchart TD
+    G(["**Goal**<br/>0.15.0 enforces partial order between contract kinds"])
+
+    G --> S1[1. Compile-time chain validator in resolve_config/3]
+    G --> S2[2. Fix existing fixtures/tests with newly-invalid combos]
+    G --> S3[3. should_evaluate?/3 with chain context]
+    G --> S4[4. Emission passes chain context at every call site]
+    G --> S5[5. Runtime chain propagation logic]
+    G --> S6[6. One-time per-process log when propagation fires]
+    G --> S7[7. Tests for runtime propagation behaviour]
+    G --> S8[8. Docs: README + FAQ + concurrency guide]
+    G --> S9[9. CHANGELOG + version bump]
+
+    S2 --> S1
+    S4 --> S3
+    S5 --> S3
+    S5 --> S4
+    S6 --> S5
+    S7 --> S6
+    S8 --> S1
+    S8 --> S5
+    S8 --> S6
+    S9 --> S2
+    S9 --> S7
+    S9 --> S8
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S1,S3 leaf;
