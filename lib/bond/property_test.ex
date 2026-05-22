@@ -103,22 +103,58 @@ defmodule Bond.PropertyTest do
 
   ## Module sequence (Form 2)
 
-  *Not yet implemented — arrives in a subsequent commit.* Pass a struct module plus
-  constructor / transformer / observer specs; the macro generates random sequences of
-  operations and runs them, with the module's `@invariant`s as the oracle.
+  Pass a struct module plus *constructor*, *transformer*, and *observer* specs. The macro
+  generates random sequences of operations over the struct, threads state through them,
+  and runs them. The module's `@invariant`s (plus any per-function contracts) are the
+  oracle.
 
-  ## Options for Form 1
+      contract_holds BoundedStack,
+        constructors: [{:new, [StreamData.integer(1..100)]}],
+        transformers: [{:push, [StreamData.term()]}, {:pop, []}],
+        observers:    [{:size, []}, {:peek, []}]
 
-    * `:args` (required) — a list of `StreamData` generators, one per function argument.
-      The function is called via `apply/2` with the generated values.
+  Each spec is a list of `{fun_name, [arg_generators]}` tuples:
+
+    * **Constructor** — produces an initial struct. Called first in every sequence.
+    * **Transformer** — takes the current struct as its first argument plus generated
+      args, returns a new struct (`%Mod{}` or `{:ok, %Mod{}}`). Advances the state.
+    * **Observer** — takes the current struct plus generated args, returns anything.
+      Doesn't advance state. The pre-invariant still fires on entry.
+
+  Return shape rules for constructors and transformers:
+
+    * `%Mod{}` — becomes the new state.
+    * `{:ok, %Mod{}}` — same; the wrapper is stripped.
+    * `{:error, _}` — terminates the sequence cleanly (the property *passes*; an operation
+      that refuses is not a contract violation).
+    * Anything else raises an `ArgumentError`; wrap your function or test it with Form 1.
+
+  ## Options
+
+  For Form 1 (function reference):
+
+    * `:args` (required) — list of `StreamData` generators, one per function argument.
+
+  For Form 2 (module alias):
+
+    * `:constructors` (required, non-empty) — list of `{fun_name, [arg_generators]}`.
+    * `:transformers` (optional, default `[]`) — same shape; state threaded in as the
+      first argument.
+    * `:observers` (optional, default `[]`) — same shape; state passed but not advanced.
+
+  Common to both:
 
     * `:name` (optional) — a string used as the property's description. Defaults to
-      `"contract_holds <function-ref-source>"`.
+      `"contract_holds <source>"`.
   """
   defmacro contract_holds(fun_or_module, opts)
 
   defmacro contract_holds({:&, _, _} = fun_ast, opts) do
     contract_holds_for_function(fun_ast, opts)
+  end
+
+  defmacro contract_holds({:__aliases__, _, _} = module_ast, opts) do
+    contract_holds_for_module(module_ast, opts)
   end
 
   defp contract_holds_for_function(fun_ast, opts) do
@@ -134,6 +170,37 @@ defmodule Bond.PropertyTest do
       property unquote(name) do
         check all args <- StreamData.fixed_list(unquote(args_gens)) do
           apply(unquote(fun_ast), args)
+        end
+      end
+    end
+  end
+
+  defp contract_holds_for_module(module_ast, opts) do
+    constructors = Keyword.get(opts, :constructors, [])
+    transformers = Keyword.get(opts, :transformers, [])
+    observers = Keyword.get(opts, :observers, [])
+
+    if constructors == [] do
+      raise ArgumentError,
+            "contract_holds for a module requires a non-empty `:constructors` keyword " <>
+              "(a list of {fun_name, [arg_generators]} tuples). " <>
+              "Constructors are how the sequence starts — there's no way to test " <>
+              "invariants on a struct module without a way to produce instances."
+    end
+
+    name = Keyword.get(opts, :name, "contract_holds #{Macro.to_string(module_ast)}")
+
+    quote do
+      property unquote(name) do
+        sequence_gen =
+          Bond.PropertyTest.Sequence.generator(
+            unquote(constructors),
+            unquote(transformers),
+            unquote(observers)
+          )
+
+        check all sequence <- sequence_gen do
+          Bond.PropertyTest.Sequence.run(unquote(module_ast), sequence)
         end
       end
     end
