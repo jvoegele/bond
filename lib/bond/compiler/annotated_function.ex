@@ -16,6 +16,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
   """
 
   alias Bond.Compiler.Assertion
+  alias Bond.Compiler.ContractDocs
   alias Bond.Compiler.FunctionDefinition
   alias Bond.Compiler.Invariants
   alias Bond.Compiler.OldExpression
@@ -271,7 +272,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
     struct_params = Invariants.struct_params_for_clause(inv_mode, first_clause)
 
-    doc_asts = doc_clauses(annotated_function, first_clause.env, pre_mode, post_mode)
+    doc_asts = ContractDocs.doc_clauses(annotated_function, first_clause.env, pre_mode, post_mode)
 
     pre_invariant_stmts =
       Invariants.all_pre_invariant_stmts(
@@ -443,89 +444,5 @@ defmodule Bond.Compiler.AnnotatedFunction do
       {:\\, _meta, [param, _default]} -> param
       other -> other
     end)
-  end
-
-  defp doc_clauses(
-         %__MODULE__{doc_attributes: doc_attributes} = annotated_function,
-         env,
-         pre_mode,
-         post_mode
-       ) do
-    contract_docs = build_contract_docs(annotated_function, pre_mode, post_mode)
-
-    has_string_doc? = Enum.any?(doc_attributes, fn {_meta, value} -> is_binary(value) end)
-
-    augmented =
-      cond do
-        has_string_doc? ->
-          Enum.map(doc_attributes, fn
-            {meta, value} when is_binary(value) and contract_docs != "" ->
-              {meta, value <> "\n\n" <> contract_docs}
-
-            other ->
-              other
-          end)
-
-        contract_docs != "" ->
-          # No user-supplied string doc; synthesise one containing just the contract docs so
-          # the contracts always appear in generated documentation.
-          [{[line: env.line], contract_docs} | doc_attributes]
-
-        true ->
-          doc_attributes
-      end
-
-    for {meta, value} <- augmented do
-      line = Keyword.get(meta, :line, env.line)
-
-      quote do
-        Module.put_attribute(__MODULE__, :doc, {unquote(line), unquote(Macro.escape(value))})
-      end
-    end
-  end
-
-  defp build_contract_docs(
-         %__MODULE__{preconditions: preconditions, postconditions: postconditions},
-         pre_mode,
-         post_mode
-       ) do
-    precondition_docs =
-      if pre_mode != :purge,
-        do: generate_assertion_docs(preconditions, header: "#### Preconditions"),
-        else: []
-
-    postcondition_docs =
-      if post_mode != :purge,
-        do: generate_assertion_docs(postconditions, header: "#### Postconditions"),
-        else: []
-
-    contract_iodata =
-      case {Enum.empty?(precondition_docs), Enum.empty?(postcondition_docs)} do
-        {true, true} -> []
-        {true, false} -> postcondition_docs
-        {false, true} -> precondition_docs
-        {false, false} -> [precondition_docs, "\n\n", postcondition_docs]
-      end
-
-    IO.iodata_to_binary(contract_iodata)
-  end
-
-  defp generate_assertion_docs([], _opts), do: []
-
-  defp generate_assertion_docs(assertions, opts) do
-    header = if header = opts[:header], do: header <> "\n\n", else: ""
-
-    assertions
-    |> Enum.reduce([], fn
-      %{label: nil, code: code}, acc ->
-        [code | acc]
-
-      assertion, acc ->
-        label = assertion.label |> inspect() |> String.trim_leading(":")
-        [[label, ": ", assertion.code] | acc]
-    end)
-    |> Enum.reverse()
-    |> List.insert_at(0, header)
-    |> Enum.intersperse("\n    ")
   end
 end
