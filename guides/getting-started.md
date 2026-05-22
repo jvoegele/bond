@@ -21,7 +21,8 @@ Then run `mix deps.get`.
 
 ## Your first contract
 
-`use Bond` in any module to enable `@pre`, `@post`, and `check/1`. Add a
+`use Bond` in any module to enable `@pre`, `@post`, `@invariant`, and
+`check/1`. Add a
 precondition before a function definition:
 
 ```elixir
@@ -146,16 +147,52 @@ end
 > Don't use `check` for input validation or anything else that protects the
 > integrity of your code — it can be compiled out entirely (see below).
 
+## Invariants for struct modules
+
+When a module defines a struct, `@invariant` declarations specify
+properties that hold for every value of the struct — checked
+automatically on entry and exit of every public function in the
+module:
+
+```elixir
+defmodule BoundedStack do
+  use Bond
+
+  defstruct [:items, :capacity]
+
+  @invariant size_within_capacity: length(subject.items) <= subject.capacity,
+             non_negative_capacity: subject.capacity >= 0
+
+  def new(capacity), do: %__MODULE__{items: [], capacity: capacity}
+
+  def push(%__MODULE__{} = stack, item) do
+    %{stack | items: [item | stack.items]}
+  end
+end
+```
+
+Inside an `@invariant` expression, `subject` refers to the struct
+instance being checked. Bond detects the struct parameter in each
+public function's head (`%__MODULE__{} = name` pattern,
+`is_struct(_, __MODULE__)` guard, or `%__MODULE__{...}` destructure)
+and rebinds `subject` to it — you write the invariant once and Bond
+applies it everywhere.
+
+See the [`@invariant`](Bond.html#module-invariant-for-struct-modules)
+section of the moduledoc for head-shape detection, multi-struct
+heads, and per-module configuration.
+
 ## Disabling contracts in production
 
-Bond's three application-config keys — `:preconditions`, `:postconditions`,
-`:checks` — each accept `true`, `false`, or `:purge`:
+Bond's four application-config keys — `:preconditions`, `:postconditions`,
+`:invariants`, `:checks` — each accept `true`, `false`, or `:purge`:
 
 ```elixir
 # config/prod.exs — strip contracts entirely from the prod build
 config :bond,
   preconditions: :purge,
   postconditions: :purge,
+  invariants: :purge,
   checks: :purge
 ```
 
@@ -195,9 +232,10 @@ See `Bond.Test` for `assert_precondition_violation/2`,
 
 ## Next steps
 
-- The `Bond` moduledoc has the full reference, including the [Invariants](Bond.html#module-invariants)
-  section if you have a struct module and want module-wide constraints on
-  every instance, and the [Property-based testing](Bond.html#module-property-based-testing)
+- The `Bond` moduledoc has the full reference, including the
+  [`@invariant`](Bond.html#module-invariant-for-struct-modules) section
+  for module-wide constraints on every instance of a struct, and the
+  [Property-based testing](Bond.html#module-property-based-testing)
   section for using contracts as oracles with StreamData.
 - The [Contracts in a Concurrent World](contracts-and-concurrency.md) guide
   covers `old`, race conditions, how to design contracts for stateful

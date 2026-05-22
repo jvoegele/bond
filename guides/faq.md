@@ -228,25 +228,35 @@ in the moduledoc.
 ## When does Bond check invariants?
 
 `@invariant` declarations on a struct module are checked automatically at
-the boundaries of that module's public functions. Specifically:
+the boundaries of that module's public functions. Bond auto-detects the
+struct parameter in the function head and pre-checks against it:
 
-- **On entry**, when the function head pattern-matches `%__MODULE__{} = name`
-  or has an `is_struct(name, __MODULE__)` guard. Bond pre-checks the
-  invariant against `name`.
+- **On entry**, when the function head matches the struct in any of these
+  shapes (Bond detects all three):
+    - `def foo(%__MODULE__{} = name, ...)` — explicit pattern with binding.
+    - `def foo(x, ...) when is_struct(x, __MODULE__)` — bare param plus
+      guard (including arbitrary nesting inside `and` / `or`).
+    - `def foo(%__MODULE__{field: v}, ...)` — destructure-only. Bond
+      rewrites the override clause to capture the struct under a
+      generated name so the pre-check still fires.
 - **On exit**, against the return value if it's `%__MODULE__{}` or
-  `{:ok, %__MODULE__{}}`. Other return shapes fall through without a check.
+  `{:ok, %__MODULE__{}}`. Other return shapes fall through without a
+  check. If your function wraps the struct differently, add an explicit
+  `@post`.
+- **For multi-struct heads** like `def merge(%__MODULE__{} = a,
+  %__MODULE__{} = b)`, both parameters are checked in left-to-right
+  order, with the implicit `subject` rebinding to each in turn.
 - **Never for `defp`** — private functions are exempt by the Eiffel
   convention (they often hold transiently-invalid state mid-operation).
 
-If you want invariant pre-checks but your function doesn't pattern-match the
-struct as an argument, add the pattern: `def foo(%__MODULE__{} = x, ...)`.
-If you destructure but don't bind the whole struct (`def foo(%__MODULE__{f: v}, ...)`),
-Bond emits a compile-time warning and skips the pre-check — add `= name` to
-the pattern to fix it.
+If your function doesn't pattern-match the struct at all (no struct in
+the head, no guard mentioning it), invariants are silently skipped for
+that function. The other contract kinds still apply.
 
 Violations raise `Bond.InvariantError` and emit `[:bond, :assertion, :failure]`
 telemetry with `:kind => :invariant`. See the
-[Invariants](Bond.html#module-invariants) section in the moduledoc.
+[Invariants](Bond.html#module-invariant-for-struct-modules) section in the
+moduledoc.
 
 ## How are multi-clause functions handled?
 
