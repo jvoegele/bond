@@ -13,6 +13,8 @@ defmodule BondTest.ConditionalCompilationTest do
       Application.delete_env(:bond, :preconditions)
       Application.delete_env(:bond, :postconditions)
       Application.delete_env(:bond, :checks)
+      Application.delete_env(:bond, :invariants)
+      Application.delete_env(:bond, :overrides)
     end)
   end
 
@@ -61,7 +63,11 @@ defmodule BondTest.ConditionalCompilationTest do
 
   describe "compile-time `:purge` (no override emitted)" do
     test "preconditions: :purge — function runs as written, no error possible" do
+      # Purging the bottom of the chain requires purging every higher kind too
+      # (chain validation in `Bond.Compiler.resolve_config/3`).
       Application.put_env(:bond, :preconditions, :purge)
+      Application.put_env(:bond, :postconditions, :purge)
+      Application.put_env(:bond, :invariants, :purge)
 
       defmodule PrePurge do
         use Bond
@@ -77,9 +83,10 @@ defmodule BondTest.ConditionalCompilationTest do
       assert PrePurge.positive(-1) == -1
     end
 
-    test "both kinds :purge — no override at all" do
+    test "all chain kinds :purge — no override at all" do
       Application.put_env(:bond, :preconditions, :purge)
       Application.put_env(:bond, :postconditions, :purge)
+      Application.put_env(:bond, :invariants, :purge)
 
       defmodule BothPurged do
         use Bond
@@ -131,10 +138,12 @@ defmodule BondTest.ConditionalCompilationTest do
   describe "use Bond opts override global" do
     test "use Bond, preconditions: :purge — no precondition errors regardless of global" do
       # Global enabled, but per-module purged.
+      # Purging preconditions requires also purging postconditions and invariants
+      # (chain validation; see `Bond.Compiler.resolve_config/3`).
       Application.put_env(:bond, :preconditions, true)
 
       defmodule UseBondPurge do
-        use Bond, preconditions: :purge
+        use Bond, preconditions: :purge, postconditions: :purge, invariants: :purge
 
         @pre positive_x: x > 0
         def positive(x), do: x
@@ -144,10 +153,13 @@ defmodule BondTest.ConditionalCompilationTest do
     end
 
     test "use Bond, preconditions: true overrides global :purge" do
+      # Set the whole chain to :purge globally; per-module use_opts opts back in.
       Application.put_env(:bond, :preconditions, :purge)
+      Application.put_env(:bond, :postconditions, :purge)
+      Application.put_env(:bond, :invariants, :purge)
 
       defmodule UseBondOverrideGlobal do
-        use Bond, preconditions: true
+        use Bond, preconditions: true, postconditions: true, invariants: true
 
         @pre positive_x: x > 0
         def positive(x), do: x
@@ -160,7 +172,8 @@ defmodule BondTest.ConditionalCompilationTest do
   describe ":overrides match by module name" do
     test "exact module match in :overrides applies" do
       Application.put_env(:bond, :overrides, [
-        {BondTest.ConditionalCompilationTest.OverridesExact, preconditions: :purge}
+        {BondTest.ConditionalCompilationTest.OverridesExact,
+         [preconditions: :purge, postconditions: :purge, invariants: :purge]}
       ])
 
       defmodule OverridesExact do
@@ -175,7 +188,7 @@ defmodule BondTest.ConditionalCompilationTest do
 
     test "regex pattern in :overrides applies" do
       Application.put_env(:bond, :overrides, [
-        {~r/OverridesRegex/, preconditions: :purge}
+        {~r/OverridesRegex/, [preconditions: :purge, postconditions: :purge, invariants: :purge]}
       ])
 
       defmodule OverridesRegex do

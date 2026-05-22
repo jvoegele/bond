@@ -344,7 +344,7 @@ and declare invariants on that struct's module. See the
 
 ## Conditional compilation
 
-Bond reads three application-config keys at compile time. Each accepts one
+Bond reads four application-config keys at compile time. Each accepts one
 of three values:
 
 | Value     | Compiled? | Runtime behaviour                                   | Doc section? |
@@ -353,15 +353,55 @@ of three values:
 | `false`   | yes       | skipped unless `Application.put_env/3` flips it     | yes          |
 | `:purge`  | no        | n/a — there is no code to run                       | no           |
 
-The keys are `:preconditions`, `:postconditions`, and `:checks`. Each
-defaults to `true`.
+The keys are `:preconditions`, `:postconditions`, `:invariants`, and
+`:checks`. Each defaults to `true`.
 
 ```elixir
 # config/prod.exs — purge contracts entirely from this build
 config :bond,
   preconditions: :purge,
   postconditions: :purge,
+  invariants: :purge,
   checks: :purge
+```
+
+### The contract-checking chain
+
+`:preconditions`, `:postconditions`, and `:invariants` form a chain:
+
+```
+preconditions ≤ postconditions ≤ invariants
+```
+
+A `:postconditions` failure is only diagnostically meaningful if
+`:preconditions` held first — without preconditions, an "incorrect" output
+might really be the caller's fault, not the callee's. Same for
+`:invariants` resting on both. Bond enforces this in two ways:
+
+- **Compile time.** If a lower kind is `:purge`d, every higher kind must
+  also be `:purge`. Mixing them produces a `CompileError` at config-
+  resolution time with an explanation. To skip a kind's evaluation
+  without removing the code, use `false` instead of `:purge`.
+
+- **Runtime.** If a lower kind is `false` at runtime
+  (`Application.put_env(:bond, :preconditions, false)`), the higher kinds
+  are also skipped — even if they're set to `true` themselves. Bond emits
+  a one-time-per-process `Logger.warning` the first time this happens
+  for a given (higher, lower) pair, so the diagnostic is visible.
+
+`:checks` is *independent* of the chain. A `check/1,2` is an internal
+assertion about your computation, not a contract with a caller, so it
+remains meaningful regardless of any other kind's settings.
+
+```elixir
+# Valid: progressively purge from the top.
+config :bond, invariants: :purge
+
+# Valid: keep everything compiled in, runtime-disable invariants by default.
+config :bond, invariants: false
+
+# Compile error: lower purged, higher present.
+config :bond, preconditions: :purge   # postconditions and invariants still :true
 ```
 
 ### Runtime toggling
@@ -560,7 +600,7 @@ enable PBT:
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.14.0"},
+    {:bond, "~> 0.15.0"},
     {:stream_data, "~> 0.6", only: [:dev, :test]}
   ]
 end
@@ -578,7 +618,7 @@ end
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.14.0"}
+    {:bond, "~> 0.15.0"}
   ]
 end
 ```

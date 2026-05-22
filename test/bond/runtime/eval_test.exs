@@ -44,6 +44,168 @@ defmodule Bond.Runtime.EvalTest do
     end
   end
 
+  describe "should_evaluate?/3 chain propagation" do
+    setup do
+      on_exit(fn ->
+        Application.delete_env(:bond, :preconditions)
+        Application.delete_env(:bond, :postconditions)
+        Application.delete_env(:bond, :invariants)
+      end)
+
+      :ok
+    end
+
+    test "postconditions skipped when preconditions are runtime-off" do
+      Application.put_env(:bond, :preconditions, false)
+      refute Eval.should_evaluate?(:postconditions, true, %{preconditions: true})
+    end
+
+    test "invariants skipped when preconditions are runtime-off" do
+      Application.put_env(:bond, :preconditions, false)
+
+      refute Eval.should_evaluate?(:invariants, true, %{
+               preconditions: true,
+               postconditions: true
+             })
+    end
+
+    test "invariants skipped when postconditions are runtime-off" do
+      Application.put_env(:bond, :postconditions, false)
+
+      refute Eval.should_evaluate?(:invariants, true, %{
+               preconditions: true,
+               postconditions: true
+             })
+    end
+
+    test "higher kind runs when all lower kinds are runtime-on" do
+      Application.put_env(:bond, :preconditions, true)
+      Application.put_env(:bond, :postconditions, true)
+
+      assert Eval.should_evaluate?(:invariants, true, %{
+               preconditions: true,
+               postconditions: true
+             })
+    end
+
+    test "kind itself off short-circuits before chain propagation" do
+      # When postconditions itself is off, the answer is false regardless of preconditions.
+      Application.put_env(:bond, :postconditions, false)
+      Application.put_env(:bond, :preconditions, true)
+      refute Eval.should_evaluate?(:postconditions, true, %{preconditions: true})
+    end
+
+    test "checks are unaffected by chain settings" do
+      # checks pass {} as chain_defaults, so disabling preconditions/postconditions has no effect.
+      Application.put_env(:bond, :preconditions, false)
+      Application.put_env(:bond, :postconditions, false)
+      assert Eval.should_evaluate?(:checks, true, %{})
+    end
+
+    test "chain_defaults compile-time defaults are honoured" do
+      # No put_env at all; postconditions defaults to its compile-time mode, preconditions
+      # too. If we pass preconditions compile-default false, postconditions should be
+      # skipped — even though preconditions has no put_env.
+      Application.delete_env(:bond, :preconditions)
+      refute Eval.should_evaluate?(:postconditions, true, %{preconditions: false})
+    end
+  end
+
+  describe "should_evaluate?/3 propagation log" do
+    import ExUnit.CaptureLog
+
+    setup do
+      on_exit(fn ->
+        Application.delete_env(:bond, :preconditions)
+        Application.delete_env(:bond, :postconditions)
+        Application.delete_env(:bond, :invariants)
+      end)
+
+      :ok
+    end
+
+    test "logs once when propagation causes a higher kind to be skipped" do
+      Application.put_env(:bond, :preconditions, false)
+
+      # Run in a fresh process so the Process-dict dedup marker starts clean.
+      task =
+        Task.async(fn ->
+          log =
+            capture_log(fn ->
+              refute Eval.should_evaluate?(:postconditions, true, %{preconditions: true})
+            end)
+
+          # Should fire exactly once for this (higher, lower) pair, even across many calls.
+          log2 =
+            capture_log(fn ->
+              refute Eval.should_evaluate?(:postconditions, true, %{preconditions: true})
+              refute Eval.should_evaluate?(:postconditions, true, %{preconditions: true})
+            end)
+
+          {log, log2}
+        end)
+
+      {log, log2} = Task.await(task)
+
+      assert log =~ ":postconditions skipped"
+      assert log =~ ":preconditions"
+      assert log2 == ""
+    end
+
+    test "does not log when the kind itself is just off (no propagation)" do
+      Application.put_env(:bond, :postconditions, false)
+
+      task =
+        Task.async(fn ->
+          capture_log(fn ->
+            refute Eval.should_evaluate?(:postconditions, true, %{preconditions: true})
+          end)
+        end)
+
+      assert Task.await(task) == ""
+    end
+
+    test "different (higher, lower) pairs each get their own one-time log" do
+      # Only preconditions is off; the higher kinds themselves are on (no put_env), so
+      # propagation through to preconditions fires for both pairs.
+      Application.put_env(:bond, :preconditions, false)
+
+      task =
+        Task.async(fn ->
+          # (postconditions, preconditions) propagation
+          log1 =
+            capture_log(fn ->
+              refute Eval.should_evaluate?(:postconditions, true, %{preconditions: true})
+            end)
+
+          # (invariants, preconditions) propagation — different pair, separate log
+          log2 =
+            capture_log(fn ->
+              refute Eval.should_evaluate?(:invariants, true, %{
+                       preconditions: true,
+                       postconditions: true
+                     })
+            end)
+
+          # (invariants, preconditions) again — already logged for this pair, no second log
+          log3 =
+            capture_log(fn ->
+              refute Eval.should_evaluate?(:invariants, true, %{
+                       preconditions: true,
+                       postconditions: true
+                     })
+            end)
+
+          {log1, log2, log3}
+        end)
+
+      {log1, log2, log3} = Task.await(task)
+      assert log1 =~ ":postconditions skipped"
+      assert log2 =~ ":invariants skipped"
+      assert log3 == ""
+    end
+  end
+
   describe "evaluate_preconditions/1" do
     test "invokes the given assertions function" do
       ref = make_ref()

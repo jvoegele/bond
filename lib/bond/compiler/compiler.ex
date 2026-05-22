@@ -82,9 +82,57 @@ defmodule Bond.Compiler do
       invariants: Keyword.get(global, :invariants, true)
     }
 
-    base
-    |> apply_settings(resolve_overrides_for(overrides, module))
-    |> apply_settings(use_opts)
+    resolved =
+      base
+      |> apply_settings(resolve_overrides_for(overrides, module))
+      |> apply_settings(use_opts)
+
+    validate_chain!(module, resolved)
+    resolved
+  end
+
+  # The contract-checking chain is `preconditions ≤ postconditions ≤ invariants`. If a
+  # lower kind is `:purge`, every higher kind must also be `:purge` — there's no
+  # meaningful way to compile invariant or postcondition evaluation into the BEAM while
+  # the preconditions they presuppose are absent. (`:checks` is independent of the chain.)
+  #
+  # The runtime half of the constraint — `false` at runtime for a lower kind skipping the
+  # higher kinds — is enforced in `Bond.Runtime.Eval.should_evaluate?/3`.
+  defp validate_chain!(module, config) do
+    chain = [:preconditions, :postconditions, :invariants]
+
+    Enum.reduce(chain, [], fn kind, lower_kinds ->
+      if config[kind] != :purge do
+        for lower <- lower_kinds, config[lower] == :purge do
+          raise CompileError,
+            description: chain_error_message(module, kind, lower)
+        end
+      end
+
+      [kind | lower_kinds]
+    end)
+
+    :ok
+  end
+
+  defp chain_error_message(module, higher, lower) do
+    """
+    Bond: contract-checking chain violated for #{inspect(module)}.
+
+    `:#{higher}` is compiled in, but `:#{lower}` is `:purge`d. The chain
+    `preconditions ≤ postconditions ≤ invariants` requires that if a higher kind is
+    in the BEAM, all lower kinds it presupposes must also be compiled in.
+
+    A `:#{higher}` failure is only meaningful if `:#{lower}` was first verified — without
+    `:#{lower}`, a `:#{higher}` error could really be the caller's fault, not the callee's.
+
+    Resolutions:
+
+      * If you want to skip `:#{higher}` evaluation but keep the code, use
+        `:#{higher}` => `false` (compiled in, runtime-disabled by default).
+      * If you genuinely want `:#{lower}` purged, also purge every higher kind:
+        `:#{lower}` => `:purge`, `:#{higher}` => `:purge`.
+    """
   end
 
   defp resolve_overrides_for(overrides, module) do

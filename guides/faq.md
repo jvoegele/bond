@@ -97,6 +97,33 @@ data.
 def transform(input), do: ...
 ```
 
+## Why can't I have postconditions on while preconditions are off?
+
+Because a postcondition failure when preconditions weren't checked is
+diagnostically misleading — it might really be the caller's fault, not
+the function's. Bond's contract-checking chain says:
+
+```
+preconditions ≤ postconditions ≤ invariants
+```
+
+Concretely:
+
+- **Compile-time:** if you `:purge` a lower kind, you must `:purge`
+  every higher kind too. `config :bond, preconditions: :purge` while
+  leaving `:postconditions: true` is a compile error.
+- **Runtime:** if you `Application.put_env(:bond, :preconditions, false)`,
+  postconditions and invariants are also skipped automatically. Bond
+  emits a one-time `Logger.warning` per process per (higher, lower)
+  pair so you know it happened.
+
+`:checks` is independent of the chain — `check/1,2` is an internal
+sanity assertion, not a contract with a caller.
+
+If you genuinely want to skip a higher kind's *evaluation* without
+removing the code, use `false` instead of `:purge` (compiled in,
+runtime-disabled by default; flippable via `Application.put_env/3`).
+
 ## How do I disable a single failing contract while debugging?
 
 There's no per-contract toggle in the source code today. Options:
