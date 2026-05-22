@@ -81,6 +81,15 @@ defmodule Bond.Test do
     assert_violation_ast(Bond.CheckError, call, opts)
   end
 
+  @doc """
+  Asserts that the given `call` raises a `Bond.InvariantError`.
+
+  See `assert_precondition_violation/2` for details.
+  """
+  defmacro assert_invariant_violation(call, opts \\ []) do
+    assert_violation_ast(Bond.InvariantError, call, opts)
+  end
+
   defp assert_violation_ast(exception_module, call, opts) do
     quote do
       error = ExUnit.Assertions.assert_raise(unquote(exception_module), fn -> unquote(call) end)
