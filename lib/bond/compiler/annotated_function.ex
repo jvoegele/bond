@@ -17,6 +17,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
   alias Bond.Compiler.Assertion
   alias Bond.Compiler.FunctionDefinition
+  alias Bond.Compiler.Invariants
   alias Bond.Compiler.OldExpression
 
   defstruct kind: nil,
@@ -135,81 +136,10 @@ defmodule Bond.Compiler.AnnotatedFunction do
     do: not Enum.empty?(doc_attributes)
 
   def override?(%__MODULE__{} = annotated_function) do
-    has_preconditions?(annotated_function) or has_postconditions?(annotated_function)
+    has_preconditions?(annotated_function) or
+      has_postconditions?(annotated_function) or
+      (annotated_function.kind == :def and has_invariants?(annotated_function))
   end
-
-  @typedoc """
-  Result of analysing a function head for an invariant-bearing argument.
-
-    * `{:ok, var_name}` — the function pattern-matches `%__MODULE__{} = name` (in either
-      order) or has an `is_struct(name, __MODULE__)` guard. `name` is the bound variable
-      that the pre-invariant should check.
-    * `{:warn, :unbound_destructure}` — the function destructures `%__MODULE__{...}` but
-      doesn't bind the whole struct to a variable. Pre-invariant check is skipped; callers
-      should emit a compile-time warning suggesting `%__MODULE__{...} = name`.
-    * `:none` — neither pattern nor guard references `%__MODULE__{}`. Skip silently.
-  """
-  @type struct_arg_result :: {:ok, atom()} | {:warn, atom()} | :none
-
-  @doc """
-  Inspects a function's parameter list and guards for a binding to this module's struct.
-
-  Only matches the `%__MODULE__{}` form. Fully-qualified module patterns (`%MyMod{}`) and
-  aliased forms (`%alias_for_mod{}`) are not recognised in 0.13.0 — users who want
-  invariant pre-checks should use `__MODULE__` idiomatically. See the module docs for the
-  recognition table.
-  """
-  @spec find_struct_arg([Macro.t()], [Macro.t()]) :: struct_arg_result()
-  def find_struct_arg(params, guards) when is_list(params) and is_list(guards) do
-    cond do
-      name = bound_struct_param(params) -> {:ok, name}
-      name = is_struct_guard_var(guards) -> {:ok, name}
-      unbound_struct_param?(params) -> {:warn, :unbound_destructure}
-      true -> :none
-    end
-  end
-
-  # Matches `%__MODULE__{} = name` and `name = %__MODULE__{}` (either order of `=` operands).
-  defp bound_struct_param(params) do
-    Enum.find_value(params, fn
-      {:=, _, [{:%, _, [{:__MODULE__, _, _}, _]}, {var, _, ctx}]}
-      when is_atom(var) and is_atom(ctx) ->
-        var
-
-      {:=, _, [{var, _, ctx}, {:%, _, [{:__MODULE__, _, _}, _]}]}
-      when is_atom(var) and is_atom(ctx) ->
-        var
-
-      _ ->
-        nil
-    end)
-  end
-
-  # Matches `%__MODULE__{...}` without an enclosing `= name` binding.
-  defp unbound_struct_param?(params) do
-    Enum.any?(params, fn
-      {:%, _, [{:__MODULE__, _, _}, _]} -> true
-      _ -> false
-    end)
-  end
-
-  # Walks guard ASTs for `is_struct(var, __MODULE__)`. Handles `and`-combined guards
-  # (both branches reachable). `or`-combined guards are not unwrapped — only the first
-  # branch would carry the struct check, and the runtime might enter via the other branch.
-  defp is_struct_guard_var(guards) do
-    Enum.find_value(guards, &extract_is_struct_var/1)
-  end
-
-  defp extract_is_struct_var({:is_struct, _, [{var, _, ctx}, {:__MODULE__, _, _}]})
-       when is_atom(var) and is_atom(ctx) do
-    var
-  end
-
-  defp extract_is_struct_var({:and, _, [left, right]}) do
-    extract_is_struct_var(left) || extract_is_struct_var(right)
-  end
-
-  defp extract_is_struct_var(_), do: nil
 
   @typedoc """
   Per-kind configuration mode controlling how `apply_contract/2` emits each contract kind:
@@ -233,7 +163,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
   """
   @type contract_config :: %{
           required(:preconditions) => mode(),
-          required(:postconditions) => mode()
+          required(:postconditions) => mode(),
+          optional(:invariants) => mode()
         }
 
   @doc """
@@ -290,8 +221,15 @@ defmodule Bond.Compiler.AnnotatedFunction do
     post_mode =
       resolve_mode(Map.fetch!(config, :postconditions), has_postconditions?(annotated_function))
 
-    if pre_mode != :purge or post_mode != :purge do
-      build_contract_override(annotated_function, pre_mode, post_mode)
+    inv_mode =
+      Invariants.resolve_mode(
+        Map.get(config, :invariants, true),
+        annotated_function.kind,
+        annotated_function.invariants
+      )
+
+    if pre_mode != :purge or post_mode != :purge or inv_mode != :purge do
+      build_contract_override(annotated_function, pre_mode, post_mode, inv_mode)
     end
   end
 
@@ -302,9 +240,11 @@ defmodule Bond.Compiler.AnnotatedFunction do
   defp resolve_mode(value, true) when value in [true, false], do: value
 
   defp build_contract_override(
-         %__MODULE__{kind: kind, fun: fun, arity: arity} = annotated_function,
+         %__MODULE__{kind: kind, fun: fun, arity: arity, module: struct_module} =
+           annotated_function,
          pre_mode,
-         post_mode
+         post_mode,
+         inv_mode
        ) do
     first_clause = List.first(annotated_function.clauses)
     function_info = {fun, arity}
@@ -327,8 +267,14 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
     pre_fn_name = lifted_fn_name(:preconditions, fun, arity)
     post_fn_name = lifted_fn_name(:postconditions, fun, arity)
+    inv_fn_name = lifted_fn_name(:invariants, fun, arity)
+
+    struct_arg = Invariants.struct_arg(inv_mode, first_clause)
 
     doc_asts = doc_clauses(annotated_function, first_clause.env, pre_mode, post_mode)
+
+    pre_invariant_stmts = Invariants.pre_invariant_stmts(inv_fn_name, struct_arg, inv_mode)
+    post_invariant_stmts = Invariants.post_invariant_stmts(inv_fn_name, inv_mode, struct_module)
 
     body_stmts =
       build_override_body(
@@ -338,7 +284,9 @@ defmodule Bond.Compiler.AnnotatedFunction do
         old_assignments,
         old_pairs,
         pre_mode,
-        post_mode
+        post_mode,
+        pre_invariant_stmts,
+        post_invariant_stmts
       )
 
     assertion_defs =
@@ -361,6 +309,13 @@ defmodule Bond.Compiler.AnnotatedFunction do
             function_info,
             first_clause.env,
             post_mode
+          ),
+          Invariants.build_lifted_defp(
+            inv_fn_name,
+            annotated_function.invariants,
+            function_info,
+            first_clause.env,
+            inv_mode
           )
         ],
         &is_nil/1
@@ -401,14 +356,19 @@ defmodule Bond.Compiler.AnnotatedFunction do
          old_assignments,
          old_pairs,
          pre_mode,
-         post_mode
+         post_mode,
+         pre_invariant_stmts,
+         post_invariant_stmts
        ) do
     pre_stmts = pre_eval_stmts(call_params, pre_fn_name, pre_mode)
     super_call = quote(do: var!(result) = super(unquote_splicing(call_params)))
     post_stmts = post_eval_stmts(call_params, post_fn_name, old_pairs, post_mode)
     return_stmt = quote(do: var!(result))
 
-    pre_stmts ++ old_assignments ++ [super_call] ++ post_stmts ++ [return_stmt]
+    pre_invariant_stmts ++
+      pre_stmts ++
+      old_assignments ++
+      [super_call] ++ post_stmts ++ post_invariant_stmts ++ [return_stmt]
   end
 
   defp pre_eval_stmts(_call_params, _name, :purge), do: []

@@ -407,54 +407,6 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
     end
   end
 
-  describe "find_struct_arg/2" do
-    test "returns {:ok, name} for `%__MODULE__{} = name` pattern" do
-      params = quote(do: [%__MODULE__{} = stack, item])
-      assert AnnotatedFunction.find_struct_arg(params, []) == {:ok, :stack}
-    end
-
-    test "returns {:ok, name} for `name = %__MODULE__{}` (reversed) pattern" do
-      params = quote(do: [stack = %__MODULE__{}, item])
-      assert AnnotatedFunction.find_struct_arg(params, []) == {:ok, :stack}
-    end
-
-    test "returns {:ok, name} for destructured-and-bound pattern" do
-      params = quote(do: [%__MODULE__{field: x} = stack, item])
-      assert AnnotatedFunction.find_struct_arg(params, []) == {:ok, :stack}
-    end
-
-    test "returns {:warn, :unbound_destructure} for destructure without binding" do
-      params = quote(do: [%__MODULE__{field: x}, item])
-      assert AnnotatedFunction.find_struct_arg(params, []) == {:warn, :unbound_destructure}
-    end
-
-    test "returns {:ok, name} for `is_struct(name, __MODULE__)` guard" do
-      params = quote(do: [x, item])
-      guards = quote(do: [is_struct(x, __MODULE__)])
-      assert AnnotatedFunction.find_struct_arg(params, guards) == {:ok, :x}
-    end
-
-    test "returns {:ok, name} for `is_struct/2` combined with `and`" do
-      params = quote(do: [x, y])
-      guards = quote(do: [is_struct(x, __MODULE__) and is_integer(y)])
-      assert AnnotatedFunction.find_struct_arg(params, guards) == {:ok, :x}
-    end
-
-    test "returns :none for a bare-variable function head" do
-      params = quote(do: [x, item])
-      assert AnnotatedFunction.find_struct_arg(params, []) == :none
-    end
-
-    test "returns :none for an unrelated struct pattern" do
-      params = quote(do: [%OtherMod{} = x])
-      assert AnnotatedFunction.find_struct_arg(params, []) == :none
-    end
-
-    test "returns :none for empty params" do
-      assert AnnotatedFunction.find_struct_arg([], []) == :none
-    end
-  end
-
   defp first_block_clause({:__block__, _, [first | _]}), do: first
   defp first_block_clause(ast), do: ast
 

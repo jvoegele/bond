@@ -158,8 +158,11 @@ defmodule Bond.Compiler do
       Module.get_attribute(env.module, :__bond_contract_config__) ||
         %{preconditions: true, postconditions: true}
 
+    invariants = FSM.invariants(fsm(env))
+
     fsm(env)
     |> FSM.annotated_functions()
+    |> Enum.map(&AnnotatedFunction.put_invariants(&1, invariants))
     |> Enum.filter(&AnnotatedFunction.override?/1)
     |> Enum.map(&AnnotatedFunction.apply_contract(&1, config))
     |> Enum.reject(&is_nil/1)
@@ -193,9 +196,25 @@ defmodule Bond.Compiler do
 
   @doc false
   def register_invariant(name, expression, label, env, meta) when is_atom(name) do
+    # Strip the hygiene context off every reference to the binding name (`stack` in
+    # `@invariant stack, length(stack.items)`). The defp emitted in
+    # `Bond.Compiler.Invariants` declares the rebind as `Macro.var(name, nil)`; if the
+    # user's references kept their original module context, they would not resolve to
+    # that rebind.
+    normalized = normalize_binding_context(expression, name)
     meta_with_binding = Keyword.put(meta, :binding_name, name)
-    invariant = Assertion.new(:invariant, label, expression, env, meta_with_binding)
+    invariant = Assertion.new(:invariant, label, normalized, env, meta_with_binding)
     FSM.invariant_def(fsm(env), invariant)
+  end
+
+  defp normalize_binding_context(expression, binding_name) do
+    Macro.prewalk(expression, fn
+      {^binding_name, meta, ctx} when is_atom(ctx) ->
+        {binding_name, meta, nil}
+
+      other ->
+        other
+    end)
   end
 
   @doc false
