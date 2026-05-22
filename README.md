@@ -498,6 +498,77 @@ Only failure events are emitted in 0.12.0. Pass events would be far too
 chatty for production use; if there's demand for them they can be added
 later behind an opt-in.
 
+## Property-based testing
+
+Bond contracts compose naturally with
+[StreamData](https://hex.pm/packages/stream_data) property-based testing.
+The usual hard parts of PBT are generating inputs and writing an oracle
+that distinguishes right answers from wrong ones; Bond's contracts
+already supply the oracle at every call site. PBT then just feeds random
+inputs through already-instrumented code.
+
+`Bond.PropertyTest.contract_holds/2` ships in two forms.
+
+### Single function
+
+```elixir
+defmodule MathTest do
+  use ExUnit.Case
+  use Bond.PropertyTest
+
+  contract_holds &Math.sqrt/1, args: [StreamData.float(min: 0.0)]
+end
+```
+
+Generates a property block that calls `Math.sqrt/1` with random
+non-negative floats. Any precondition, postcondition, or `check`
+violation fails the property; StreamData shrinks to the minimal failing
+input.
+
+### Module sequence (invariant-driven)
+
+```elixir
+defmodule BoundedStackTest do
+  use ExUnit.Case
+  use Bond.PropertyTest
+
+  contract_holds BoundedStack,
+    constructors: [{:new, [StreamData.integer(1..100)]}],
+    transformers: [{:push, [StreamData.term()]}, {:pop, []}],
+    observers:    [{:size, []}, {:peek, []}]
+end
+```
+
+Generates random *sequences* of operations over a struct module. The
+constructor produces an initial struct; transformers thread state
+forward (they take the current struct as their first argument); observers
+take the struct but don't advance state. The module's `@invariant`s fire
+on every operation entry and exit, so any violation in any operation
+shrinks back to the minimal failing sequence.
+
+Form 2 supports `%Mod{}` and `{:ok, %Mod{}}` return shapes from
+constructors and transformers. `{:error, _}` terminates the sequence
+cleanly (an operation refusing isn't a contract violation). Other return
+shapes raise an `ArgumentError` — wrap your function or test it with
+Form 1.
+
+### Setup
+
+`stream_data` is an optional dep of `bond`. Add it to your own deps to
+enable PBT:
+
+```elixir
+def deps do
+  [
+    {:bond, "~> 0.14.0"},
+    {:stream_data, "~> 0.6", only: [:dev, :test]}
+  ]
+end
+```
+
+`use Bond.PropertyTest` raises a `CompileError` with an explanation if
+`stream_data` isn't on the path.
+
 <!-- README END -->
 
 ## Installation

@@ -174,6 +174,30 @@ forwarder).
 This is expected. If you want the error to mention `sqrt/1`, split the
 default-arg form into explicit clauses.
 
+## How does Bond compose with StreamData / property-based testing?
+
+Contracts and property-based testing are natural partners: PBT's hard
+part is usually writing the oracle that says whether an output is right
+or wrong, and contracts *are* that oracle. `Bond.PropertyTest.contract_holds/2`
+exposes this directly with two shapes:
+
+```elixir
+use Bond.PropertyTest
+
+# Form 1: random inputs into a single function
+contract_holds &Math.sqrt/1, args: [StreamData.float(min: 0.0)]
+
+# Form 2: random sequences over a struct's @invariant
+contract_holds BoundedStack,
+  constructors: [{:new, [StreamData.integer(1..100)]}],
+  transformers: [{:push, [StreamData.term()]}, {:pop, []}]
+```
+
+`stream_data` is an optional dep of bond — add it to your own project
+when you want PBT. See the
+[Property-based testing](Bond.html#module-property-based-testing) section
+in the moduledoc.
+
 ## When does Bond check invariants?
 
 `@invariant` declarations on a struct module are checked automatically at
