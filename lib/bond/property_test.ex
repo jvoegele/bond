@@ -79,4 +79,63 @@ defmodule Bond.PropertyTest do
       import Bond.PropertyTest
     end
   end
+
+  @doc """
+  Generates an ExUnit property that calls the given function with random arguments and
+  verifies that Bond's contracts (preconditions, postconditions, `check`s, invariants)
+  are all satisfied.
+
+  Two forms are supported, dispatched by the first argument:
+
+  ## Single function (Form 1)
+
+  Pass a function reference and a list of generators, one per argument:
+
+      contract_holds &Math.sqrt/1, args: [StreamData.float(min: 0.0)]
+
+  The macro expands to a `property` block. On each iteration it generates one value per
+  argument and calls the function. Any contract violation raised by Bond's runtime
+  instrumentation fails the property; StreamData then shrinks to the minimal
+  counterexample.
+
+  Useful for catching edge cases your example-based tests didn't cover. The function's
+  contracts are the oracle — no separate assertion is needed.
+
+  ## Module sequence (Form 2)
+
+  *Not yet implemented — arrives in a subsequent commit.* Pass a struct module plus
+  constructor / transformer / observer specs; the macro generates random sequences of
+  operations and runs them, with the module's `@invariant`s as the oracle.
+
+  ## Options for Form 1
+
+    * `:args` (required) — a list of `StreamData` generators, one per function argument.
+      The function is called via `apply/2` with the generated values.
+
+    * `:name` (optional) — a string used as the property's description. Defaults to
+      `"contract_holds <function-ref-source>"`.
+  """
+  defmacro contract_holds(fun_or_module, opts)
+
+  defmacro contract_holds({:&, _, _} = fun_ast, opts) do
+    contract_holds_for_function(fun_ast, opts)
+  end
+
+  defp contract_holds_for_function(fun_ast, opts) do
+    args_gens =
+      Keyword.get(opts, :args) ||
+        raise ArgumentError,
+              "contract_holds for a single function requires an `:args` keyword " <>
+                "with a list of generators (one per function argument)"
+
+    name = Keyword.get(opts, :name, "contract_holds #{Macro.to_string(fun_ast)}")
+
+    quote do
+      property unquote(name) do
+        check all args <- StreamData.fixed_list(unquote(args_gens)) do
+          apply(unquote(fun_ast), args)
+        end
+      end
+    end
+  end
 end
