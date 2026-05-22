@@ -53,8 +53,27 @@ defmodule Bond.Runtime.Eval do
   """
   @spec should_evaluate?(kind(), compile_default(), %{optional(kind()) => compile_default()}) ::
           boolean()
-  def should_evaluate?(kind, compile_default, _chain_defaults \\ %{}) do
+  def should_evaluate?(kind, compile_default, chain_defaults \\ %{}) do
+    if runtime_enabled?(kind, compile_default) do
+      chain_clear?(chain_defaults)
+    else
+      false
+    end
+  end
+
+  defp runtime_enabled?(kind, compile_default) do
     Application.get_env(:bond, kind, compile_default) != false
+  end
+
+  # Returns `true` when every lower-chain kind is runtime-on. Returns `false` as soon as
+  # one is `false` at runtime — that's the propagation. `chain_defaults` is the map the
+  # call site baked in with each lower kind's compile-time default; we use it as the
+  # fallback for `Application.get_env/3` so propagation respects per-module settings
+  # rather than always falling back to `true`.
+  defp chain_clear?(chain_defaults) do
+    Enum.all?(chain_defaults, fn {lower_kind, lower_default} ->
+      runtime_enabled?(lower_kind, lower_default)
+    end)
   end
 
   @spec evaluate_preconditions(assertion_fun()) :: term()
