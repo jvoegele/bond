@@ -123,3 +123,23 @@ defmodule Bond.CheckError do
     )
   end
 end
+
+defmodule Bond.InvariantError do
+  @moduledoc """
+  Exception raised when an `@invariant` for a struct module is violated.
+
+  Invariants are checked when a public function in the struct's defining module receives or
+  returns a value of the struct. The error's `:function` field identifies the function the
+  invariant was checked around; `:module` is always the struct's module.
+  """
+
+  use Bond.AssertionError
+
+  @impl Exception
+  def message(%{module: module, function: {function, arity}} = error) do
+    Bond.AssertionError.message(
+      error,
+      "invariant violated around #{inspect(module)}.#{function}/#{arity}"
+    )
+  end
+end
