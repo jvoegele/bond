@@ -157,16 +157,16 @@ defmodule Bond do
   defmacro check(assertion_or_list_of_assertions)
 
   defmacro check(keyword_list) when is_list(keyword_list) do
-    build_check(__CALLER__.module, fn ->
+    build_check(__CALLER__.module, fn mode ->
       for {label, {_, meta, _} = expression} <- keyword_list do
-        Bond.Compiler.check_assertion(expression, label, __CALLER__, meta)
+        Bond.Compiler.check_assertion(expression, label, __CALLER__, meta, mode)
       end
     end)
   end
 
   defmacro check({_, meta, _} = expression) do
-    build_check(__CALLER__.module, fn ->
-      Bond.Compiler.check_assertion(expression, nil, __CALLER__, meta)
+    build_check(__CALLER__.module, fn mode ->
+      Bond.Compiler.check_assertion(expression, nil, __CALLER__, meta, mode)
     end)
   end
 
@@ -179,38 +179,29 @@ defmodule Bond do
 
   @spec check(assertion_label(), assertion_expression()) :: as_boolean(any())
   defmacro check(label, {_, meta, _} = expression) when is_atom(label) or is_binary(label) do
-    build_check(__CALLER__.module, fn ->
-      Bond.Compiler.check_assertion(expression, label, __CALLER__, meta)
+    build_check(__CALLER__.module, fn mode ->
+      Bond.Compiler.check_assertion(expression, label, __CALLER__, meta, mode)
     end)
   end
 
   @spec check(assertion_expression(), assertion_label()) :: as_boolean(any())
   defmacro check({_, meta, _} = expression, label) when is_atom(label) or is_binary(label) do
-    build_check(__CALLER__.module, fn ->
-      Bond.Compiler.check_assertion(expression, label, __CALLER__, meta)
+    build_check(__CALLER__.module, fn mode ->
+      Bond.Compiler.check_assertion(expression, label, __CALLER__, meta, mode)
     end)
   end
 
   # Build the AST for a `check` call honouring the per-module `:checks` config:
   #
-  #   * `:purge` — expand to `:ok` at compile time; `build_inline_ast` is never called.
-  #   * `true` / `false` — call `build_inline_ast` to get the assertion-evaluation AST, then
-  #     wrap it in a runtime guard using `Application.get_env/3` defaulting to the
-  #     compile-time mode.
+  #   * `:purge` — expand to `:ok` at compile time; `build_inline_ast` is never called and
+  #     the wrapped expression is not evaluated at runtime.
+  #   * `true` / `false` — call `build_inline_ast` with the compile-time-resolved mode to
+  #     produce the call(s) to `Bond.Runtime.Eval.evaluate_check/2`. The runtime guard
+  #     (`Application.get_env/3` defaulting to the compile-time mode) lives inside `Eval`.
   defp build_check(module, build_inline_ast) do
     case checks_mode(module) do
-      :purge ->
-        :ok
-
-      mode when mode in [true, false] ->
-        inline = build_inline_ast.()
-
-        quote do
-          case Application.get_env(:bond, :checks, unquote(mode)) do
-            false -> :ok
-            _ -> unquote(inline)
-          end
-        end
+      :purge -> :ok
+      mode when mode in [true, false] -> build_inline_ast.(mode)
     end
   end
 

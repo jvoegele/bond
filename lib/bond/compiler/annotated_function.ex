@@ -154,33 +154,39 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
   Per-kind mode (see `t:mode/0`):
 
-    * `true` / `false` — the override IS emitted; each call reads
-      `Application.get_env(:bond, <kind>, <compile_time_value>)` and skips evaluation when the
-      result is exactly `false`. The auto-generated doc section for that kind appears.
+    * `true` / `false` — the override IS emitted; `Bond.Runtime.Eval` performs a runtime
+      `Application.get_env(:bond, <kind>, <compile_time_value>)` check and skips evaluation
+      when the result is exactly `false`. The auto-generated doc section for that kind
+      appears.
     * `:purge` — no code is emitted for that kind. The doc section is omitted.
 
   When both `:preconditions` and `:postconditions` resolve to `:purge` (or when the function
   has no contracts of either kind), `apply_contract/2` returns `nil`. The caller filters
   `nil`s out and the user's `def`/`defp` runs as written, with zero per-call overhead.
 
-  When an override IS emitted, the expression contains three things:
+  When an override IS emitted, the expression contains:
 
     1. A `defoverridable` declaration making the function overridable.
     2. Zero or more `@doc` clauses re-emitting the user's `@doc` attributes, with the
        auto-generated `#### Preconditions` / `#### Postconditions` sections appended (filtered
-       by the per-kind mode). A synthetic `@doc` is emitted if the function has contracts but
-       no user-supplied string `@doc`.
+       by the per-kind mode).
     3. A single override clause for the function that:
 
-         * (when `preconditions != :purge`) builds the preconditions fn and, if
-           `Application.get_env(:bond, :preconditions, …)` is not `false`, calls
-           `Bond.Runtime.Eval.evaluate_preconditions/1`;
+         * (when `preconditions != :purge`) calls `Bond.Runtime.Eval.evaluate_preconditions/2`
+           with a thin closure that delegates to the lifted precondition defp;
          * resolves any `old(...)` expressions found in the postconditions into local bindings;
          * delegates to the original implementation via `super(...)`, capturing the result;
-         * (when `postconditions != :purge`) builds the postconditions fn and, if
-           `Application.get_env(:bond, :postconditions, …)` is not `false`, calls
-           `Bond.Runtime.Eval.evaluate_postconditions/1`;
+         * (when `postconditions != :purge`) calls `Bond.Runtime.Eval.evaluate_postconditions/2`
+           with a thin closure that delegates to the lifted postcondition defp (passing the
+           function params, the captured result, and the resolved old-value bindings);
          * returns the captured result.
+
+    4. One private `defp` per non-purged kind containing the assertion-evaluation block
+       produced by `Bond.Compiler.Assertion.assertions_body/2`. Naming convention:
+       `:"__bond_preconditions__\#{fun}__\#{arity}"` /
+       `:"__bond_postconditions__\#{fun}__\#{arity}"`. Lifting the closure body into a named
+       defp keeps the override clause itself tiny and avoids re-emitting the full assertion
+       AST inline.
 
   The override clause uses the parameter names from the function's first clause. For
   multi-clause functions Elixir's normal pattern matching applies inside `super(...)`, so a
@@ -221,29 +227,55 @@ defmodule Bond.Compiler.AnnotatedFunction do
     # they end up calling our override.
     call_params = strip_default_args(first_clause.params)
 
-    {postconditions, old_context} = OldExpression.precompile(annotated_function.postconditions)
-    old_resolved_ast = OldExpression.resolve(old_context)
-
-    preconditions_fun_ast =
-      if pre_mode != :purge do
-        Assertion.create_assertions_function(annotated_function.preconditions, function_info)
-      end
-
-    postconditions_fun_ast =
+    {postconditions, old_context} =
       if post_mode != :purge do
-        Assertion.create_assertions_function(postconditions, function_info)
+        OldExpression.precompile(annotated_function.postconditions)
+      else
+        {[], %{}}
       end
+
+    old_pairs = OldExpression.pairs(old_context)
+    old_assignments = OldExpression.resolve(old_context)
+
+    pre_fn_name = lifted_fn_name(:preconditions, fun, arity)
+    post_fn_name = lifted_fn_name(:postconditions, fun, arity)
 
     doc_asts = doc_clauses(annotated_function, first_clause.env, pre_mode, post_mode)
 
     body_stmts =
       build_override_body(
         call_params,
-        preconditions_fun_ast,
-        postconditions_fun_ast,
-        old_resolved_ast,
+        pre_fn_name,
+        post_fn_name,
+        old_assignments,
+        old_pairs,
         pre_mode,
         post_mode
+      )
+
+    assertion_defs =
+      Enum.reject(
+        [
+          maybe_build_assertion_defp(
+            pre_fn_name,
+            call_params,
+            [],
+            annotated_function.preconditions,
+            function_info,
+            first_clause.env,
+            pre_mode
+          ),
+          maybe_build_assertion_defp(
+            post_fn_name,
+            call_params,
+            postcondition_extra_params(old_pairs),
+            postconditions,
+            function_info,
+            first_clause.env,
+            post_mode
+          )
+        ],
+        &is_nil/1
       )
 
     quote file: first_clause.env.file, line: first_clause.env.line do
@@ -254,53 +286,94 @@ defmodule Bond.Compiler.AnnotatedFunction do
       unquote(kind)(unquote(fun)(unquote_splicing(call_params))) do
         (unquote_splicing(body_stmts))
       end
+
+      unquote_splicing(assertion_defs)
     end
+  end
+
+  defp lifted_fn_name(kind, fun, arity) do
+    :"__bond_#{kind}__#{fun}__#{arity}"
+  end
+
+  # Extra parameters that come after the original function's params in the lifted
+  # postcondition defp: the captured `result` and one parameter per resolved `old(...)` value,
+  # in the order produced by `OldExpression.pairs/1`. All wrapped in `var!/1` so they bind
+  # with the calling function's hygiene context (matching how the assertion expressions and
+  # `OldExpression.resolve/1` reference them).
+  defp postcondition_extra_params(old_pairs) do
+    result_param = quote(do: var!(result))
+    old_params = for {var, _expression} <- old_pairs, do: quote(do: var!(unquote(var)))
+    [result_param | old_params]
   end
 
   defp build_override_body(
          call_params,
-         preconditions_fun_ast,
-         postconditions_fun_ast,
-         old_resolved_ast,
+         pre_fn_name,
+         post_fn_name,
+         old_assignments,
+         old_pairs,
          pre_mode,
          post_mode
        ) do
-    pre_stmts = guarded_eval_stmts(:preconditions, preconditions_fun_ast, pre_mode)
+    pre_stmts = pre_eval_stmts(call_params, pre_fn_name, pre_mode)
     super_call = quote(do: var!(result) = super(unquote_splicing(call_params)))
-    post_stmts = guarded_eval_stmts(:postconditions, postconditions_fun_ast, post_mode)
+    post_stmts = post_eval_stmts(call_params, post_fn_name, old_pairs, post_mode)
     return_stmt = quote(do: var!(result))
 
-    pre_stmts ++ [old_resolved_ast, super_call] ++ post_stmts ++ [return_stmt]
+    pre_stmts ++ old_assignments ++ [super_call] ++ post_stmts ++ [return_stmt]
   end
 
-  # Emit the per-kind statements that bind the assertions fn and then conditionally invoke
-  # the runtime evaluator. The compile-time mode (`true` or `false`) is embedded as the
-  # default in the `Application.get_env/3` call, so the runtime check reflects the user's
-  # compile-time intent when no `Application.put_env/3` override is in place.
-  defp guarded_eval_stmts(_kind, _fun_ast, :purge), do: []
+  defp pre_eval_stmts(_call_params, _name, :purge), do: []
 
-  defp guarded_eval_stmts(:preconditions, fun_ast, mode) do
+  defp pre_eval_stmts(call_params, name, mode) do
     [
-      quote(do: preconditions_fun = unquote(fun_ast)),
       quote do
-        case Application.get_env(:bond, :preconditions, unquote(mode)) do
-          false -> :ok
-          _ -> Bond.Runtime.Eval.evaluate_preconditions(preconditions_fun)
+        if Bond.Runtime.Eval.should_evaluate?(:preconditions, unquote(mode)) do
+          Bond.Runtime.Eval.evaluate_preconditions(fn ->
+            unquote(name)(unquote_splicing(call_params))
+          end)
         end
       end
     ]
   end
 
-  defp guarded_eval_stmts(:postconditions, fun_ast, mode) do
+  defp post_eval_stmts(_call_params, _name, _old_pairs, :purge), do: []
+
+  defp post_eval_stmts(call_params, name, old_pairs, mode) do
+    old_args = for {var, _expression} <- old_pairs, do: quote(do: var!(unquote(var)))
+    args = call_params ++ [quote(do: var!(result)) | old_args]
+
     [
-      quote(do: postconditions_fun = unquote(fun_ast)),
       quote do
-        case Application.get_env(:bond, :postconditions, unquote(mode)) do
-          false -> :ok
-          _ -> Bond.Runtime.Eval.evaluate_postconditions(postconditions_fun)
+        if Bond.Runtime.Eval.should_evaluate?(:postconditions, unquote(mode)) do
+          Bond.Runtime.Eval.evaluate_postconditions(fn ->
+            unquote(name)(unquote_splicing(args))
+          end)
         end
       end
     ]
+  end
+
+  defp maybe_build_assertion_defp(_name, _params, _extra, _assertions, _info, _env, :purge),
+    do: nil
+
+  defp maybe_build_assertion_defp(
+         name,
+         call_params,
+         extra_params,
+         assertions,
+         function_info,
+         env,
+         _mode
+       ) do
+    body = Assertion.assertions_body(assertions, function_info)
+    params = call_params ++ extra_params
+
+    quote file: env.file, line: env.line do
+      defp unquote(name)(unquote_splicing(params)) do
+        unquote(body)
+      end
+    end
   end
 
   defp strip_default_args(params) do

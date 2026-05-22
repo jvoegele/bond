@@ -182,15 +182,42 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       assert {:def, _, [{:new, _, [{:list, _, _}]}, [do: do_block]]} = override
 
       code = Macro.to_string(do_block)
-      assert code =~ ~r"preconditions_fun ="
-      assert code =~ ~r"if x > 0"
-      assert code =~ ~r"Bond.Runtime.Eval.evaluate_preconditions\(preconditions_fun\)"
+      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(:preconditions, true\)"
+
+      assert code =~
+               ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__new__1\(list\)\s+end\)/s
+
       assert code =~ ~r"var!\(result\) = super\(list\)"
-      assert code =~ ~r"postconditions_fun ="
-      assert code =~ ~r"Bond.Runtime.Eval.evaluate_postconditions\(postconditions_fun\)"
+      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(:postconditions, true\)"
+
+      assert code =~
+               ~r/Bond\.Runtime\.Eval\.evaluate_postconditions\(fn ->\s+__bond_postconditions__new__1\(list, var!\(result\)\)\s+end\)/s
+
       assert code =~ ~r"var!\(result\)$"
-      assert code =~ ~r"throw.*:assertion_failure"
-      assert code =~ ~r"if result < x"
+    end
+
+    test "emits lifted defps for the precondition and postcondition assertion bodies",
+         %{two_clause_annotated_function: annotated_function} do
+      ast = AnnotatedFunction.apply_contract(annotated_function)
+      defps = lifted_defp_clauses(ast)
+
+      assert {:__bond_preconditions__new__1, [{:list, _, _}], pre_body} =
+               Enum.find(defps, fn {name, _, _} -> name == :__bond_preconditions__new__1 end)
+
+      pre_code = Macro.to_string(pre_body)
+      assert pre_code =~ ~r"import Bond\.Predicates"
+      assert pre_code =~ ~r"if x > 0"
+      assert pre_code =~ ~r"throw.*:assertion_failure"
+
+      assert {:__bond_postconditions__new__1, post_params, post_body} =
+               Enum.find(defps, fn {name, _, _} -> name == :__bond_postconditions__new__1 end)
+
+      # `list` (the user param) plus a `var!(result)` parameter at the end.
+      assert length(post_params) == 2
+
+      post_code = Macro.to_string(post_body)
+      assert post_code =~ ~r"import Bond\.Predicates"
+      assert post_code =~ ~r"if result < x"
     end
   end
 
@@ -215,10 +242,22 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       override = override_def_clause(ast)
       code = Macro.to_string(elem(override, 2) |> List.last() |> Keyword.get(:do))
 
-      refute code =~ ~r"preconditions_fun ="
       refute code =~ ~r"evaluate_preconditions"
+      refute code =~ ~r"__bond_preconditions__"
       assert code =~ ~r"evaluate_postconditions"
       assert code =~ ~r"var!\(result\) = super"
+
+      defp_names = lifted_defp_clauses(ast) |> Enum.map(fn {name, _, _} -> name end)
+
+      refute Enum.any?(
+               defp_names,
+               &(Atom.to_string(&1) |> String.starts_with?("__bond_preconditions__"))
+             )
+
+      assert Enum.any?(
+               defp_names,
+               &(Atom.to_string(&1) |> String.starts_with?("__bond_postconditions__"))
+             )
     end
 
     test "postconditions purged — override has no postcondition eval, doc has no #### Postconditions",
@@ -239,8 +278,20 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       code = Macro.to_string(elem(override, 2) |> List.last() |> Keyword.get(:do))
 
       assert code =~ ~r"evaluate_preconditions"
-      refute code =~ ~r"postconditions_fun ="
       refute code =~ ~r"evaluate_postconditions"
+      refute code =~ ~r"__bond_postconditions__"
+
+      defp_names = lifted_defp_clauses(ast) |> Enum.map(fn {name, _, _} -> name end)
+
+      assert Enum.any?(
+               defp_names,
+               &(Atom.to_string(&1) |> String.starts_with?("__bond_preconditions__"))
+             )
+
+      refute Enum.any?(
+               defp_names,
+               &(Atom.to_string(&1) |> String.starts_with?("__bond_postconditions__"))
+             )
     end
 
     test "both purged returns nil", %{one_clause_annotated_function: annotated_function} do
@@ -253,7 +304,7 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       assert is_nil(ast)
     end
 
-    test "preconditions: false — override IS emitted with runtime guard, doc HAS section",
+    test "preconditions: false — override emits evaluate_preconditions with false default, doc HAS section",
          %{one_clause_annotated_function: annotated_function} do
       ast =
         AnnotatedFunction.apply_contract(annotated_function, %{
@@ -270,13 +321,16 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       override = override_def_clause(ast)
       code = Macro.to_string(elem(override, 2) |> List.last() |> Keyword.get(:do))
 
-      # Override is emitted; runtime guard reads Application.get_env with default `false`.
-      assert code =~ ~r"preconditions_fun ="
-      assert code =~ ~r"Application\.get_env\(:bond, :preconditions, false\)"
-      assert code =~ ~r"evaluate_preconditions"
+      # Override gates the evaluate call with should_evaluate?, passing the compile-time
+      # default of `false`. Eval's should_evaluate? feeds that into
+      # `Application.get_env(:bond, :preconditions, false)` internally.
+      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(:preconditions, false\)"
+
+      assert code =~
+               ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__add__2\(x, y\)\s+end\)/s
     end
 
-    test "preconditions: true — override emitted with runtime guard defaulting to true",
+    test "preconditions: true — override emits evaluate_preconditions with true default",
          %{one_clause_annotated_function: annotated_function} do
       ast =
         AnnotatedFunction.apply_contract(annotated_function, %{
@@ -287,8 +341,15 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       override = override_def_clause(ast)
       code = Macro.to_string(elem(override, 2) |> List.last() |> Keyword.get(:do))
 
-      assert code =~ ~r"Application\.get_env\(:bond, :preconditions, true\)"
-      assert code =~ ~r"Application\.get_env\(:bond, :postconditions, true\)"
+      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(:preconditions, true\)"
+
+      assert code =~
+               ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__add__2\(x, y\)\s+end\)/s
+
+      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(:postconditions, true\)"
+
+      assert code =~
+               ~r/Bond\.Runtime\.Eval\.evaluate_postconditions\(fn ->\s+__bond_postconditions__add__2\(x, y, var!\(result\)\)\s+end\)/s
     end
 
     test "function with only preconditions: purging postconditions still emits override" do
@@ -370,6 +431,23 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
     |> Enum.find(fn
       {:def, _, _} -> true
       _ -> false
+    end)
+  end
+
+  # Extracts `{fun_name, params, body_ast}` for each `defp __bond_*__*` clause in `ast`.
+  defp lifted_defp_clauses(ast) do
+    ast
+    |> block_clauses()
+    |> Enum.flat_map(fn
+      {:defp, _, [{name, _, params}, [do: body]]} when is_atom(name) and is_list(params) ->
+        if String.starts_with?(Atom.to_string(name), "__bond_") do
+          [{name, params, body}]
+        else
+          []
+        end
+
+      _ ->
+        []
     end)
   end
 

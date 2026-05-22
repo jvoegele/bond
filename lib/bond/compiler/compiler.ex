@@ -197,9 +197,17 @@ defmodule Bond.Compiler do
   end
 
   @doc false
-  def check_assertion(expression, label, env, meta) do
+  def check_assertion(expression, label, env, meta, mode) when mode in [true, false] do
     check = Assertion.new(:check, label, expression, env, meta)
-    Assertion.quoted_eval(check)
+    body = Assertion.check_body(check)
+
+    quote do
+      if Bond.Runtime.Eval.should_evaluate?(:checks, unquote(mode)) do
+        Bond.Runtime.Eval.evaluate_check(fn -> unquote(body) end)
+      else
+        :ok
+      end
+    end
   end
 
   @spec fsm(Macro.Env.t()) :: FSM.server_ref()
