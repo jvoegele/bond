@@ -46,11 +46,16 @@ defmodule Bond.MixProject do
   defp deps do
     [
       {:telemetry, "~> 1.0"},
+      # `stream_data` is optional: users who want property-based testing via
+      # `Bond.PropertyTest` add it to their own deps; everyone else doesn't pay the cost.
+      # Marked `optional: true` so it's available for Bond's own test suite (and to lib/
+      # references guarded by `Code.ensure_loaded?/1`) without becoming a transitive dep
+      # for downstream apps.
+      {:stream_data, "~> 0.6", optional: true},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: [:dev, :test]},
-      {:excoveralls, "~> 0.18", only: :test},
-      {:stream_data, "~> 0.6", only: [:dev, :test]}
+      {:excoveralls, "~> 0.18", only: :test}
     ]
   end
 
