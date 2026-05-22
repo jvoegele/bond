@@ -5,6 +5,110 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-05-26
+
+0.16.0 is the first 1.0-prep release. It tightens the public API in two
+places where the surface had accumulated friction: `@invariant` drops its
+required binding-name argument in favour of an implicit `subject` binding,
+and `check/2` drops its two string-label forms in favour of `check expr`
+and `check label: expr`. Both legacy shapes now raise `CompileError` at the
+call site with a migration message.
+
+### Breaking changes (minor)
+
+- **`@invariant <name>, <expr>` was removed.** The new form is `@invariant
+  <expr_or_kw>` — no binding-name argument. Invariant expressions reference
+  the implicit `subject` binding, which Bond rebinds at every check site to
+  whichever struct parameter the function head exposes (detected
+  automatically across `%__MODULE__{} = name` patterns, `is_struct(name,
+  __MODULE__)` guards, and `%__MODULE__{...}` destructures).
+
+      # Was:
+      @invariant stack,
+                 non_negative_capacity: stack.capacity >= 0,
+                 size_within_capacity: length(stack.items) <= stack.capacity
+
+      # Now:
+      @invariant non_negative_capacity: subject.capacity >= 0,
+                 size_within_capacity: length(subject.items) <= subject.capacity
+
+  Function bodies don't change — `def push(%__MODULE__{} = stack, item)`
+  keeps its parameter named `stack`; Bond detects and rebinds `subject` to
+  it automatically. The legacy 2-arg shape raises a `CompileError` with the
+  migration message.
+
+- **`check/2` was removed.** The two string-label forms (`check "label",
+  expr` and `check expr, "label"`) are gone — they were redundant with the
+  keyword-list form, which already carries a label:
+
+      # Was:
+      check "x is a number", is_number(x)
+      check is_number(x), "x is a number"
+
+      # Now:
+      check x_is_number: is_number(x)
+
+  `check expr` (bare) and `check label: expr` (keyword) are the two
+  remaining forms. The legacy 2-arg shape raises a `CompileError` with the
+  migration message.
+
+### Added
+
+- **Multi-struct heads in `@invariant`.** `def merge(%__MODULE__{} = a,
+  %__MODULE__{} = b)` now triggers invariant checks on *both* struct
+  parameters in left-to-right order, with `subject` rebinding to each in
+  turn. Previously only the first detected struct param was checked.
+
+- **Destructure-only heads in `@invariant`.** `def head(%__MODULE__{items:
+  [first | _]})` (no `= name`) now participates in pre-invariant checks.
+  Bond rewrites the override clause head to add a capturing binding
+  (`%__MODULE__{items: [first | _]} = __bond_subject_0__`) so the struct
+  passes cleanly to the lifted invariants defp. Previously this shape was
+  skipped silently with a documented (but unimplemented) warning.
+
+  This also closes a latent bug in the override emission: `super(...)`
+  previously spliced raw destructure patterns as expressions, which would
+  fail at compile time on patterns like `[h | _]` if a user had ever tried
+  it with `@pre`/`@post`. The capture rewrite passes the original input
+  through cleanly.
+
+- **`Bond.Compiler.Invariants.detect_struct_params/2`** — internal helper
+  that finds every struct-bearing parameter in a function head, returning a
+  list of `{:bound, var, idx}` or `{:destructure, idx}` descriptors.
+  Replaces the single-struct `find_struct_arg/2` removed below.
+
+### Changed
+
+- **Doc-generation logic extracted into `Bond.Compiler.ContractDocs`.**
+  Pure refactor — no user-visible change. Shaves ~80 lines off
+  `Bond.Compiler.AnnotatedFunction`, which is on the FSM's hot path. A
+  shorter `AnnotatedFunction` reduces the window for the parallel-compile
+  race first encountered (and partially mitigated) in 0.13.0.
+
+- **`Bond.Compiler.Assertion` drops the `:binding_name` field.** The
+  invariant body now hardcodes the `subject = bond_invariant_value` rebind.
+  The struct shrinks from 8 fields to 7.
+
+- **`Bond.Compiler.Invariants` simplified.** Removed the legacy
+  single-struct helpers `find_struct_arg/2`, `struct_arg/2`,
+  `pre_invariant_stmts/5`, and the supporting AST walkers. New emission
+  uses `detect_struct_params/2` + `all_pre_invariant_stmts/5` +
+  `rewrite_call_params/2` end-to-end.
+
+- **Moduledoc reorganised.** Sections regroup as "what you write" (Usage →
+  Assertion syntax → `@invariant` → `check/1` → `old`) then "how you
+  operate" (Documenting contracts → Conditional compilation → Telemetry →
+  PBT). The 0.10 → 0.11 migration table is dropped, and the long Agent
+  race-condition narrative in `old` moves to the
+  `contracts-and-concurrency` guide.
+
+- **Telemetry `:kind` documentation** updated to include `:invariant` (the
+  event was already emitted since 0.13.0; the docs were stale).
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.15.0] - 2026-05-25
 
 0.15.0 closes a correctness gap in conditional compilation: previously
