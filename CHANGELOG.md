@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-05-25
+
+0.15.0 closes a correctness gap in conditional compilation: previously
+`:preconditions`, `:postconditions`, and `:invariants` could be toggled
+independently in any combination, including combinations that produced
+diagnostically-misleading errors (e.g. postconditions on while
+preconditions are off — a "postcondition failure" might really mean
+the caller broke their contract, not the function).
+
+0.15.0 enforces the natural chain `preconditions ≤ postconditions ≤
+invariants` both at compile time and at runtime. `:checks` remains
+independent of the chain.
+
+### Breaking changes (minor)
+
+- **Compile-time validation of `:purge` combinations.** `:purge` on a
+  lower kind now requires `:purge` on every higher kind in the chain.
+  `Bond.Compiler.resolve_config/3` raises `CompileError` with an
+  explanation otherwise.
+
+  Migration: if you used `config :bond, preconditions: :purge` without
+  also purging postconditions/invariants, choose one:
+
+      # Was:
+      config :bond, preconditions: :purge
+
+      # Option A — also purge the chain (preserves the original intent
+      # if you wanted zero overhead):
+      config :bond,
+        preconditions: :purge,
+        postconditions: :purge,
+        invariants: :purge
+
+      # Option B — runtime-disable instead of purge (keeps the code,
+      # operator can flip on at runtime):
+      config :bond,
+        preconditions: false
+
+  `false` is unaffected — runtime-disabling a single kind is
+  unchanged. Only `:purge` participates in the compile-time check.
+
+### Added
+
+- **Runtime chain propagation.** When a lower kind is `false` at runtime
+  (`Application.put_env(:bond, :preconditions, false)`), every higher
+  kind is also skipped automatically, regardless of its own setting.
+  Enforced in `Bond.Runtime.Eval.should_evaluate?/3` via the new
+  optional third argument carrying the compile-time defaults of every
+  lower kind.
+
+- **One-time-per-process propagation log.** The first time a higher
+  kind is skipped because a lower one is runtime-off, Bond emits a
+  `Logger.warning` describing the chain constraint, the offending
+  pair, and the `Application.put_env` invocation that would bring the
+  higher kind back. Deduped per (higher, lower) pair via a
+  Process-dictionary marker — long-running OTP processes get exactly
+  one warning per pair.
+
+### Changed
+
+- `Bond.Runtime.Eval.should_evaluate?/2` is now `should_evaluate?/3`
+  with an optional `chain_defaults` map; the 2-arity call still works
+  via default and is unchanged behaviour-wise for `:preconditions` and
+  `:checks` (both have no lower kinds).
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.14.0] - 2026-05-24
 
 0.14.0 adds **`Bond.PropertyTest`** — a property-based testing layer that
