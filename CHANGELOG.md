@@ -5,6 +5,77 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-05-23
+
+0.13.0 adds **`@invariant`** declarations for struct modules — module-scoped
+properties that hold across every public function in the struct's defining
+module. Where `@pre`/`@post` constrain a single function call, `@invariant`
+constrains the struct itself.
+
+### Added
+
+- **`@invariant <name>, <kw_or_expression>`** annotation. Same shape as
+  `@pre`/`@post`: a labelled keyword-list of assertions, or a single
+  unlabelled expression. The first argument is the variable name the
+  expression refers to (e.g. `stack` in
+  `@invariant stack, length(stack.items) <= stack.capacity`).
+
+  Invariants are checked at the boundaries of every public function in the
+  module:
+
+  - **On entry**, when the function head pattern-matches `%__MODULE__{} = name`
+    or has an `is_struct(name, __MODULE__)` guard.
+  - **On exit**, against the return value if it's `%__MODULE__{}` or
+    `{:ok, %__MODULE__{}}`. Other return shapes fall through with no check.
+  - **Never for `defp`** — private functions are exempt by the Eiffel
+    convention (they often hold transiently-invalid state).
+
+  When a function destructures `%__MODULE__{...}` in its head without binding
+  the whole struct to a variable, Bond emits a compile-time warning suggesting
+  `%__MODULE__{...} = name` to enable the pre-check.
+
+- **`Bond.InvariantError`** — new exception parallel to
+  `PreconditionError`/`PostconditionError`/`CheckError`. Raised on invariant
+  violation; carries the same metadata shape.
+
+- **`Bond.Test.assert_invariant_violation/2`** — ExUnit helper mirroring the
+  existing pre/post/check helpers.
+
+- **`:invariants` conditional-compilation key.** Joins `:preconditions`,
+  `:postconditions`, and `:checks`. Same `true | false | :purge` value space;
+  same runtime toggleability via `Application.put_env/3`; same `:overrides`
+  and `use Bond, invariants: …` support.
+
+- **`Bond.Compiler.Invariants`** — new internal module owning the invariant
+  emission logic (struct-arg detection, pre-/post-invariant call sites, the
+  lifted invariants defp). Kept separate from `Bond.Compiler.AnnotatedFunction`
+  for separation of concerns and to avoid parallel-compile scheduling issues
+  with the larger combined file.
+
+### Changed
+
+- `[:bond, :assertion, :failure]` telemetry events now also fire for invariant
+  violations, with `:kind => :invariant` in the metadata. No subscriber
+  changes are needed — existing handlers attached to the event automatically
+  pick up the new kind.
+
+- `Bond.Compiler.Assertion.t/0` gains a `:binding_name` field, populated only
+  on `:invariant` assertions from the declaration's first argument.
+
+- `Bond.Compiler.AnnotatedFunction` gains an `:invariants` field plus
+  `put_invariants/2` and `has_invariants?/1` helpers. `override?/1` widens to
+  emit overrides for public functions in modules with `@invariant`s, even
+  when the function has no per-function `@pre`/`@post`.
+
+- `Bond.Compiler.CompileStateFSM` tracks module-scoped invariants alongside
+  the per-function preconditions/postconditions. Invariants don't transition
+  the FSM into `:contracts_pending` (they don't attach to a "next function")
+  and aren't flushed by function definitions.
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.12.0] - 2026-05-22
 
 0.12.0 lands two internal-shape changes that compose on top of the

@@ -507,7 +507,7 @@ later behind an opt-in.
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.12.0"}
+    {:bond, "~> 0.13.0"}
   ]
 end
 ```
