@@ -1,5 +1,7 @@
 defmodule Bond.Runtime.Eval do
   @moduledoc internal: true
+
+  require Logger
   @moduledoc """
   Internal helper module for runtime execution of contracts and assertions.
 
@@ -55,7 +57,7 @@ defmodule Bond.Runtime.Eval do
           boolean()
   def should_evaluate?(kind, compile_default, chain_defaults \\ %{}) do
     if runtime_enabled?(kind, compile_default) do
-      chain_clear?(chain_defaults)
+      chain_clear?(kind, chain_defaults)
     else
       false
     end
@@ -66,14 +68,48 @@ defmodule Bond.Runtime.Eval do
   end
 
   # Returns `true` when every lower-chain kind is runtime-on. Returns `false` as soon as
-  # one is `false` at runtime — that's the propagation. `chain_defaults` is the map the
-  # call site baked in with each lower kind's compile-time default; we use it as the
-  # fallback for `Application.get_env/3` so propagation respects per-module settings
-  # rather than always falling back to `true`.
-  defp chain_clear?(chain_defaults) do
-    Enum.all?(chain_defaults, fn {lower_kind, lower_default} ->
-      runtime_enabled?(lower_kind, lower_default)
+  # one is `false` at runtime — that's the propagation. The `higher_kind` is the kind
+  # that *wanted* to run; we pass it through so the propagation log can attribute the
+  # skip to a (higher, lower) pair. `chain_defaults` carries each lower kind's
+  # compile-time default; `Application.get_env/3` falls back to that so per-module
+  # settings are honoured.
+  defp chain_clear?(higher_kind, chain_defaults) do
+    Enum.reduce_while(chain_defaults, true, fn {lower_kind, lower_default}, _acc ->
+      if runtime_enabled?(lower_kind, lower_default) do
+        {:cont, true}
+      else
+        maybe_log_propagation(higher_kind, lower_kind)
+        {:halt, false}
+      end
     end)
+  end
+
+  # When propagation causes a higher kind to be skipped because a lower one is off,
+  # emit a one-time-per-process Logger warning. The dedup key is (higher, lower) per
+  # process — so a long-running OTP process logs at most one message per pair, but
+  # different processes (or processes restarted by their supervisors) get their own
+  # warnings. Tests reset the marker by running in fresh processes anyway.
+  defp maybe_log_propagation(higher_kind, lower_kind) do
+    key = {:__bond_propagation_logged__, higher_kind, lower_kind}
+
+    if Process.get(key) != true do
+      Process.put(key, true)
+
+      Logger.warning("""
+      Bond: :#{higher_kind} skipped because :bond, :#{lower_kind} is `false` at runtime.
+
+      The chain `preconditions ≤ postconditions ≤ invariants` requires that lower kinds be
+      enabled whenever higher kinds are. A :#{higher_kind} check is only meaningful if
+      :#{lower_kind} held first; with :#{lower_kind} disabled, :#{higher_kind} is also
+      skipped to avoid misleading errors.
+
+      To re-enable :#{higher_kind} evaluation, also enable :#{lower_kind}:
+
+          Application.put_env(:bond, :#{lower_kind}, true)
+
+      This warning is logged once per process per (higher, lower) pair.
+      """)
+    end
   end
 
   @spec evaluate_preconditions(assertion_fun()) :: term()
