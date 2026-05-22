@@ -31,8 +31,8 @@ Meyer with the Eiffel language. See the
 
 ## Usage
 
-`use Bond` in any module to enable the `@pre`, `@post`, `check/1`, and
-`check/2` annotations. Contracts may use any Elixir expression that returns
+`use Bond` in any module to enable the `@pre`, `@post`, and `check/1`
+annotations. Contracts may use any Elixir expression that returns
 a boolean (or a truthy value).
 
 ```elixir
@@ -55,7 +55,7 @@ to the `result` variable (bound to the function's return value) and
 `old(...)` expressions that snapshot a value before the function runs (see
 [`old` expressions](#module-old-expressions) below).
 
-Bond also provides a `check/1,2` macro for placing assertions at arbitrary
+Bond also provides a `check/1` macro for placing assertions at arbitrary
 points inside a function body — useful for sanity checks during development.
 `check` honours the `:bond, :checks` config (see
 [Conditional compilation](#module-conditional-compilation)) and is safe to
@@ -76,8 +76,8 @@ disable in production builds.
 > with contracts via `defoverridable` at the end of module compilation. Your
 > `def`s and `defp`s are otherwise left alone.
 >
-> `use Bond` also imports the `Bond` module so the `check/1` and `check/2`
-> macros are available, and imports `Bond.Predicates` so the predicate
+> `use Bond` also imports the `Bond` module so the `check/1` macro is
+> available, and imports `Bond.Predicates` so the predicate
 > functions and operators defined there (such as `~>` and `|||`) can be used
 > in assertions. `Bond.Predicates` can be explicitly imported elsewhere if you
 > want the operators outside of contract expressions.
@@ -104,15 +104,11 @@ also fine:
 @post is_float(result)
 ```
 
-For symmetry with ExUnit's `assert(value, message)` and `assert message, value`
-patterns, the `check/2` macro also accepts a label before or after the
-expression:
+The same two forms work inside function bodies via the `check/1` macro:
 
 ```elixir
 check is_number(x)
 check x_is_number: is_number(x)
-check "x is a number", is_number(x)
-check is_number(x), "x is a number"
 ```
 
 Bond also provides the `Bond.Predicates` module with operators that are often
@@ -389,7 +385,7 @@ might really be the caller's fault, not the callee's. Same for
   a one-time-per-process `Logger.warning` the first time this happens
   for a given (higher, lower) pair, so the diagnostic is visible.
 
-`:checks` is *independent* of the chain. A `check/1,2` is an internal
+`:checks` is *independent* of the chain. A `check/1` is an internal
 assertion about your computation, not a contract with a caller, so it
 remains meaningful regardless of any other kind's settings.
 
