@@ -5,6 +5,117 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-05-27
+
+A patch release covering a 1.0-prep test-coverage audit (no behavioural
+change, just locking down behaviour that wasn't directly tested) plus
+a refresh of the supporting guides for content that had drifted out of
+date with 0.16.0.
+
+### Changed
+
+- **`guides/about.md` — full rewrite.** The previous version's feature
+  TODO list still showed conditional compilation (shipped in 0.10/0.11)
+  and invariants (shipped in 0.13) as unchecked items, and the framing
+  read like marketing copy. New version is structured as "what Bond is,
+  when to reach for it, background" — same length, every paragraph
+  carrying information.
+
+- **`guides/getting-started.md` — `@invariant` section added.** The
+  tutorial previously mentioned `@invariant` only in "Next steps." A
+  reader following it linearly would never learn there was a third
+  contract kind. New section between "Inline checks" and "Disabling
+  contracts in production" introduces it with a `BoundedStack` example
+  and the `subject` binding, then points at the moduledoc for the full
+  reference. The intro line at the top mentions `@invariant` alongside
+  `@pre`/`@post`/`check/1`. The disabling-in-production config snippet
+  now lists `:invariants` (was listing three of four keys).
+
+### Fixed
+
+- **`guides/faq.md` — "When does Bond check invariants?"** description
+  brought current. The previous text said destructure-only function
+  heads (`def foo(%__MODULE__{f: v}, ...)`, no `= name`) emit a
+  compile-time warning and skip the pre-check. The 0.16.0 release
+  lifted that restriction — Bond now rewrites the override clause to
+  capture the struct under a generated name and the pre-check fires.
+  Multi-struct heads are also noted (weren't previously).
+
+- **`guides/getting-started.md` — dead anchor.** The "Next steps" link
+  to the Invariants section used the pre-0.16.0 anchor
+  `#module-invariants`; updated to `#module-invariant-for-struct-modules`
+  matching the renamed section.
+
+### Internal
+
+- **Test coverage filled across seven gaps from a 1.0-prep audit**
+  (+16 tests, 220 total; all green). No behavioural change — each
+  fill verifies behaviour that was already in place but lacked a
+  direct test:
+
+    * **Invariant telemetry.** `[:bond, :assertion, :failure]` fires
+      with `:kind => :invariant` on invariant violations. Documented
+      since 0.13.0; previously only the other three kinds had
+      assertions on the event.
+
+    * **`@invariant` runtime modes.** Two tests cover (a) `put_env
+      :bond, :invariants, false` skips evaluation, and (b) flipping
+      back to `true` re-engages it. The runtime-toggle path was
+      tested for `@pre`/`@post` but not `@invariant`.
+
+    * **Compound `and` guards.** Behavioural confirmation that
+      `is_struct(x, __MODULE__)` nested inside an `and` guard
+      triggers the pre-invariant check. (Compiler-level detection
+      was already covered.) The `or` case is deliberately not
+      covered — it's a latent unsafe pattern worth a separate
+      design discussion.
+
+    * **No-struct heads.** Behavioural confirmation that a function
+      whose head doesn't expose the struct silently skips pre-
+      invariant evaluation — passing non-struct arguments returns
+      cleanly rather than crashing on a `subject.<field>` access.
+
+    * **Migration `CompileError`s.** The legacy `@invariant <name>,
+      <expr>` and the two arity-2 `check` shapes (removed in 0.16.0)
+      now have direct assertions that they raise `CompileError` with
+      the migration message at the call site.
+
+    * **`Bond.Test.assert_check_violation/2`.** The helper existed
+      alongside its `precondition`/`postcondition`/`invariant`
+      siblings but had no test.
+
+    * **`old(...)` runtime integration.** Compiler-level extraction
+      and precompilation were covered; the runtime path (does the
+      snapshotted value end up correctly bound when the postcondition
+      evaluates?) had no direct test. New `Bond.OldRuntimeTest`
+      covers success and failure paths plus the captured `binding()`
+      at failure.
+
+- **Coverage audit findings worth keeping in mind for future
+  releases** (not addressed in 0.16.1):
+
+    * Compound `or` guards containing `is_struct(_, __MODULE__)` are
+      a latent unsafe pattern. Bond's detection recognises `x` as the
+      struct parameter, but the pre-invariant fires unconditionally —
+      so a runtime input matching a non-struct alternative crashes in
+      the invariant body rather than raising a clean
+      `FunctionClauseError`.
+    * Relatedly, the override clause doesn't reproduce the user's
+      function-head guard. Calling `Smoke.reverse(5)` (where
+      `reverse` has `when is_struct(stack, __MODULE__)`) hits Bond's
+      pattern-less override, fires the pre-invariant against the
+      integer, and crashes inside the invariant body before super
+      dispatches to the user's def for the proper
+      `FunctionClauseError`.
+
+  Neither issue surfaces in normal use (callers pass arguments of
+  the right shape) — they're worth a fix pass before 1.0 but not
+  shippable as a patch.
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.16.0] - 2026-05-26
 
 0.16.0 is the first 1.0-prep release. It tightens the public API in two
