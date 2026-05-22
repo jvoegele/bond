@@ -62,8 +62,7 @@ defmodule Bond do
                                   postconditions:
                                     Application.compile_env(:bond, :postconditions, true),
                                   checks: Application.compile_env(:bond, :checks, true),
-                                  invariants:
-                                    Application.compile_env(:bond, :invariants, true),
+                                  invariants: Application.compile_env(:bond, :invariants, true),
                                   overrides: Application.compile_env(:bond, :overrides, [])
                                 )
 

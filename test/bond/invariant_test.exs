@@ -92,5 +92,4 @@ defmodule Bond.InvariantTest do
       end
     end
   end
-
 end
