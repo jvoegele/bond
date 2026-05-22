@@ -269,12 +269,18 @@ defmodule Bond.Compiler.AnnotatedFunction do
     post_fn_name = lifted_fn_name(:postconditions, fun, arity)
     inv_fn_name = lifted_fn_name(:invariants, fun, arity)
 
-    struct_arg = Invariants.struct_arg(inv_mode, first_clause)
+    struct_params = Invariants.struct_params_for_clause(inv_mode, first_clause)
 
     doc_asts = doc_clauses(annotated_function, first_clause.env, pre_mode, post_mode)
 
     pre_invariant_stmts =
-      Invariants.pre_invariant_stmts(inv_fn_name, struct_arg, inv_mode, pre_mode, post_mode)
+      Invariants.all_pre_invariant_stmts(
+        inv_fn_name,
+        struct_params,
+        inv_mode,
+        pre_mode,
+        post_mode
+      )
 
     post_invariant_stmts =
       Invariants.post_invariant_stmts(inv_fn_name, inv_mode, struct_module, pre_mode, post_mode)

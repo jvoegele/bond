@@ -141,6 +141,63 @@ defmodule Bond.Compiler.Invariants do
   end
 
   @doc """
+  Detects every struct-bearing parameter in a function clause, or returns `[]` when
+  invariants are purged for the function.
+
+  Wrapper around `detect_struct_params/2` that respects the resolved invariant `mode`.
+  Kept in this module to keep `Bond.Compiler.AnnotatedFunction` small (see the compile-
+  order gotcha note in the moduledoc).
+  """
+  @spec struct_params_for_clause(Bond.Compiler.AnnotatedFunction.mode(), term()) ::
+          [struct_param()]
+  def struct_params_for_clause(:purge, _clause), do: []
+
+  def struct_params_for_clause(_mode, clause) do
+    detect_struct_params(clause.params || [], clause.guards || [])
+  end
+
+  @doc """
+  Emits one pre-invariant statement per detected `{:bound, var, _}` struct parameter, in
+  left-to-right order. Each statement calls the lifted invariants defp with the bound
+  variable; the defp rebinds the assertion-side binding (e.g. `subject`) to that value
+  and runs every `@invariant` assertion against it.
+
+  `{:destructure, _}` entries are skipped — capturing the destructured struct requires
+  rewriting the override clause head, which is wired in S4 of the mikado.
+
+  Returns `[]` when the kind is purged or when no bound struct parameters were detected.
+  """
+  @spec all_pre_invariant_stmts(
+          atom(),
+          [struct_param()],
+          Bond.Compiler.AnnotatedFunction.mode(),
+          Bond.Compiler.AnnotatedFunction.mode(),
+          Bond.Compiler.AnnotatedFunction.mode()
+        ) :: [Macro.t()]
+  def all_pre_invariant_stmts(_name, _params, :purge, _pre_mode, _post_mode), do: []
+  def all_pre_invariant_stmts(_name, [], _mode, _pre_mode, _post_mode), do: []
+
+  def all_pre_invariant_stmts(name, struct_params, mode, pre_mode, post_mode) do
+    chain = %{preconditions: pre_mode, postconditions: post_mode}
+
+    for {:bound, var, _idx} <- struct_params do
+      arg_var = Macro.var(var, nil)
+
+      quote do
+        if Bond.Runtime.Eval.should_evaluate?(
+             :invariants,
+             unquote(mode),
+             unquote(Macro.escape(chain))
+           ) do
+          Bond.Runtime.Eval.evaluate_invariants(fn ->
+            unquote(name)(unquote(arg_var))
+          end)
+        end
+      end
+    end
+  end
+
+  @doc """
   Emits the pre-invariant statements that go at the *start* of the override body.
 
   Gated on `Bond.Runtime.Eval.should_evaluate?/2`. Returns an empty list when the kind is

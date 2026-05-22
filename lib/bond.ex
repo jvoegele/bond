@@ -111,12 +111,29 @@ defmodule Bond do
     :ok
   end
 
+  # @invariant <expression-or-keyword-list>
+  #
+  # The new 0.16.0 shape: no binding-name argument. Invariant expressions reference the
+  # implicit `subject` binding, which Bond rebinds at every check site to whichever struct
+  # parameter the function head exposes (detected via `Bond.Compiler.Invariants.
+  # detect_struct_params/2`).
+  defmacro @{:invariant, meta, [expression_or_kw_list]} do
+    if Keyword.keyword?(expression_or_kw_list) do
+      for {label, expression} <- expression_or_kw_list do
+        Bond.Compiler.register_invariant(:subject, expression, label, __CALLER__, meta)
+      end
+    else
+      Bond.Compiler.register_invariant(:subject, expression_or_kw_list, nil, __CALLER__, meta)
+    end
+
+    :ok
+  end
+
   # @invariant <name>, <expression-or-keyword-list>
   #
-  # The first arg is the name to bind the struct value to inside each invariant assertion
-  # (e.g. `stack` in `@invariant stack, size_within_capacity: ...`). The second arg is either
-  # a single bare expression or a keyword list of `label: expression` pairs, mirroring the
-  # `@pre`/`@post` keyword-list shape.
+  # Legacy 0.13–0.15 shape, still accepted during the 0.16.0 migration window. S5 of the
+  # 0.16.0 mikado removes this clause and turns it into a CompileError. New code should use
+  # the 1-arg form above.
   defmacro @{:invariant, meta, [{name, _, ctx}, expression_or_kw_list]}
            when is_atom(name) and is_atom(ctx) do
     if Keyword.keyword?(expression_or_kw_list) do
