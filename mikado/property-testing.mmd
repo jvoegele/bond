@@ -1,0 +1,32 @@
+%% Mikado graph for the 0.14.0 `Bond.PropertyTest` work.
+%%
+%% Each numbered node is a commit-sized step. Arrows point from a goal to its
+%% prerequisites — leaves (green) have no further prerequisites and are safe to
+%% start with. Depth-first per Mikado: pick a leaf, finish it, commit, repeat.
+
+flowchart TD
+    G(["**Goal**<br/>Bond.PropertyTest ships in 0.14.0"])
+
+    G --> S3[3. Form 1: contract_holds for single fn]
+    G --> S6[6. Form 2: contract_holds for module sequence]
+    G --> S4[4. Form 1 tests]
+    G --> S7[7. Form 2 tests]
+    G --> S8[8. Docs: README + FAQ + getting-started]
+    G --> S9[9. CHANGELOG + version bump]
+
+    S3 --> S2[2. Bond.PropertyTest module skeleton + use macro]
+    S6 --> S2
+    S6 --> S5[5. Sequence runner + state threading]
+    S5 --> S2
+    S2 --> S1[1. stream_data as optional regular dep]
+
+    S4 --> S3
+    S7 --> S6
+    S8 --> S3
+    S8 --> S6
+    S9 --> S4
+    S9 --> S7
+    S9 --> S8
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S1 leaf;

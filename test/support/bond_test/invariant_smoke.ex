@@ -37,7 +37,11 @@ defmodule BondTest.InvariantSmoke do
   def try_new(_), do: {:error, :invalid_capacity}
 
   def push(%__MODULE__{} = stack, item) do
-    %{stack | items: [item | stack.items]}
+    if length(stack.items) >= stack.capacity do
+      {:error, :full}
+    else
+      %{stack | items: [item | stack.items]}
+    end
   end
 
   # Intentionally produces an invariant-violating struct: items exceeds capacity.
