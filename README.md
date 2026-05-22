@@ -212,9 +212,11 @@ Although this assertion is not as strong as the `count_incremented_by_1`
 assertion in the original version, it is the strongest we can provide given
 the possibility of concurrent state updates.
 
-Future versions of Bond may provide stronger support for stateful contracts
-in the form of _invariants_ for structs and/or stateful processes, although
-this is still a subject of research.
+Bond 0.13.0 added a related but distinct facility — `@invariant`
+declarations for struct modules. Where postconditions like
+`count_increased` constrain a single operation, invariants constrain
+*every* operation's input and output struct. See the
+[Invariants](#module-invariants) section below.
 
 ## Documenting contracts
 
@@ -237,6 +239,108 @@ yourself — Bond synthesises one when needed.
 > production builds, leave at least one of `:preconditions` or
 > `:postconditions` set to `true` or `false` (both emit the override; only
 > `:purge` removes it).
+
+## Invariants
+
+`@invariant` declarations specify properties that must hold for every value of
+a struct. They're checked automatically on the way *into* and *out of* every
+public function in the struct's defining module that handles the struct.
+
+Where `@pre`/`@post` constrain a single function call, `@invariant` constrains
+the struct itself — every instance produced by the module's public API
+satisfies the invariant, every instance entering the module's public API is
+expected to.
+
+```elixir
+defmodule BoundedStack do
+  use Bond
+
+  defstruct [:items, :capacity]
+
+  @invariant stack,
+             non_negative_capacity: stack.capacity >= 0,
+             size_within_capacity: length(stack.items) <= stack.capacity
+
+  def new(capacity) when is_integer(capacity) and capacity >= 0 do
+    %__MODULE__{items: [], capacity: capacity}
+  end
+
+  def push(%__MODULE__{} = stack, item) do
+    %{stack | items: [item | stack.items]}
+  end
+end
+```
+
+### Syntax
+
+`@invariant <name>, <kw_or_expression>` where `<name>` is the variable that
+the invariant's expression refers to. Both single-expression and keyword-list
+forms are supported, identical to `@pre`/`@post`:
+
+```elixir
+@invariant stack, length(stack.items) <= stack.capacity
+
+@invariant stack,
+           non_negative_capacity: stack.capacity >= 0,
+           size_within_capacity: length(stack.items) <= stack.capacity
+```
+
+You can declare multiple `@invariant`s with the same or different binding
+names; the convention is one binding name per module.
+
+### When invariants fire
+
+Invariants are checked at the boundaries of public functions in the struct's
+module — exactly the places a struct value crosses between "internal"
+(possibly transient) and "external" (must be valid).
+
+| Function head shape | Pre-check on entry | Post-check on exit |
+|---|---|---|
+| `def foo(%__MODULE__{} = name, ...)` | yes, on `name` | yes, if result is `%__MODULE__{}` or `{:ok, %__MODULE__{}}` |
+| `def foo(x, ...) when is_struct(x, __MODULE__)` | yes, on `x` | same |
+| `def foo(%__MODULE__{field: ...}, ...)` (no `= name`) | skipped, compile-time warning | same |
+| `def foo(x, ...)` (no pattern, no guard) | skipped | same |
+| `defp ...` | skipped — private functions exempt by Eiffel convention | skipped |
+
+The post-check matches both `%__MODULE__{}` and `{:ok, %__MODULE__{}}`
+returns. Other shapes (e.g. `{:error, _}`, bare integers) fall through and
+no check fires. If your function returns the struct under a different
+wrapper, add an explicit `@post`.
+
+### Violation behaviour
+
+A violated invariant raises `Bond.InvariantError`, with the same metadata
+shape as `Bond.PreconditionError` / `Bond.PostconditionError` and the same
+telemetry event (`[:bond, :assertion, :failure]` with `:kind => :invariant`).
+Test with `Bond.Test.assert_invariant_violation/2`.
+
+### Compile-time configuration
+
+Invariants share the same `true | false | :purge` value space as the other
+three kinds, controlled by `:bond, :invariants` in your config:
+
+```elixir
+# config/prod.exs — invariants compile in but default off; flip on
+# remotely via Application.put_env(:bond, :invariants, true)
+config :bond, invariants: false
+
+# config/prod.exs — invariants purged entirely, zero per-call cost
+config :bond, invariants: :purge
+```
+
+You can also set `:invariants` per-module via `use Bond, invariants: …`,
+or via an `:overrides` entry.
+
+### What's not supported
+
+Invariants are scoped to the **struct's own defining module**. External
+modules that operate on the struct can't declare invariants for it — that
+matches Eiffel's class-locality and keeps cross-module ownership clean.
+
+Process-level invariants (for `GenServer`/`Agent` state) aren't a separate
+feature — the recommended pattern is to keep the process state in a struct
+and declare invariants on that struct's module. See the
+[`Contracts in a Concurrent World`](contracts-and-concurrency.html) guide.
 
 ## Conditional compilation
 
