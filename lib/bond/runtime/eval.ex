@@ -64,6 +64,8 @@ defmodule Bond.Runtime.Eval do
       with_recursion_check(assertions_fun)
     catch
       {:assertion_failure, %{kind: kind} = assertion_info} ->
+        emit_failure_event(assertion_info)
+
         exception_module = Map.fetch!(@assertion_errors, kind)
         exception = exception_module.exception(assertion_info)
 
@@ -71,6 +73,20 @@ defmodule Bond.Runtime.Eval do
         # call site rather than into Bond.Runtime.Eval or the generated __bond_* defps.
         :erlang.raise(:error, exception, prune_stacktrace(__STACKTRACE__))
     end
+  end
+
+  # Fire `[:bond, :assertion, :failure]` whenever an assertion is violated. Pass the full
+  # `assertion_info` map as metadata so consumers can filter on `:kind`, attribute failures to
+  # a specific `:assertion_id`, or inspect the captured `:binding`. Measurements carry
+  # `:system_time` and `:monotonic_time` so consumers can use the event as a time-series
+  # signal without an additional clock read.
+  defp emit_failure_event(assertion_info) do
+    measurements = %{
+      system_time: System.system_time(),
+      monotonic_time: System.monotonic_time()
+    }
+
+    :telemetry.execute([:bond, :assertion, :failure], measurements, assertion_info)
   end
 
   defp prune_stacktrace(stacktrace) do

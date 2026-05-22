@@ -79,6 +79,7 @@ defmodule Bond.Compiler.Assertion do
       for %Assertion{expression: expression, definition_env: assertion_env} = assertion <-
             assertions do
         assertion_info = %{
+          assertion_id: assertion.id,
           kind: assertion.kind,
           label: assertion.label,
           expression: assertion.code,
@@ -121,13 +122,14 @@ defmodule Bond.Compiler.Assertion do
         %__MODULE__{kind: :check, expression: expression, definition_env: env} = assertion
       ) do
     assertion_info = %{
+      assertion_id: assertion.id,
       kind: :check,
       label: assertion.label,
       expression: assertion.code,
       file: env.file,
       line: env.line,
       module: env.module,
-      function: nil
+      function: env.function
     }
 
     quote do
