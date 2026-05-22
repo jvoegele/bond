@@ -72,31 +72,31 @@ defmodule Bond.Compiler.InvariantsTest do
     end
   end
 
-  describe "pre_invariant_stmts/3" do
+  describe "pre_invariant_stmts/5" do
     test "returns [] when mode is :purge" do
-      assert Invariants.pre_invariant_stmts(:any, :stack, :purge) == []
+      assert Invariants.pre_invariant_stmts(:any, :stack, :purge, true, true) == []
     end
 
     test "returns [] when struct_arg is nil" do
-      assert Invariants.pre_invariant_stmts(:any, nil, true) == []
+      assert Invariants.pre_invariant_stmts(:any, nil, true, true, true) == []
     end
 
     test "emits a should_evaluate? + evaluate_invariants block otherwise" do
-      [ast] = Invariants.pre_invariant_stmts(:my_inv_fn, :stack, true)
+      [ast] = Invariants.pre_invariant_stmts(:my_inv_fn, :stack, true, true, true)
       code = Macro.to_string(ast)
-      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(:invariants, true\)"
+      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:invariants,\s*true"
       assert code =~ ~r"Bond\.Runtime\.Eval\.evaluate_invariants"
       assert code =~ ~r"my_inv_fn\(stack\)"
     end
   end
 
-  describe "post_invariant_stmts/3" do
+  describe "post_invariant_stmts/5" do
     test "returns [] when mode is :purge" do
-      assert Invariants.post_invariant_stmts(:any, :purge, SomeMod) == []
+      assert Invariants.post_invariant_stmts(:any, :purge, SomeMod, true, true) == []
     end
 
     test "emits a case extraction matching %Mod{} and {:ok, %Mod{}}" do
-      [ast] = Invariants.post_invariant_stmts(:my_inv_fn, true, BoundedStack)
+      [ast] = Invariants.post_invariant_stmts(:my_inv_fn, true, BoundedStack, true, true)
       code = Macro.to_string(ast)
       assert code =~ ~r"case var!\(result\)"
       assert code =~ ~r"%BoundedStack\{\}"

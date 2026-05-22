@@ -182,13 +182,13 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       assert {:def, _, [{:new, _, [{:list, _, _}]}, [do: do_block]]} = override
 
       code = Macro.to_string(do_block)
-      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(:preconditions, true\)"
+      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:preconditions,\s*true"
 
       assert code =~
                ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__new__1\(list\)\s+end\)/s
 
       assert code =~ ~r"var!\(result\) = super\(list\)"
-      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(:postconditions, true\)"
+      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:postconditions,\s*true"
 
       assert code =~
                ~r/Bond\.Runtime\.Eval\.evaluate_postconditions\(fn ->\s+__bond_postconditions__new__1\(list, var!\(result\)\)\s+end\)/s
@@ -324,7 +324,7 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       # Override gates the evaluate call with should_evaluate?, passing the compile-time
       # default of `false`. Eval's should_evaluate? feeds that into
       # `Application.get_env(:bond, :preconditions, false)` internally.
-      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(:preconditions, false\)"
+      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:preconditions,\s*false"
 
       assert code =~
                ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__add__2\(x, y\)\s+end\)/s
@@ -341,12 +341,12 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       override = override_def_clause(ast)
       code = Macro.to_string(elem(override, 2) |> List.last() |> Keyword.get(:do))
 
-      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(:preconditions, true\)"
+      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:preconditions,\s*true"
 
       assert code =~
                ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__add__2\(x, y\)\s+end\)/s
 
-      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(:postconditions, true\)"
+      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:postconditions,\s*true"
 
       assert code =~
                ~r/Bond\.Runtime\.Eval\.evaluate_postconditions\(fn ->\s+__bond_postconditions__add__2\(x, y, var!\(result\)\)\s+end\)/s

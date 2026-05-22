@@ -94,17 +94,27 @@ defmodule Bond.Compiler.Invariants do
   Gated on `Bond.Runtime.Eval.should_evaluate?/2`. Returns an empty list when the kind is
   purged or when there's no struct arg to check against.
   """
-  @spec pre_invariant_stmts(atom(), atom() | nil, Bond.Compiler.AnnotatedFunction.mode()) ::
-          [Macro.t()]
-  def pre_invariant_stmts(_name, _struct_arg, :purge), do: []
-  def pre_invariant_stmts(_name, nil, _mode), do: []
+  @spec pre_invariant_stmts(
+          atom(),
+          atom() | nil,
+          Bond.Compiler.AnnotatedFunction.mode(),
+          Bond.Compiler.AnnotatedFunction.mode(),
+          Bond.Compiler.AnnotatedFunction.mode()
+        ) :: [Macro.t()]
+  def pre_invariant_stmts(_name, _struct_arg, :purge, _pre_mode, _post_mode), do: []
+  def pre_invariant_stmts(_name, nil, _mode, _pre_mode, _post_mode), do: []
 
-  def pre_invariant_stmts(name, struct_arg, mode) do
+  def pre_invariant_stmts(name, struct_arg, mode, pre_mode, post_mode) do
     arg_var = Macro.var(struct_arg, nil)
+    chain = %{preconditions: pre_mode, postconditions: post_mode}
 
     [
       quote do
-        if Bond.Runtime.Eval.should_evaluate?(:invariants, unquote(mode)) do
+        if Bond.Runtime.Eval.should_evaluate?(
+             :invariants,
+             unquote(mode),
+             unquote(Macro.escape(chain))
+           ) do
           Bond.Runtime.Eval.evaluate_invariants(fn ->
             unquote(name)(unquote(arg_var))
           end)
@@ -123,23 +133,38 @@ defmodule Bond.Compiler.Invariants do
   rather than spelled `%__MODULE__{}` inside the quote, to avoid a deferred-`__MODULE__`
   reference that confuses parallel compilation.
   """
-  @spec post_invariant_stmts(atom(), Bond.Compiler.AnnotatedFunction.mode(), module()) ::
-          [Macro.t()]
-  def post_invariant_stmts(_name, :purge, _struct_module), do: []
+  @spec post_invariant_stmts(
+          atom(),
+          Bond.Compiler.AnnotatedFunction.mode(),
+          module(),
+          Bond.Compiler.AnnotatedFunction.mode(),
+          Bond.Compiler.AnnotatedFunction.mode()
+        ) :: [Macro.t()]
+  def post_invariant_stmts(_name, :purge, _struct_module, _pre_mode, _post_mode), do: []
 
-  def post_invariant_stmts(name, mode, struct_module) do
+  def post_invariant_stmts(name, mode, struct_module, pre_mode, post_mode) do
+    chain = %{preconditions: pre_mode, postconditions: post_mode}
+
     [
       quote do
         case var!(result) do
           %unquote(struct_module){} = __bond_post_value__ ->
-            if Bond.Runtime.Eval.should_evaluate?(:invariants, unquote(mode)) do
+            if Bond.Runtime.Eval.should_evaluate?(
+                 :invariants,
+                 unquote(mode),
+                 unquote(Macro.escape(chain))
+               ) do
               Bond.Runtime.Eval.evaluate_invariants(fn ->
                 unquote(name)(__bond_post_value__)
               end)
             end
 
           {:ok, %unquote(struct_module){} = __bond_post_value__} ->
-            if Bond.Runtime.Eval.should_evaluate?(:invariants, unquote(mode)) do
+            if Bond.Runtime.Eval.should_evaluate?(
+                 :invariants,
+                 unquote(mode),
+                 unquote(Macro.escape(chain))
+               ) do
               Bond.Runtime.Eval.evaluate_invariants(fn ->
                 unquote(name)(__bond_post_value__)
               end)

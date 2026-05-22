@@ -273,8 +273,11 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
     doc_asts = doc_clauses(annotated_function, first_clause.env, pre_mode, post_mode)
 
-    pre_invariant_stmts = Invariants.pre_invariant_stmts(inv_fn_name, struct_arg, inv_mode)
-    post_invariant_stmts = Invariants.post_invariant_stmts(inv_fn_name, inv_mode, struct_module)
+    pre_invariant_stmts =
+      Invariants.pre_invariant_stmts(inv_fn_name, struct_arg, inv_mode, pre_mode, post_mode)
+
+    post_invariant_stmts =
+      Invariants.post_invariant_stmts(inv_fn_name, inv_mode, struct_module, pre_mode, post_mode)
 
     body_stmts =
       build_override_body(
@@ -362,7 +365,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
        ) do
     pre_stmts = pre_eval_stmts(call_params, pre_fn_name, pre_mode)
     super_call = quote(do: var!(result) = super(unquote_splicing(call_params)))
-    post_stmts = post_eval_stmts(call_params, post_fn_name, old_pairs, post_mode)
+    post_stmts = post_eval_stmts(call_params, post_fn_name, old_pairs, post_mode, pre_mode)
     return_stmt = quote(do: var!(result))
 
     pre_invariant_stmts ++
@@ -385,15 +388,20 @@ defmodule Bond.Compiler.AnnotatedFunction do
     ]
   end
 
-  defp post_eval_stmts(_call_params, _name, _old_pairs, :purge), do: []
+  defp post_eval_stmts(_call_params, _name, _old_pairs, :purge, _pre_mode), do: []
 
-  defp post_eval_stmts(call_params, name, old_pairs, mode) do
+  defp post_eval_stmts(call_params, name, old_pairs, mode, pre_mode) do
     old_args = for {var, _expression} <- old_pairs, do: quote(do: var!(unquote(var)))
     args = call_params ++ [quote(do: var!(result)) | old_args]
+    chain = %{preconditions: pre_mode}
 
     [
       quote do
-        if Bond.Runtime.Eval.should_evaluate?(:postconditions, unquote(mode)) do
+        if Bond.Runtime.Eval.should_evaluate?(
+             :postconditions,
+             unquote(mode),
+             unquote(Macro.escape(chain))
+           ) do
           Bond.Runtime.Eval.evaluate_postconditions(fn ->
             unquote(name)(unquote_splicing(args))
           end)
