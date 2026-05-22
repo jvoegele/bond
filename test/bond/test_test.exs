@@ -65,4 +65,36 @@ defmodule Bond.TestTest do
       end
     end
   end
+
+  defmodule CheckFixture do
+    @moduledoc false
+    use Bond
+
+    def must_be_positive(n) do
+      check positive_n: n > 0
+      n
+    end
+  end
+
+  describe "assert_check_violation/2" do
+    test "passes when the expected check is raised" do
+      error = assert_check_violation(CheckFixture.must_be_positive(-1))
+
+      assert is_struct(error, Bond.CheckError)
+      assert error.label == :positive_n
+    end
+
+    test "passes when expected fields match exactly" do
+      assert_check_violation(CheckFixture.must_be_positive(-1),
+        label: :positive_n,
+        expression: "n > 0"
+      )
+    end
+
+    test "fails when no check violation occurs" do
+      assert_raise ExUnit.AssertionError, fn ->
+        assert_check_violation(CheckFixture.must_be_positive(1))
+      end
+    end
+  end
 end
