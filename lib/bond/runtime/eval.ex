@@ -39,9 +39,21 @@ defmodule Bond.Runtime.Eval do
   Reads `Application.get_env(:bond, kind, compile_default)` and returns `false` only when
   the result is exactly `false`. `compile_default` is the per-module compile-time-resolved
   mode for the kind, baked into the generated call site.
+
+  The third argument carries the compile-time defaults of every lower kind in the
+  contract-checking chain (`preconditions ≤ postconditions ≤ invariants`). It exists so
+  runtime propagation — "if a lower kind is `false` at runtime, the higher kind is also
+  skipped" — can be enforced without every call site having to know the chain topology.
+  For `:preconditions` (bottom of the chain) the map is empty; for `:postconditions` it
+  carries `:preconditions`; for `:invariants` it carries both. The `:checks` kind is
+  independent of the chain — its callers pass `%{}`.
+
+  Propagation logic itself arrives in a subsequent commit; for now the argument is
+  accepted but not consulted, so behaviour is unchanged.
   """
-  @spec should_evaluate?(kind(), compile_default()) :: boolean()
-  def should_evaluate?(kind, compile_default) do
+  @spec should_evaluate?(kind(), compile_default(), %{optional(kind()) => compile_default()}) ::
+          boolean()
+  def should_evaluate?(kind, compile_default, _chain_defaults \\ %{}) do
     Application.get_env(:bond, kind, compile_default) != false
   end
 
