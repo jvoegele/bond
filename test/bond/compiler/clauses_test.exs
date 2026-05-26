@@ -293,6 +293,71 @@ defmodule Bond.Compiler.ClausesTest do
     end
   end
 
+  describe "underscore-prefixed name normalization (0.17.3)" do
+    test "`_a` and `a` agree at the same position; canonical is the non-underscored form" do
+      clauses = [[:a, :b], [:_a, :_b]]
+      assert {:ok, [:a, :b]} = Clauses.canonical_names(clauses)
+    end
+
+    test "all-underscored agreement: canonical is the non-underscored form" do
+      clauses = [[:_a, :_b], [:_a, :_b]]
+      assert {:ok, [:a, :b]} = Clauses.canonical_names(clauses)
+    end
+
+    test "underscore variant and a different name: still a disagreement" do
+      clauses = [[:_capacity], [:size]]
+
+      assert {:error, {:disagreement, 0, _conflicting}} = Clauses.canonical_names(clauses)
+    end
+
+    test "bare wildcard `_` (returned as nil) remains distinct from named `_a`" do
+      # Wildcards are filtered out as nil before normalization; they adopt
+      # the canonical from sibling clauses rather than agreeing with `_a`.
+      clauses = [[nil], [:_capacity]]
+      assert {:ok, [:capacity]} = Clauses.canonical_names(clauses)
+    end
+
+    test "referenced_param_names matches `a` in a contract against `_a` in a clause" do
+      assertions = [%{expression: quote(do: is_atom(a))}]
+      clauses = [%{params: quote(do: [_a, _b, c])}]
+
+      result = Clauses.referenced_param_names(assertions, clauses)
+      assert :a in result
+    end
+
+    test "referenced_param_names matches `_a` in a contract against `a` in a clause" do
+      # Less common (contracts rarely use underscored names) but symmetric.
+      assertions = [%{expression: quote(do: is_atom(_a))}]
+      clauses = [%{params: quote(do: [a])}]
+
+      result = Clauses.referenced_param_names(assertions, clauses)
+      assert :_a in result
+    end
+
+    test "assert_clauses_agree!: contract on `a` + fallback `_a` clause compiles cleanly" do
+      clauses = [
+        %{params: quote(do: [a, b, c])},
+        %{params: quote(do: [_a, _b, c])}
+      ]
+
+      required = MapSet.new([:a])
+
+      assert {:ok, [:a, :b, :c]} =
+               Clauses.assert_clauses_agree!(clauses, __ENV__, {:f, 3}, required)
+    end
+
+    test "assert_clauses_agree!: still raises on truly different names even with `_`" do
+      clauses = [
+        %{params: quote(do: [_size])},
+        %{params: quote(do: [capacity])}
+      ]
+
+      assert_raise CompileError, fn ->
+        Clauses.assert_clauses_agree!(clauses, __ENV__, {:f, 1}, MapSet.new([:capacity]))
+      end
+    end
+  end
+
   describe "assert_clauses_agree!/3" do
     test "returns canonical names when all clauses agree" do
       clauses = [

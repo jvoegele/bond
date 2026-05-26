@@ -321,6 +321,14 @@ don't bind a top-level name at that position. They adopt whatever name a
 sibling clause provides — Bond rewrites the wildcard or wraps the literal
 to bind the canonical name in the wrapper's pattern.
 
+**Underscore-prefixed names are equivalent to their unprefixed forms.**
+A fallback clause like `def f(_a, _b, c)` paired with a contracted clause
+`def f(a, b, c)` agrees on the canonical names `a`, `b`, `c` — Elixir's
+leading-underscore convention is "bound but intentionally unused," and
+Bond treats `_a` and `a` as the same binding for the consistency check.
+Write fallback clauses with `_name` markers freely; the contracts still
+attach.
+
 ### Naming consistency is only required where contracts depend on it
 
 The naming-agreement rule applies *positionally*: only positions whose

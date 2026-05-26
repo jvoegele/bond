@@ -183,6 +183,24 @@ defmodule Bond.MultiClauseDispatchTest do
       assert {{:module, _, _, _}, _} = Code.eval_string(code)
     end
 
+    test "0.17.3 normalization: `_name` and `name` are equivalent in the agreement check" do
+      # Fallback-clause idiom: `def f(_a, _b, c)` binds the args as
+      # intentionally-unused. Pre-0.17.3 this disagreed with the contracted
+      # clause's `a, b, c` and raised CompileError. 0.17.3 treats `_a` and
+      # `a` as the same binding for agreement purposes.
+      code = """
+      defmodule Bond.MultiClauseDispatchTest.UnderscoreFallback do
+        use Bond
+
+        @pre is_atom(a)
+        def f(a, b, c) when is_atom(a), do: {:ok, a, b, c}
+        def f(_a, _b, c), do: {:fallback, c}
+      end
+      """
+
+      assert {{:module, _, _, _}, _} = Code.eval_string(code)
+    end
+
     test "0.17.2 relaxation: still raises when a contract DOES reference a disagreeing name" do
       # Adding a contract that references `league` (a position-1 name in
       # clause 2) re-engages the agreement check at position 1, where clause

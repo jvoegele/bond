@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.17.3] - 2026-06-03
+
+A small additive release: `_name` and `name` are now treated as semantically
+equivalent in the consistent-naming check. Surfaced by a Photon dogfood
+round where the fallback-clause idiom (`def f(_a, _b, c)` paired with a
+contracted `def f(a, b, c)`) tripped the agreement rule unnecessarily.
+
+### Changed
+
+- **Underscore-prefixed top-level names normalize against their unprefixed
+  counterparts** in `Bond.Compiler.Clauses.canonical_names/2`. `_a` and
+  `a` agree at the same position; the canonical at that position is the
+  non-underscored form. This matches Elixir's leading-underscore convention
+  ("bound but intentionally unused" — the same parameter, just marked as
+  not-used in the body).
+
+      # 0.17.2 — `CompileError`: position 0 disagrees (`:_a` vs `:a`)
+      # 0.17.3 — compiles cleanly
+      @pre is_atom(a)
+      def f(a, b, c) when is_atom(a), do: {:ok, a, b, c}
+      def f(_a, _b, c), do: {:fallback, c}
+
+  Wildcards (bare `_`, returned as `nil` from `top_level_name/1`) are
+  unaffected — they continue to adopt sibling clauses' names rather than
+  agreeing with `_a` directly.
+
+- **`Bond.Compiler.Clauses.referenced_param_names/2`** treats both
+  spellings symmetrically: a contract referencing `a` matches a clause
+  binding `_a`, and a contract referencing `_a` matches a clause binding
+  `a`. The intersection check is name-equivalent under the
+  leading-underscore normalization.
+
+### Internal
+
+- 8 new unit tests in `Bond.Compiler.ClausesTest` for the normalization
+  rules (agreement, all-underscored agreement, truly-different names
+  still disagreeing, wildcard-vs-named-underscore distinction, both
+  directions of `referenced_param_names` matching).
+
+- 1 new behavioural test in `Bond.MultiClauseDispatchTest` driving the
+  Photon-style fallback-clause idiom end-to-end.
+
+- FAQ entry "How are multi-clause functions handled?" gains a paragraph
+  on the `_name`/`name` equivalence.
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.17.2] - 2026-06-02
 
 A purely additive release narrowing the 0.17.0 consistent-naming rule from
