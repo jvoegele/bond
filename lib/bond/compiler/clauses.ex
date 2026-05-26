@@ -80,26 +80,32 @@ defmodule Bond.Compiler.Clauses do
     arity = length(first)
 
     Enum.reduce_while(0..(arity - 1)//1, {:ok, []}, fn idx, {:ok, acc} ->
-      proposed_names =
+      raw_proposed =
         clauses_names
         |> Enum.map(&Enum.at(&1, idx))
         |> Enum.reject(&is_nil/1)
-        |> Enum.uniq()
 
-      case proposed_names do
+      # Normalize for agreement: `_a` and `a` represent the same binding
+      # semantically (Elixir's leading-underscore convention is "bound but
+      # intentionally unused"). The canonical at this position is the
+      # non-underscored form. Wildcards (bare `_`) are already filtered out
+      # above as nil and aren't part of this set.
+      normalized = raw_proposed |> Enum.map(&normalize_name/1) |> Enum.uniq()
+
+      case normalized do
         [] ->
           {:cont, {:ok, [generated_name(idx) | acc]}}
 
         [name] ->
           {:cont, {:ok, [name | acc]}}
 
-        more ->
-          # Multiple distinct names at this position. The disagreement is a
-          # CompileError only if some assertion references a name at this
-          # position (or `required_names` is `:all`). Otherwise generate a
-          # name and move on.
-          if position_required?(more, required_names) do
-            {:halt, {:error, {:disagreement, idx, more}}}
+        _multiple ->
+          # Multiple distinct (normalized) names at this position. The
+          # disagreement is a CompileError only if some assertion references
+          # a name at this position (or `required_names` is `:all`).
+          # Otherwise generate a name and move on.
+          if position_required?(raw_proposed, required_names) do
+            {:halt, {:error, {:disagreement, idx, Enum.uniq(raw_proposed)}}}
           else
             {:cont, {:ok, [generated_name(idx) | acc]}}
           end
@@ -111,10 +117,23 @@ defmodule Bond.Compiler.Clauses do
     end
   end
 
+  # Strip a single leading underscore from a name. `_a` → `a`, `a` → `a`.
+  # Bare `_` and shorter forms pass through untouched (never produced as a
+  # top-level name anyway — `top_level_name/1` returns nil for those).
+  defp normalize_name(name) when is_atom(name) do
+    case Atom.to_string(name) do
+      "_" <> rest when rest != "" -> String.to_atom(rest)
+      _ -> name
+    end
+  end
+
   defp position_required?(_proposed_names, :all), do: true
 
   defp position_required?(proposed_names, %MapSet{} = required_names) do
-    Enum.any?(proposed_names, &MapSet.member?(required_names, &1))
+    Enum.any?(proposed_names, fn name ->
+      MapSet.member?(required_names, name) or
+        MapSet.member?(required_names, normalize_name(name))
+    end)
   end
 
   @doc """
@@ -204,6 +223,7 @@ defmodule Bond.Compiler.Clauses do
       clauses
       |> Enum.flat_map(&top_level_names(&1.params || []))
       |> Enum.reject(&is_nil/1)
+      |> Enum.flat_map(&candidate_variants/1)
       |> MapSet.new()
 
     referenced =
@@ -212,6 +232,22 @@ defmodule Bond.Compiler.Clauses do
       end)
 
     MapSet.intersection(referenced, candidates)
+  end
+
+  # For every clause's top-level name, include both `_name` and `name` in the
+  # candidate set so contracts referencing either spelling are recognised
+  # symmetrically. Mirrors the `_a`/`a` equivalence the agreement check
+  # applies — Elixir's leading-underscore convention is "bound but
+  # intentionally unused", so the two forms are semantically the same
+  # parameter.
+  defp candidate_variants(name) when is_atom(name) do
+    case Atom.to_string(name) do
+      "_" <> rest when rest != "" ->
+        [name, String.to_atom(rest)]
+
+      str ->
+        [name, String.to_atom("_" <> str)]
+    end
   end
 
   # Walks an AST collecting every bare-variable reference. A bare variable in
