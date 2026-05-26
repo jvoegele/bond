@@ -5,6 +5,82 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.17.2] - 2026-06-02
+
+A purely additive release narrowing the 0.17.0 consistent-naming rule from
+"all positions must agree" to "positions referenced by some contract must
+agree." Surfaced by a second round of Photon dogfooding where a trivial
+result-only contract on a four-clause shape-dispatching function would
+otherwise have required renaming every parameter across all clauses.
+
+### Changed
+
+- **Multi-clause consistent-naming check is now per-position based on
+  contract references.** A contract that doesn't reference any parameter
+  name imposes no naming constraint:
+
+      # 0.17.0 — `CompileError`: position 1 disagrees on :game vs :league
+      # 0.17.2 — compiles cleanly
+      @post is_boolean(result)
+      def can_access?(conn, %Game{} = game, %GameFilm{} = film), do: ...
+      def can_access?(conn, league, conference) when is_binary(league), do: ...
+
+  Bond walks every `@pre`/`@post`/`@invariant` expression's AST and
+  collects bare-variable references, intersecting with the union of
+  top-level parameter names across all clauses. Synthetic bindings
+  (`result`, `old(...)` helpers, the invariant `subject`) drop out of
+  the intersection automatically. Agreement is required only at
+  positions whose canonical name appears in the resulting set.
+
+  Adding a contract that *does* reference a disagreeing position
+  re-engages the rule at that position — the `CompileError` fires
+  exactly when (and where) a contract needs the consistency. Trivial
+  contracts attach freely; shape-dependent contracts still need
+  `~>` for cross-clause uniformity.
+
+### Added
+
+- **`Bond.Compiler.Clauses.referenced_param_names/2`** — new internal
+  helper. Walks an assertion list's expression ASTs collecting
+  bare-variable names, intersected with the union of top-level
+  parameter names across all clauses.
+
+- **`Bond.Compiler.Clauses.assert_clauses_agree!/4`** — gains a fourth
+  argument for the set of names requiring agreement. The 3-arg form
+  remains (defaulting to `:all`) for strict-mode callers and existing
+  tests.
+
+### Fixed
+
+- `Bond.Compiler.Clauses.rewrite_clause_params/3` now correctly rebinds
+  the canonical name when a clause's top-level name differs from it.
+  This case couldn't arise under 0.17.0's strict rule but does under
+  the 0.17.2 relaxation (at unreferenced positions where the canonical
+  is a generated `bond_arg_<idx>` regardless of what the user named
+  the parameter). Without the rebind, the wrapper would reference an
+  unbound name at the super-call site.
+
+### Internal
+
+- 13 new unit tests in `Bond.Compiler.ClausesTest` covering the AST
+  walker (bare/remote/operator/`old`/`subject` references, the
+  cross-clause candidate-name union, and the documented closure-
+  variable false-positive case) and the relaxed mode of
+  `assert_clauses_agree!/4` (`:all`, empty, agreeing, disagreeing
+  required-name sets).
+
+- 2 new behavioural tests in `Bond.MultiClauseDispatchTest` covering
+  the Photon-shape relaxation and the re-engagement when a parameter-
+  referencing contract is added.
+
+- FAQ entry "How are multi-clause functions handled?" gains a
+  subsection describing the positional rule and the trivial-contract
+  affordance.
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.17.1] - 2026-05-31
 
 A purely additive release closing a doc-symmetry gap: per-function
