@@ -104,6 +104,72 @@ defmodule Bond.Compiler.Clauses do
   end
 
   @doc """
+  Validates that every clause in `clauses` agrees on the top-level name at each
+  positional argument. Returns `{:ok, canonical_names}` on success, or raises
+  `CompileError` at `env`'s file/line with a clear diagnostic on disagreement.
+
+  This is the 0.17.0 break: multi-clause functions with `@pre` / `@post` /
+  `@invariant`-emitted overrides must use consistent top-level parameter names
+  across all clauses. The diagnostic names the disagreeing position, lists the
+  conflicting names, and points at the canonical fix (rename to one consistent
+  name per position) plus the deferred per-clause-contracts door.
+
+  `clauses` is a list of structs (or maps) with a `:params` field; the order
+  matters only for the error message. `function_info` is `{name, arity}`, used
+  to name the function in the diagnostic.
+  """
+  @spec assert_clauses_agree!(
+          [%{:params => [Macro.t()], optional(any()) => any()}],
+          Macro.Env.t(),
+          {atom(), non_neg_integer()}
+        ) :: {:ok, [atom()]}
+  def assert_clauses_agree!(clauses, %Macro.Env{} = env, {fun, arity} = _function_info)
+      when is_list(clauses) do
+    clauses_names = Enum.map(clauses, &top_level_names(&1.params || []))
+
+    case canonical_names(clauses_names) do
+      {:ok, names} ->
+        {:ok, names}
+
+      {:error, {:disagreement, idx, conflicting}} ->
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description: disagreement_message(fun, arity, idx, conflicting, clauses_names)
+    end
+  end
+
+  defp disagreement_message(fun, arity, idx, conflicting, clauses_names) do
+    conflicting_str = conflicting |> Enum.map(&inspect/1) |> Enum.join(", ")
+
+    clause_summary =
+      clauses_names
+      |> Enum.with_index(1)
+      |> Enum.map_join("\n", fn {names, clause_num} ->
+        "  clause #{clause_num}: " <>
+          (names |> Enum.map(&format_name/1) |> Enum.join(", "))
+      end)
+
+    """
+    Bond requires consistent top-level parameter names across all clauses of #{fun}/#{arity} \
+    when contracts are attached. Position #{idx} disagrees: #{conflicting_str}.
+
+    Per-clause top-level names:
+    #{clause_summary}
+
+    Fix: rename each clause to use one consistent name at position #{idx} (and any other \
+    disagreeing positions). For shape-dependent contracts, use the `~>` implication \
+    operator — e.g. `@pre is_binary(resource) ~> String.length(resource) <= 10`.
+
+    Per-clause contracts may be added in a future Bond release. If this restriction \
+    bites real code, please open an issue.\
+    """
+  end
+
+  defp format_name(nil), do: "_"
+  defp format_name(name) when is_atom(name), do: Atom.to_string(name)
+
+  @doc """
   Underscore-prefixes every bound variable in `pattern` whose name isn't in the
   `used` set. Names already starting with underscore (`_foo`) and bare wildcards
   (`_`) are left alone. Pin expressions (`^x`) are treated as uses, not bindings,

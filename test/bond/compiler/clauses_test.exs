@@ -138,6 +138,111 @@ defmodule Bond.Compiler.ClausesTest do
     end
   end
 
+  describe "assert_clauses_agree!/3" do
+    test "returns canonical names when all clauses agree" do
+      clauses = [
+        %{params: quote(do: [conn, resource, scope])},
+        %{params: quote(do: [conn, resource, scope])}
+      ]
+
+      assert {:ok, [:conn, :resource, :scope]} =
+               Clauses.assert_clauses_agree!(clauses, __ENV__, {:f, 3})
+    end
+
+    test "returns canonical names when one clause has wildcards and another has names" do
+      clauses = [
+        %{params: quote(do: [capacity])},
+        %{params: quote(do: [_])}
+      ]
+
+      assert {:ok, [:capacity]} = Clauses.assert_clauses_agree!(clauses, __ENV__, {:try_new, 1})
+    end
+
+    test "raises CompileError on disagreement, naming the function and position" do
+      clauses = [
+        %{params: quote(do: [conn, g, f])},
+        %{params: quote(do: [conn, league, conference])}
+      ]
+
+      assert_raise CompileError, ~r/can_access_conference\?\/3/, fn ->
+        Clauses.assert_clauses_agree!(clauses, __ENV__, {:can_access_conference?, 3})
+      end
+    end
+
+    test "disagreement message names the conflicting position and the names" do
+      clauses = [
+        %{params: quote(do: [conn, g, f])},
+        %{params: quote(do: [conn, league, conference])}
+      ]
+
+      error =
+        assert_raise CompileError, fn ->
+          Clauses.assert_clauses_agree!(clauses, __ENV__, {:can_access_conference?, 3})
+        end
+
+      message = Exception.message(error)
+      assert message =~ "Position 1 disagrees"
+      assert message =~ ":g"
+      assert message =~ ":league"
+    end
+
+    test "disagreement message includes a per-clause summary" do
+      clauses = [
+        %{params: quote(do: [a])},
+        %{params: quote(do: [b])}
+      ]
+
+      error =
+        assert_raise CompileError, fn ->
+          Clauses.assert_clauses_agree!(clauses, __ENV__, {:f, 1})
+        end
+
+      message = Exception.message(error)
+      assert message =~ "clause 1: a"
+      assert message =~ "clause 2: b"
+    end
+
+    test "disagreement message points at the consistent-names fix" do
+      clauses = [
+        %{params: quote(do: [a])},
+        %{params: quote(do: [b])}
+      ]
+
+      error =
+        assert_raise CompileError, fn ->
+          Clauses.assert_clauses_agree!(clauses, __ENV__, {:f, 1})
+        end
+
+      message = Exception.message(error)
+      assert message =~ "rename each clause to use one consistent name"
+    end
+
+    test "disagreement message mentions ~> for shape-dependent contracts" do
+      clauses = [
+        %{params: quote(do: [a])},
+        %{params: quote(do: [b])}
+      ]
+
+      error =
+        assert_raise CompileError, fn ->
+          Clauses.assert_clauses_agree!(clauses, __ENV__, {:f, 1})
+        end
+
+      message = Exception.message(error)
+      assert message =~ "~>"
+    end
+
+    test "single-clause function: trivially agrees" do
+      clauses = [%{params: quote(do: [x, y])}]
+      assert {:ok, [:x, :y]} = Clauses.assert_clauses_agree!(clauses, __ENV__, {:f, 2})
+    end
+
+    test "empty params: returns empty canonical list" do
+      clauses = [%{params: []}]
+      assert {:ok, []} = Clauses.assert_clauses_agree!(clauses, __ENV__, {:f, 0})
+    end
+  end
+
   describe "underscore_prefix_unused/2" do
     test "leaves a bare variable alone when it's in the used set" do
       pattern = quote(do: x)
