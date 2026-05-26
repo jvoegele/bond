@@ -8,6 +8,27 @@ defmodule Bond.Predicates do
 
   To use the infix operator versions of the predicates in other contexts, this module must be
   imported in the using module.
+
+  ## Operator precedence
+
+  `~>` (implication) and `<~` (pattern match) share the same precedence and
+  left-associate. This matters when both appear in a single assertion. The
+  natural-language reading "if `x > 0` then the result matches `{:ok, _}`"
+
+      # WRONG — fails to compile
+      @post (x > 0) ~> {:ok, _} <~ result
+
+  parses as `((x > 0) ~> {:ok, _}) <~ result`, where the LHS of `<~` is an
+  arbitrary expression containing `_`. `_` isn't a valid value position, so
+  compilation fails with a cryptic error.
+
+  Add explicit parens around the inner operator to get the intended grouping:
+
+      # Right
+      @post (x > 0) ~> ({:ok, _} <~ result)
+
+  Rule of thumb: any time you nest `<~` inside `~>` (or vice versa),
+  parenthesize the inner expression.
   """
 
   @doc """

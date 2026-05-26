@@ -111,6 +111,26 @@ defmodule Bond do
     :ok
   end
 
+  # Catch-all for `@pre`/`@post` with 2+ args that don't match the label-first,
+  # label-last, or single-arg patterns above. The common trip is mixing a bare
+  # assertion with a labelled one (`@pre is_binary(x), positive: x > 0`) —
+  # Elixir parses that as two args, neither valid for the existing clauses, so
+  # it would otherwise fall through to Kernel's `@/1` and die with an unhelpful
+  # arity error. Raise a clearer diagnostic here.
+  defmacro @{pre_or_post, _meta, [_, _ | _] = args}
+           when pre_or_post in [:pre, :post] do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description:
+        "@#{pre_or_post} accepts a single argument — either a bare assertion expression " <>
+          "or a keyword list of label: assertion pairs. Got #{length(args)} arguments " <>
+          "(likely a bare assertion mixed with labelled assertions, e.g. " <>
+          "`@#{pre_or_post} is_binary(x), positive: x > 0`). Either label every " <>
+          "assertion (`@#{pre_or_post} binary: is_binary(x), positive: x > 0`) or use " <>
+          "a separate @#{pre_or_post} line per bare assertion."
+  end
+
   # @invariant <expression-or-keyword-list>
   #
   # Invariant expressions reference the implicit `subject` binding, which Bond rebinds at
@@ -142,6 +162,24 @@ defmodule Bond do
         "@invariant <name>, <expr> was removed in Bond 0.16.0. Drop the binding name; " <>
           "invariant expressions reference the implicit `subject` binding. Example: " <>
           "`@invariant subject.field > 0` instead of `@invariant stack, stack.field > 0`."
+  end
+
+  # Catch-all for `@invariant` with 2+ args that don't match the legacy
+  # `@invariant <atom>, <expr>` shape above. Same trip as `@pre`/`@post`:
+  # mixing a bare assertion with a labelled one (`@invariant subject.x >= 0,
+  # positive: subject.y > 0`) parses as two args, neither valid, and would
+  # otherwise fall through to Kernel's `@/1` with an arity error.
+  defmacro @{:invariant, _meta, [_, _ | _] = args} do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description:
+        "@invariant accepts a single argument — either a bare expression or a " <>
+          "keyword list of label: expression pairs. Got #{length(args)} arguments " <>
+          "(likely a bare expression mixed with labelled ones, e.g. " <>
+          "`@invariant subject.x >= 0, positive: subject.y > 0`). Either label every " <>
+          "expression (`@invariant non_negative: subject.x >= 0, positive: subject.y > 0`) " <>
+          "or use a separate @invariant line per bare expression."
   end
 
   defmacro @{:doc, meta, [value]} do
