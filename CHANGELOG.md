@@ -5,6 +5,133 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-05-30
+
+0.17.0 closes the longest-standing bug surfaced by real-world dogfooding:
+multi-clause functions whose first body clause had shape-specific
+patterns silently broke callers using a different shape. The fix is a
+per-clause wrapper redesign that preserves Elixir's natural multi-clause
+dispatch, plus a new rule that all clauses must agree on the top-level
+parameter name at each position when Bond is attaching contracts.
+
+0.17.0 also fixes a latent semantic bug in `Bond.Predicates.~>/2`: the
+implication operator was a `def`, so both sides were eagerly evaluated.
+The natural "shape-dependent assertion" pattern
+(`is_struct(x, Mod) ~> (x.id > 0)`) crashed on non-struct inputs to the
+antecedent. `~>` is now a `defmacro` that short-circuits.
+
+### Breaking changes (minor)
+
+- **`Bond.Predicates.~>/2` is now a macro, not a function.** The
+  expansion is `if antecedent, do: !!consequent, else: true`, so the
+  consequent is only evaluated when the antecedent is truthy. This
+  matches the logical reading of implication and makes
+  shape-dependent assertions safe to write.
+
+      # Was: both sides evaluated eagerly — `String.length(x)` raised
+      # FunctionClauseError when `x` wasn't a binary.
+      @pre is_binary(x) ~> (String.length(x) > 0)
+
+      # Now: `String.length(x)` is only evaluated when `is_binary(x)`
+      # is truthy. Same source, correct semantics.
+
+  The migration impact is limited: code that passed `~>` as a function
+  capture (`&Bond.Predicates.~>/2`) no longer compiles. Use a function
+  wrapper or the underlying `implies?/2` (still a function and still
+  eagerly evaluated) instead. The infix usage that's common in
+  contracts is unchanged.
+
+- **Multi-clause functions with contracts must agree on top-level
+  parameter names across all clauses.** Heterogeneous naming raises
+  `CompileError` at the function's compile site. Pre-0.17.0 Bond used
+  the first clause's params for the wrapper head verbatim, silently
+  breaking callers whose shape matched a non-first clause; the new
+  rule makes the constraint explicit and pushes naming consistency
+  (often a readability win regardless of Bond).
+
+      # Was (silently broken): callers passing strings hit
+      # FunctionClauseError inside Bond's generated code.
+      def lookup(conn, %Game{} = g, %GameFilm{} = f), do: ...
+      def lookup(conn, league, conference) when is_binary(league), do: ...
+
+      # Now: rename for consistent positional meaning across clauses.
+      def lookup(conn, %Game{} = resource, %GameFilm{} = scope), do: ...
+      def lookup(conn, resource, scope) when is_binary(resource), do: ...
+
+  Wildcard clauses (`def f(_)`) and literal-pattern clauses
+  (`def f(0)`) don't bind a top-level name at that position — they
+  adopt whatever name a sibling clause provides. So the common
+  `def try_init(_)`-paired-with-`def try_init(capacity)` pattern
+  works unchanged.
+
+  For shape-dependent assertions across clauses, use the `~>`
+  implication operator (which now short-circuits, per above).
+  Per-clause contracts may be added in a future release if the
+  consistent-naming restriction turns out to bite real code.
+
+### Added
+
+- **`Bond.Compiler.Clauses`** — new internal module owning clause-
+  shape utilities: `top_level_names/1`, `canonical_names/1`,
+  `assert_clauses_agree!/3` (the validator), `rewrite_clause_params/3`
+  (canonical-name binding + underscore-prefix of unused names), and
+  `underscore_prefix_unused/2`.
+
+- **`Bond.Compiler.ClauseWrapper`** — new internal module owning
+  per-clause wrapper emission. Extracted from `AnnotatedFunction`
+  (which is on the FSM's hot path) to keep that file small and avoid
+  the parallel-compile race the project first encountered in 0.13.0.
+
+### Changed
+
+- **Wrapper emission switches from single-wrapper to per-clause.**
+  For an N-clause user function, Bond now emits N wrapper clauses,
+  each preserving the user's pattern (with destructured names
+  underscore-prefixed where the wrapper body doesn't reference them).
+  Elixir's natural multi-clause dispatch routes each call to the
+  appropriate user clause via `super/N`. Wrong-shape inputs raise
+  `FunctionClauseError` at the wrapper layer, matching the pre-Bond
+  behaviour.
+
+- **Lifted assertion defps' parameter heads diverge by clause count.**
+  - Single-clause functions keep the user's pattern in the lifted
+    defp head, so contracts can still reference destructured names
+    from the head (e.g. `current_count` from
+    `%__MODULE__{count: current_count} = state` — the
+    contracts-and-concurrency guide example works unchanged).
+  - Multi-clause functions use the canonical top-level names as bare
+    vars. Contracts can only reference those names; shape-dependent
+    assertions use `~>`.
+
+- **Destructure-in-head wrapper warnings (the original #3 from the
+  Photon dogfood) are silenced.** Bond's per-clause wrapper now
+  underscore-prefixes any destructured name the wrapper body doesn't
+  reference. The lifted defp's pattern (for single-clause functions)
+  still binds those names, so contract-side access is unaffected.
+
+### Internal
+
+- **`Bond.Compiler.Invariants` simplifications.** The destructure-only
+  invariant handling that ran in 0.16.x is subsumed by the canonical-
+  name rewrite — `Invariants.rewrite_call_params/2` and
+  `Invariants.params_split/3` are no longer called from emission.
+  They remain in the module for now; cleanup deferred to a later
+  release.
+
+- **`Bond.Compiler.AnnotatedFunction` shrunk from 448 → 430 lines**
+  via the ClauseWrapper and Clauses extractions, well below the
+  historical baseline where the parallel-compile race surfaced.
+
+- **Test fixture migration.** The existing `BondTest.InvariantSmoke.
+  try_new/1` (wildcard adopts canonical) and `BondTest.Stack.new/N`
+  (all clauses agree on `capacity`) work unchanged under the new
+  rule. The unit-test fixture in `Bond.Compiler.AnnotatedFunctionTest`
+  (previously `list`/`map`) migrated to consistent `input`.
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.16.2] - 2026-05-28
 
 A patch release covering eight issues surfaced by dogfooding Bond 0.16.1
