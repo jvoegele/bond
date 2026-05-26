@@ -243,6 +243,88 @@ defmodule Bond.Compiler.ClausesTest do
     end
   end
 
+  describe "rewrite_clause_params/3" do
+    test "leaves a bare-var param matching the canonical alone" do
+      params = quote(do: [stack])
+      [result] = Clauses.rewrite_clause_params(params, [:stack])
+      assert match?({:stack, _, _}, result)
+    end
+
+    test "rewrites a wildcard to bind the canonical" do
+      params = quote(do: [_])
+      [result] = Clauses.rewrite_clause_params(params, [:capacity])
+      assert match?({:capacity, _, _}, result)
+    end
+
+    test "wraps a destructure-only pattern with `canonical = <pattern>`" do
+      params = quote(do: [%BondTest.Mod{f: x}])
+      [result] = Clauses.rewrite_clause_params(params, [:state])
+      source = Macro.to_string(result)
+      assert source =~ ~r/state\s*=\s*%BondTest\.Mod\{/
+    end
+
+    test "wraps a literal pattern with `canonical = <pattern>`" do
+      params = quote(do: [0])
+      [result] = Clauses.rewrite_clause_params(params, [:n])
+      source = Macro.to_string(result)
+      assert source =~ ~r/n\s*=\s*0/
+    end
+
+    test "leaves `pattern = name` matches alone when name is the canonical" do
+      params = quote(do: [%BondTest.Mod{} = stack])
+      [result] = Clauses.rewrite_clause_params(params, [:stack])
+      source = Macro.to_string(result)
+      assert source =~ "stack"
+      # No double-wrapping like `stack = (%Mod{} = stack)`
+      refute source =~ ~r/stack\s*=\s*\(/
+    end
+
+    test "underscore-prefixes destructured names other than the canonical" do
+      params = quote(do: [%BondTest.Mod{id: id, name: name} = subject])
+      [result] = Clauses.rewrite_clause_params(params, [:subject])
+      source = Macro.to_string(result)
+      assert source =~ "subject"
+      assert source =~ "_id"
+      assert source =~ "_name"
+    end
+
+    test "preserves destructured names that are in the `used` set" do
+      params = quote(do: [%BondTest.Mod{count: current_count} = state])
+
+      [result] = Clauses.rewrite_clause_params(params, [:state], MapSet.new([:current_count]))
+
+      source = Macro.to_string(result)
+      assert source =~ "current_count"
+      refute source =~ "_current_count"
+    end
+
+    test "handles multiple positions with different canonical names" do
+      params = quote(do: [conn, %BondTest.Mod{} = resource, _])
+
+      [a, b, c] = Clauses.rewrite_clause_params(params, [:conn, :resource, :scope])
+
+      assert match?({:conn, _, _}, a)
+      assert Macro.to_string(b) =~ "resource"
+      assert match?({:scope, _, _}, c)
+    end
+
+    test "generated canonical name (`__bond_arg_N__`) binds to a no-name position" do
+      params = quote(do: [0])
+      [result] = Clauses.rewrite_clause_params(params, [:__bond_arg_0__])
+      source = Macro.to_string(result)
+      assert source =~ "__bond_arg_0__"
+      assert source =~ "0"
+    end
+
+    test "underscore-prefix doesn't touch the canonical even if `used` is empty" do
+      # The canonical names are always implicitly "used" — never prefixed.
+      params = quote(do: [stack])
+      [result] = Clauses.rewrite_clause_params(params, [:stack])
+      assert match?({:stack, _, _}, result)
+      refute match?({:_stack, _, _}, result)
+    end
+  end
+
   describe "underscore_prefix_unused/2" do
     test "leaves a bare variable alone when it's in the used set" do
       pattern = quote(do: x)

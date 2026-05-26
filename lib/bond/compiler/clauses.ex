@@ -170,6 +170,68 @@ defmodule Bond.Compiler.Clauses do
   defp format_name(name) when is_atom(name), do: Atom.to_string(name)
 
   @doc """
+  Rewrites a clause's params for use as a wrapper head, in two steps:
+
+    1. **Canonical-name binding.** At each position, ensure the param binds the
+       canonical name from `canonical_names`. If the user's pattern already
+       does (e.g. clause head is `def f(stack, ...)` and canonical is `stack`),
+       leave it alone. If the position is a wildcard (`_`), replace it with the
+       canonical name. Otherwise wrap as `canonical = <original_pattern>` so
+       the canonical name binds the whole position while the original
+       destructure / literal pattern still pattern-matches.
+
+    2. **Underscore-prefix unused names.** Any bound variable other than the
+       canonical names (and any extra names passed in `used`) is underscore-
+       prefixed so Elixir doesn't warn about it being unused in the wrapper
+       body. The canonical names are always treated as used.
+
+  Used by per-clause wrapper emission in `Bond.Compiler.ClauseWrapper`.
+  """
+  @spec rewrite_clause_params([Macro.t()], [atom()], MapSet.t(atom()) | Enumerable.t()) ::
+          [Macro.t()]
+  def rewrite_clause_params(params, canonical_names, used \\ [])
+      when is_list(params) and is_list(canonical_names) do
+    used_set =
+      used
+      |> MapSet.new()
+      |> MapSet.union(MapSet.new(canonical_names))
+
+    params
+    |> Enum.with_index()
+    |> Enum.map(fn {param, idx} ->
+      canonical = Enum.at(canonical_names, idx)
+      bound = bind_canonical_at_pos(param, canonical)
+      underscore_prefix_unused(bound, used_set)
+    end)
+  end
+
+  defp bind_canonical_at_pos(param, canonical) when is_atom(canonical) do
+    case top_level_names([param]) do
+      [^canonical] ->
+        # Already binds the canonical name at top level. No rewrite needed.
+        param
+
+      [nil] ->
+        # No top-level binding at this position. Add one.
+        case param do
+          {:_, meta, ctx} when is_atom(ctx) ->
+            # Wildcard `_`: replace with the canonical var.
+            {canonical, meta, ctx}
+
+          _ ->
+            # Destructure / literal / other: wrap as `canonical = <original>`.
+            {:=, [], [Macro.var(canonical, nil), param]}
+        end
+
+      [_other_name] ->
+        # User bound a different name at top level than canonical. This
+        # shouldn't happen if `assert_clauses_agree!/3` ran first. Leave alone
+        # defensively — the disagreement would have raised before reaching here.
+        param
+    end
+  end
+
+  @doc """
   Underscore-prefixes every bound variable in `pattern` whose name isn't in the
   `used` set. Names already starting with underscore (`_foo`) and bare wildcards
   (`_`) are left alone. Pin expressions (`^x`) are treated as uses, not bindings,
@@ -235,6 +297,12 @@ defmodule Bond.Compiler.Clauses do
   defp do_prefix(literal, _used), do: literal
 
   # --- Pattern recognition for one parameter ---
+
+  # `param \\ default` — default-arg form. Recurse on the inner param so the
+  # caller doesn't have to `strip_default_args` first.
+  defp top_level_name({:\\, _meta, [param, _default]}) do
+    top_level_name(param)
+  end
 
   # `{name, _meta, ctx}` where ctx is an atom — bare variable.
   defp top_level_name({name, _meta, ctx}) when is_atom(name) and is_atom(ctx) do

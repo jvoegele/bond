@@ -23,6 +23,7 @@ defmodule Bond.Compiler.ClauseWrapper do
   compile-order gotcha memory.
   """
 
+  alias Bond.Compiler.Clauses
   alias Bond.Compiler.Invariants
 
   @typedoc """
@@ -47,16 +48,45 @@ defmodule Bond.Compiler.ClauseWrapper do
         }
 
   @doc """
-  Builds one wrapper clause AST for the given `clause`, using the per-function
-  context. Returns the `def`/`defp` head + body as a quoted form ready to be
-  spliced alongside the lifted assertion defps inside the override block.
-  """
-  @spec build_wrapper(term(), context()) :: Macro.t()
-  def build_wrapper(clause, %{} = context) do
-    clean_params = strip_default_args(clause.params)
+  Builds one wrapper clause AST for the given user `clause`, using the
+  per-function `context` and the function-level `canonical_names` (one name
+  per positional argument, agreed across all clauses by
+  `Bond.Compiler.Clauses.assert_clauses_agree!/3`).
 
-    {struct_params, head_params, super_args} =
-      Invariants.params_split(clean_params, clause, context.inv_mode)
+  The wrapper:
+
+    1. Has its pattern rewritten so that each position binds the canonical
+       name. The user's destructure / guard / literal pattern is preserved
+       for dispatch; the canonical name is added if the user's clause didn't
+       bind it (wildcard, literal, destructure-only).
+    2. Has all other destructured names underscore-prefixed (the #3 fix —
+       suppresses Elixir's unused-variable warnings on names the wrapper
+       body doesn't reference).
+    3. Calls `super` and the lifted assertion defps using the canonical
+       names as bare vars — same arguments for every clause's wrapper, so
+       the lifted defps can be shared across clauses.
+
+  `lifted_used` is the set of names the lifted assertion defps will reference
+  in their pattern matches (relevant for single-clause functions where the
+  lifted defp keeps the user's pattern; pass `[]` for multi-clause).
+  """
+  @spec build_wrapper(term(), [atom()], context(), Enumerable.t()) :: Macro.t()
+  def build_wrapper(clause, canonical_names, %{} = context, lifted_used \\ [])
+      when is_list(canonical_names) do
+    clean_params = strip_default_args(clause.params)
+    head_params = Clauses.rewrite_clause_params(clean_params, canonical_names, lifted_used)
+    super_args = Enum.map(canonical_names, &Macro.var(&1, nil))
+
+    # Invariant struct detection runs on the rewritten head — so destructure-
+    # only positions, now wrapped as `canonical = %__MODULE__{...}`, are
+    # detected as `:bound` with the canonical name. The pre-invariant call
+    # uses that name, which is already bound by the wrapper's pattern.
+    struct_params =
+      if context.inv_mode == :purge do
+        []
+      else
+        Invariants.detect_struct_params(head_params, clause.guards || [])
+      end
 
     pre_invariant_stmts =
       Invariants.all_pre_invariant_stmts(

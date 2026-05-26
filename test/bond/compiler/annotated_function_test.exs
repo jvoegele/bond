@@ -53,11 +53,11 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
     } do
       annotated_function = AnnotatedFunction.new(clause_def1)
       assert [clause1] = annotated_function.clauses
-      assert Macro.to_string(clause1.params) == "[list]"
+      assert Macro.to_string(clause1.params) == "[input]"
 
       annotated_function = AnnotatedFunction.add_clause(annotated_function, clause_def2)
       assert [^clause1, clause2] = annotated_function.clauses
-      assert Macro.to_string(clause2.params) == "[map]"
+      assert Macro.to_string(clause2.params) == "[input]"
     end
 
     test "error when given a FunctionDefinition with different mfa", %{
@@ -174,26 +174,32 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       assert keyword_doc == [artist: "The D.O.C.", title: "Portrait of a Master Piece"]
     end
 
-    test "override clause delegates to super/1 with the first clause's params",
+    test "emits one wrapper clause per user clause, each binding the canonical name",
          %{two_clause_annotated_function: annotated_function} do
       ast = AnnotatedFunction.apply_contract(annotated_function)
-      override = override_def_clause(ast)
+      wrappers = override_def_clauses(ast)
 
-      assert {:def, _, [{:new, _, [{:list, _, _}]}, [do: do_block]]} = override
+      # 0.17.0 emits one override clause per user clause to preserve Elixir's
+      # multi-clause dispatch. Both bind the canonical name `input`.
+      assert length(wrappers) == 2
 
-      code = Macro.to_string(do_block)
-      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:preconditions,\s*true"
+      Enum.each(wrappers, fn wrapper ->
+        assert {:def, _, [{:new, _, [{:input, _, _}]}, [do: do_block]]} = wrapper
 
-      assert code =~
-               ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__new__1\(list\)\s+end\)/s
+        code = Macro.to_string(do_block)
+        assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:preconditions,\s*true"
 
-      assert code =~ ~r"var!\(result\) = super\(list\)"
-      assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:postconditions,\s*true"
+        assert code =~
+                 ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__new__1\(input\)\s+end\)/s
 
-      assert code =~
-               ~r/Bond\.Runtime\.Eval\.evaluate_postconditions\(fn ->\s+__bond_postconditions__new__1\(list, var!\(result\)\)\s+end\)/s
+        assert code =~ ~r"var!\(result\) = super\(input\)"
+        assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:postconditions,\s*true"
 
-      assert code =~ ~r"var!\(result\)$"
+        assert code =~
+                 ~r/Bond\.Runtime\.Eval\.evaluate_postconditions\(fn ->\s+__bond_postconditions__new__1\(input, var!\(result\)\)\s+end\)/s
+
+        assert code =~ ~r"var!\(result\)$"
+      end)
     end
 
     test "emits lifted defps for the precondition and postcondition assertion bodies",
@@ -201,7 +207,9 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       ast = AnnotatedFunction.apply_contract(annotated_function)
       defps = lifted_defp_clauses(ast)
 
-      assert {:__bond_preconditions__new__1, [{:list, _, _}], pre_body} =
+      # For multi-clause functions the lifted defps use the canonical top-level
+      # name (`input` here), not any individual clause's full pattern.
+      assert {:__bond_preconditions__new__1, [{:input, _, _}], pre_body} =
                Enum.find(defps, fn {name, _, _} -> name == :__bond_preconditions__new__1 end)
 
       pre_code = Macro.to_string(pre_body)
@@ -212,7 +220,7 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       assert {:__bond_postconditions__new__1, post_params, post_body} =
                Enum.find(defps, fn {name, _, _} -> name == :__bond_postconditions__new__1 end)
 
-      # `list` (the user param) plus a `var!(result)` parameter at the end.
+      # `input` (the canonical name) plus a `var!(result)` parameter at the end.
       assert length(post_params) == 2
 
       post_code = Macro.to_string(post_body)
@@ -434,6 +442,15 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
     end)
   end
 
+  defp override_def_clauses(ast) do
+    ast
+    |> block_clauses()
+    |> Enum.filter(fn
+      {:def, _, _} -> true
+      _ -> false
+    end)
+  end
+
   # Extracts `{fun_name, params, body_ast}` for each `defp __bond_*__*` clause in `ast`.
   defp lifted_defp_clauses(ast) do
     ast
@@ -462,14 +479,17 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
         quote(do: x + y)
       )
 
+    # Two clauses for new/1, sharing the canonical top-level name `input`
+    # but dispatching on shape via guards. 0.17.0's consistent-naming rule
+    # requires all clauses to use the same top-level name at each position.
     two_clause_function_clause1 =
       FunctionDefinition.new(
         __ENV__,
         :def,
         :new,
-        quote(do: [list]),
-        quote(do: [is_list(list)]),
-        quote(do: Map.new(list))
+        quote(do: [input]),
+        quote(do: [is_list(input)]),
+        quote(do: Map.new(input))
       )
 
     two_clause_function_clause2 =
@@ -477,9 +497,9 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
         __ENV__,
         :def,
         :new,
-        quote(do: [map]),
-        quote(do: [is_map(map)]),
-        quote(do: map)
+        quote(do: [input]),
+        quote(do: [is_map(input)]),
+        quote(do: input)
       )
 
     {:ok,

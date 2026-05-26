@@ -17,6 +17,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
   alias Bond.Compiler.Assertion
   alias Bond.Compiler.ClauseWrapper
+  alias Bond.Compiler.Clauses
   alias Bond.Compiler.ContractDocs
   alias Bond.Compiler.FunctionDefinition
   alias Bond.Compiler.Invariants
@@ -251,6 +252,9 @@ defmodule Bond.Compiler.AnnotatedFunction do
     first_clause = List.first(annotated_function.clauses)
     function_info = {fun, arity}
 
+    {:ok, canonical_names} =
+      Clauses.assert_clauses_agree!(annotated_function.clauses, first_clause.env, function_info)
+
     {postconditions, old_context} =
       if post_mode != :purge do
         OldExpression.precompile(annotated_function.postconditions)
@@ -282,24 +286,41 @@ defmodule Bond.Compiler.AnnotatedFunction do
       old_assignments: old_assignments
     }
 
-    wrapper_clause_ast = ClauseWrapper.build_wrapper(first_clause, wrapper_context)
+    # Lifted-defp parameter strategy depends on whether the function has one
+    # clause or many.
+    #
+    #   * Single-clause: lifted defp's head reproduces the user's pattern, so
+    #     contracts can reference destructured names from the head (e.g.
+    #     `current_count` from `%__MODULE__{count: current_count} = state`).
+    #     The wrapper passes the canonical-named value; the defp re-binds via
+    #     its pattern.
+    #
+    #   * Multi-clause: lifted defp's head is just the canonical names as bare
+    #     vars. Contracts can only reference top-level names — they must apply
+    #     uniformly to every clause, so destructured-name access from any
+    #     individual clause is unavailable. Shape-dependent assertions use the
+    #     `~>` implication operator.
+    {lifted_defp_params, lifted_used} =
+      case annotated_function.clauses do
+        [_single] ->
+          single_clause_params = ClauseWrapper.strip_default_args(first_clause.params)
+          {single_clause_params, names_bound_in_patterns(single_clause_params)}
 
-    # `head_params` for the lifted assertion defps' heads — kept aligned with the
-    # first clause's params (pre-0.17 behaviour). S5b switches this to canonical
-    # names from `Bond.Compiler.Clauses` once all-clauses-agree is enforced.
-    {_struct_params, head_params, _super_args} =
-      Invariants.params_split(
-        ClauseWrapper.strip_default_args(first_clause.params),
-        first_clause,
-        inv_mode
-      )
+        _multi ->
+          {Enum.map(canonical_names, &Macro.var(&1, nil)), MapSet.new()}
+      end
+
+    wrapper_clauses =
+      Enum.map(annotated_function.clauses, fn clause ->
+        ClauseWrapper.build_wrapper(clause, canonical_names, wrapper_context, lifted_used)
+      end)
 
     assertion_defs =
       Enum.reject(
         [
           maybe_build_assertion_defp(
             pre_fn_name,
-            head_params,
+            lifted_defp_params,
             [],
             annotated_function.preconditions,
             function_info,
@@ -308,7 +329,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
           ),
           maybe_build_assertion_defp(
             post_fn_name,
-            head_params,
+            lifted_defp_params,
             postcondition_extra_params(old_pairs),
             postconditions,
             function_info,
@@ -331,11 +352,44 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
       unquote_splicing(doc_asts)
 
-      unquote(wrapper_clause_ast)
+      unquote_splicing(wrapper_clauses)
 
       unquote_splicing(assertion_defs)
     end
   end
+
+  # Collects every variable bound at any position inside a list of patterns —
+  # used for single-clause functions to compute the set of names that the
+  # lifted defp's head will bind (and therefore should not be underscore-
+  # prefixed in the wrapper's pattern). This preserves contract access to
+  # destructured names like `current_count` from
+  # `%__MODULE__{count: current_count} = state`.
+  defp names_bound_in_patterns(patterns) when is_list(patterns) do
+    Enum.reduce(patterns, MapSet.new(), &collect_bound_names/2)
+  end
+
+  defp collect_bound_names({:^, _, _}, acc), do: acc
+
+  defp collect_bound_names({name, _, ctx}, acc)
+       when is_atom(name) and is_atom(ctx) and name != :_ do
+    MapSet.put(acc, name)
+  end
+
+  defp collect_bound_names({_head, _meta, args}, acc) when is_list(args) do
+    Enum.reduce(args, acc, &collect_bound_names/2)
+  end
+
+  defp collect_bound_names({a, b}, acc) do
+    acc |> collect_bound_names_in(a) |> collect_bound_names_in(b)
+  end
+
+  defp collect_bound_names(list, acc) when is_list(list) do
+    Enum.reduce(list, acc, &collect_bound_names/2)
+  end
+
+  defp collect_bound_names(_other, acc), do: acc
+
+  defp collect_bound_names_in(acc, node), do: collect_bound_names(node, acc)
 
   defp lifted_fn_name(kind, fun, arity) do
     :"__bond_#{kind}__#{fun}__#{arity}"
