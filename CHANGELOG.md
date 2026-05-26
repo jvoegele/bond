@@ -5,6 +5,108 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.16.2] - 2026-05-28
+
+A patch release covering eight issues surfaced by dogfooding Bond 0.16.1
+on a real-world Elixir umbrella application (Photon, ~200+ modules). Six
+fixes bundle here; two (#2 wrapper-head shape leak, #3 destructure-in-
+head unused warnings) are deferred to 0.17.0 pending a design
+conversation.
+
+### Changed
+
+- **Remote function calls are now valid as the outermost expression of
+  an assertion.** Pre-0.16.2, `@pre String.starts_with?(x, "foo")` was
+  rejected by `Bond.Compiler.Assertion.is_assertion_expression/1` —
+  the AST's head is a `{:., _, _}` 3-tuple, not an atom, so the guard
+  failed. Workaround was an `== true` suffix on every such assertion.
+  The relaxed guard accepts the remote-call shape, including
+  `Map.has_key?(m, :k)`, `Enum.all?(xs, &f/1)`,
+  `String.starts_with?(s, "prefix")`, and Erlang calls
+  (`:erlang.is_atom`).
+
+- **No `@doc` emission on `defp`.** Contracts on private helpers
+  previously triggered Elixir's "@doc is always discarded for private
+  functions" warning on every contracted defp, making the combination
+  unusable without compile-time noise. `Bond.Compiler.ContractDocs.
+  doc_clauses/4` now short-circuits for `:defp` kind. The contracts
+  themselves continue to fire — the warning was the only blocker.
+
+- **`Bond.Predicates` moduledoc gains an "Operator precedence"
+  section** documenting the `~>` / `<~` left-associativity trap.
+  `A ~> pattern <~ B` parses as `(A ~> pattern) <~ B`, where the LHS
+  of `<~` becomes an arbitrary expression containing `_` and fails to
+  compile. The fix is parens around the inner operator. Same trap
+  surfaced as a boxed callout in the main moduledoc's Assertion Syntax
+  section so readers see it before they fall into it.
+
+- **Telemetry section** gains a concrete metadata-map example showing
+  the `{name, arity}` shape of `:function`, the sorted-binding-list
+  shape of `:binding`, and a note on `:assertion_id` stability for
+  aggregation pipelines.
+
+- **Assertion Syntax section** in the moduledoc now shows remote-call
+  examples and explicitly notes which forms aren't valid (bare
+  literals, bare variables, non-call expressions).
+
+### Fixed
+
+- **`@pre is_binary(x), positive: x > 0`** (bare assertion mixed with
+  a labelled one) and `@pre is_integer(x), x > 0` (two bare assertions
+  in a single call) previously fell through to Kernel's `@/1` and died
+  with "expected 0 or 1 argument for @pre, got: 2" — a confusing error
+  that didn't point at the parse issue. Bond now matches these shapes
+  at the macro layer and raises a clear `CompileError` suggesting
+  either label-every-assertion (keyword-list form) or separate
+  `@pre`/`@post` lines. Same catch-all added for `@invariant`.
+
+- **Bond-shaped diagnostics on malformed assertions.** When the user
+  wrote an assertion that didn't satisfy `is_assertion_expression/1`
+  (`@pre 42`, `@pre :foo`, `@pre "hello"`), Bond previously surfaced
+  a bare `FunctionClauseError` from `Assertion.new/5` with a
+  stacktrace that dumped the full `Macro.Env`. New
+  `Bond.Compiler.Assertion.validate_expression!/2` is called from both
+  `register_assertion/5` and `register_invariant/4`, and raises
+  `CompileError` with the env's file/line, the expression's source
+  (via `Macro.to_string/1`), and a one-sentence hint at valid forms.
+
+### Internal
+
+- **Test coverage filled across each fix** (+36 tests, 256 total):
+  - 6 unit tests in `assertion_test.exs` for the relaxed AST guard
+    plus the new `validate_expression!/2` validator.
+  - 8 behavioural tests in a new `BondTest.RemoteCallAssertions`
+    fixture proving remote-call assertions work end-to-end in `@pre`,
+    `@post`, `@invariant`, and `check/1` — both success and violation
+    paths.
+  - 4 behavioural + diagnostic tests for `defp` contracts, including
+    a `capture_io(:stderr, ...)` assertion that no `@doc`-discarded
+    warning fires during compilation.
+  - 9 behavioural tests covering the new bare-vs-labelled
+    `CompileError` catch-alls and verifying all five existing valid
+    forms still compile cleanly.
+
+### Deferred (to 0.17.0)
+
+- **#2 wrapper-head shape leak.** Bond's override head uses the first
+  body clause's params verbatim, so multi-clause functions with a
+  shape-specific first clause silently break callers using a different
+  shape (a `def fn(conn, %Game{}, %GameFilm{})` clause alongside a
+  sibling `def fn(conn, league, conference) when is_binary(league)`
+  clause will misroute string callers). The right fix needs a design
+  conversation on whether to use a shape-neutral wrapper with
+  restricted contract refs vs a per-clause wrapper that preserves
+  dispatch faithfully.
+
+- **#3 destructure-in-head wrapper warnings.** When the first body
+  clause has destructure like `def f(%Mod{a: x, b: y} = z)` and the
+  wrapper body uses only `z`, Elixir warns about unused `x`/`y`.
+  Partially subsumed by #2's resolution.
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.16.1] - 2026-05-27
 
 A patch release covering a 1.0-prep test-coverage audit (no behavioural
