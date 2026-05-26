@@ -66,15 +66,18 @@ defmodule Bond.Compiler.ClauseWrapper do
        names as bare vars — same arguments for every clause's wrapper, so
        the lifted defps can be shared across clauses.
 
-  `lifted_used` is the set of names the lifted assertion defps will reference
-  in their pattern matches (relevant for single-clause functions where the
-  lifted defp keeps the user's pattern; pass `[]` for multi-clause).
+  The wrapper rewrites the user's pattern so it binds the canonical names but
+  underscores every other destructured name — the wrapper's body never
+  references those, so they'd otherwise warn as "unused variable." The
+  *lifted defp* (one per kind per function, called from this wrapper) keeps
+  the user's full pattern for single-clause functions, so contracts can
+  still bind destructured names there.
   """
-  @spec build_wrapper(term(), [atom()], context(), Enumerable.t()) :: Macro.t()
-  def build_wrapper(clause, canonical_names, %{} = context, lifted_used \\ [])
+  @spec build_wrapper(term(), [atom()], context()) :: Macro.t()
+  def build_wrapper(clause, canonical_names, %{} = context)
       when is_list(canonical_names) do
     clean_params = strip_default_args(clause.params)
-    head_params = Clauses.rewrite_clause_params(clean_params, canonical_names, lifted_used)
+    head_params = Clauses.rewrite_clause_params(clean_params, canonical_names)
     super_args = Enum.map(canonical_names, &Macro.var(&1, nil))
 
     # Invariant struct detection runs on the rewritten head — so destructure-

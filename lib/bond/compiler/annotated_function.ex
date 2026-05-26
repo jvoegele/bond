@@ -300,19 +300,15 @@ defmodule Bond.Compiler.AnnotatedFunction do
     #     uniformly to every clause, so destructured-name access from any
     #     individual clause is unavailable. Shape-dependent assertions use the
     #     `~>` implication operator.
-    {lifted_defp_params, lifted_used} =
+    lifted_defp_params =
       case annotated_function.clauses do
-        [_single] ->
-          single_clause_params = ClauseWrapper.strip_default_args(first_clause.params)
-          {single_clause_params, names_bound_in_patterns(single_clause_params)}
-
-        _multi ->
-          {Enum.map(canonical_names, &Macro.var(&1, nil)), MapSet.new()}
+        [_single] -> ClauseWrapper.strip_default_args(first_clause.params)
+        _multi -> Enum.map(canonical_names, &Macro.var(&1, nil))
       end
 
     wrapper_clauses =
       Enum.map(annotated_function.clauses, fn clause ->
-        ClauseWrapper.build_wrapper(clause, canonical_names, wrapper_context, lifted_used)
+        ClauseWrapper.build_wrapper(clause, canonical_names, wrapper_context)
       end)
 
     assertion_defs =
@@ -357,39 +353,6 @@ defmodule Bond.Compiler.AnnotatedFunction do
       unquote_splicing(assertion_defs)
     end
   end
-
-  # Collects every variable bound at any position inside a list of patterns —
-  # used for single-clause functions to compute the set of names that the
-  # lifted defp's head will bind (and therefore should not be underscore-
-  # prefixed in the wrapper's pattern). This preserves contract access to
-  # destructured names like `current_count` from
-  # `%__MODULE__{count: current_count} = state`.
-  defp names_bound_in_patterns(patterns) when is_list(patterns) do
-    Enum.reduce(patterns, MapSet.new(), &collect_bound_names/2)
-  end
-
-  defp collect_bound_names({:^, _, _}, acc), do: acc
-
-  defp collect_bound_names({name, _, ctx}, acc)
-       when is_atom(name) and is_atom(ctx) and name != :_ do
-    MapSet.put(acc, name)
-  end
-
-  defp collect_bound_names({_head, _meta, args}, acc) when is_list(args) do
-    Enum.reduce(args, acc, &collect_bound_names/2)
-  end
-
-  defp collect_bound_names({a, b}, acc) do
-    acc |> collect_bound_names_in(a) |> collect_bound_names_in(b)
-  end
-
-  defp collect_bound_names(list, acc) when is_list(list) do
-    Enum.reduce(list, acc, &collect_bound_names/2)
-  end
-
-  defp collect_bound_names(_other, acc), do: acc
-
-  defp collect_bound_names_in(acc, node), do: collect_bound_names(node, acc)
 
   defp lifted_fn_name(kind, fun, arity) do
     :"__bond_#{kind}__#{fun}__#{arity}"

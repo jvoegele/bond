@@ -100,7 +100,11 @@ defmodule Bond.Compiler.Clauses do
   """
   @spec generated_name(non_neg_integer()) :: atom()
   def generated_name(idx) when is_integer(idx) and idx >= 0 do
-    :"__bond_arg_#{idx}__"
+    # No leading underscore: Elixir warns "underscored variable used after
+    # being set" when an underscore-prefixed name appears in an expression
+    # position (e.g. as a super_args / lifted-defp-call arg). The wrapper
+    # body DOES use the canonical name, so the prefix is incompatible.
+    :"bond_arg_#{idx}"
   end
 
   @doc """

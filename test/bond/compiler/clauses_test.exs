@@ -94,7 +94,7 @@ defmodule Bond.Compiler.ClausesTest do
 
     test "all clauses wildcard at a position: generated name fills in" do
       clauses = [[nil, :x], [nil, :x]]
-      assert Clauses.canonical_names(clauses) == {:ok, [:__bond_arg_0__, :x]}
+      assert Clauses.canonical_names(clauses) == {:ok, [:bond_arg_0, :x]}
     end
 
     test "disagreement: error with the position and the conflicting names" do
@@ -131,10 +131,10 @@ defmodule Bond.Compiler.ClausesTest do
   end
 
   describe "generated_name/1" do
-    test "produces a stable `__bond_arg_<idx>__` atom" do
-      assert Clauses.generated_name(0) == :__bond_arg_0__
-      assert Clauses.generated_name(1) == :__bond_arg_1__
-      assert Clauses.generated_name(7) == :__bond_arg_7__
+    test "produces a stable `bond_arg_<idx>` atom (no leading underscore)" do
+      assert Clauses.generated_name(0) == :bond_arg_0
+      assert Clauses.generated_name(1) == :bond_arg_1
+      assert Clauses.generated_name(7) == :bond_arg_7
     end
   end
 
@@ -308,11 +308,11 @@ defmodule Bond.Compiler.ClausesTest do
       assert match?({:scope, _, _}, c)
     end
 
-    test "generated canonical name (`__bond_arg_N__`) binds to a no-name position" do
+    test "generated canonical name (`bond_arg_<idx>`) binds to a no-name position" do
       params = quote(do: [0])
-      [result] = Clauses.rewrite_clause_params(params, [:__bond_arg_0__])
+      [result] = Clauses.rewrite_clause_params(params, [:bond_arg_0])
       source = Macro.to_string(result)
-      assert source =~ "__bond_arg_0__"
+      assert source =~ "bond_arg_0"
       assert source =~ "0"
     end
 
