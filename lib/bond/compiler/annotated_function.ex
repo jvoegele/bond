@@ -252,8 +252,24 @@ defmodule Bond.Compiler.AnnotatedFunction do
     first_clause = List.first(annotated_function.clauses)
     function_info = {fun, arity}
 
+    # Only require clause-name agreement at positions whose names appear in
+    # some assertion's expression AST. Trivial contracts (`@post is_boolean(result)`)
+    # don't constrain parameter naming; shape-dependent contracts referencing
+    # `x` only constrain the position bound to `x`.
+    referenced_names =
+      Clauses.referenced_param_names(
+        annotated_function.preconditions ++
+          annotated_function.postconditions ++ annotated_function.invariants,
+        annotated_function.clauses
+      )
+
     {:ok, canonical_names} =
-      Clauses.assert_clauses_agree!(annotated_function.clauses, first_clause.env, function_info)
+      Clauses.assert_clauses_agree!(
+        annotated_function.clauses,
+        first_clause.env,
+        function_info,
+        referenced_names
+      )
 
     {postconditions, old_context} =
       if post_mode != :purge do

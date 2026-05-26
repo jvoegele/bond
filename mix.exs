@@ -1,7 +1,7 @@
 defmodule Bond.MixProject do
   use Mix.Project
 
-  @version "0.17.1"
+  @version "0.17.2"
   @source_url "https://github.com/jvoegele/bond"
 
   def project do
