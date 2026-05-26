@@ -91,6 +91,20 @@ is also fine:
 @post is_float(result)
 ```
 
+The assertion expression can be any call or operator returning a
+truthy/falsy value — including remote function calls from the standard
+library or your own modules:
+
+```elixir
+@pre String.starts_with?(path, "/api/")
+@pre Map.has_key?(opts, :user_id)
+@post Enum.all?(result, &is_integer/1)
+```
+
+Bare literals (`@pre 42`), bare variables (`@pre x`), and other non-call
+expressions aren't valid assertion forms — Bond raises a `CompileError`
+with the source location and a suggested form when it sees one.
+
 The same two forms work for `@invariant` declarations and inside function
 bodies via the `check/1` macro:
 
@@ -113,7 +127,14 @@ assertion expressions, so you can use these operators directly:
 @post {:ok, _} <~ result
 ```
 
-See `Bond.Predicates` for the full list.
+> #### Operator precedence trap {: .warning}
+>
+> `~>` and `<~` share precedence and left-associate. Nesting them
+> (`A ~> pattern <~ B`) parses as `(A ~> pattern) <~ B` and fails to
+> compile. Parenthesize the inner operator:
+> `(x > 0) ~> ({:ok, _} <~ result)`. See `Bond.Predicates` for details.
+
+See `Bond.Predicates` for the full list of predicates and operators.
 
 ## `@invariant` for struct modules
 
