@@ -1,0 +1,85 @@
+%% Mikado graph for 0.17.0 — multi-clause wrapper redesign (Option B-ii).
+%%
+%% Arrows point from a goal to its prerequisites. Leaves (green) have no
+%% further prerequisites and are safe to start with. Depth-first per Mikado:
+%% pick a leaf, finish it, commit, repeat.
+%%
+%% Problem (#2 + #3 from Photon dogfood):
+%%   Bond currently emits a single override clause whose head is the first
+%%   body clause's params verbatim. For multi-clause functions with heterogeneous
+%%   shapes, callers using a non-first-clause shape hit FunctionClauseError from
+%%   inside Bond's generated code. The first clause's destructure pattern is
+%%   also duplicated in the wrapper head, leading to "unused variable" warnings
+%%   (10+ in some Photon functions).
+%%
+%% Design (Option B-ii — uniform contracts, consistent names required):
+%%   1. Each user clause gets its OWN wrapper clause with the user's pattern
+%%      preserved (so Elixir's natural multi-clause dispatch survives).
+%%   2. Bond emits ONE set of lifted pre/post/invariant defps per function.
+%%      Their heads use the canonical top-level names — the user-bound name at
+%%      each positional argument's outer level, agreed across all clauses.
+%%   3. A compile-time validator enforces that all clauses agree on top-level
+%%      names. Disagreement → CompileError pointing at the canonical fix
+%%      (rename to use consistent names) and a forward link to the
+%%      "per-clause contracts may come in a future Bond release" door.
+%%   4. Each wrapper's pattern is rewritten to underscore-prefix any bound name
+%%      that the wrapper body and the contracts don't reference — silences the
+%%      destructure-in-head unused-variable warnings (#3).
+%%
+%% Single-clause / multi-clause asymmetry:
+%%   - Single-clause functions: lifted defp keeps the user's pattern verbatim.
+%%     Contracts can reference destructured names from the head (the
+%%     concurrency-guide's `current_count` keeps working).
+%%   - Multi-clause functions: lifted defp uses canonical top-level names only.
+%%     Contracts can only reference those. Shape-dependent assertions use the
+%%     `~>` implication operator (documented in 0.16.2 S5).
+%%
+%% Audit notes (informed scope, not exhaustive):
+%%   - BondTest.InvariantSmoke.try_new/1 has a wildcard second clause —
+%%     `def try_new(_), do: {:error, :invalid_capacity}` — which won't agree
+%%     with clause 1's `capacity` top-level name. S4 renames the wildcard to
+%%     `_capacity`.
+%%   - Other multi-clause fixtures TBD; the audit step grep-verifies.
+%%
+%% New module: `Bond.Compiler.Clauses`
+%%   Holds top-level-name extraction, clause-agreement validator, and the
+%%   underscore-prefix AST rewrite. Keeps `AnnotatedFunction` small per the
+%%   compile-order gotcha memory.
+%%
+%% New module: `Bond.Compiler.ClauseWrapper`
+%%   Per-clause wrapper builder. S5a extracts the existing single-wrapper
+%%   logic from `AnnotatedFunction` into this module unchanged; S5b switches
+%%   `AnnotatedFunction` to iterate clauses and call `ClauseWrapper.build`
+%%   for each. Separation keeps the FSM's hot path (`AnnotatedFunction.new/1`)
+%%   on a smaller module.
+%%
+%% Deferred to a future release (probably 0.18+ if real evidence demands):
+%%   - Per-clause contracts (Option B-iii). Discussed at length; ship B-ii
+%%     first, see if the consistent-naming refactor actually bites in practice.
+
+flowchart TD
+    G(["**Goal**<br/>0.17.0 — multi-clause wrappers + consistent-naming rule"])
+
+    G --> S1[1. Bond.Compiler.Clauses: top-level-name extraction]
+    G --> S2[2. Bond.Compiler.Clauses: underscore-prefix-unused AST rewrite]
+    G --> S3[3. Bond.Compiler.Clauses: validator — clauses must agree on top-level names]
+    G --> S4[4. Audit + migrate internal multi-clause fixtures]
+    G --> S5a[5a. Extract Bond.Compiler.ClauseWrapper from AnnotatedFunction]
+    G --> S5b[5b. Per-clause emission + validator wired + canonical names]
+    G --> S6[6. Behavioural test suite: multi-clause shapes]
+    G --> S7[7. Docs: FAQ rewrite + moduledoc note]
+    G --> S8[8. CHANGELOG + 0.17.0 version bump]
+
+    S3 --> S1
+    S5a --> S1
+    S5a --> S2
+    S5b --> S3
+    S5b --> S4
+    S5b --> S5a
+    S6 --> S5b
+    S7 --> S5b
+    S8 --> S6
+    S8 --> S7
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S1,S2,S4 leaf;

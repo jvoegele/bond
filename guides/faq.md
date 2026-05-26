@@ -260,12 +260,69 @@ moduledoc.
 
 ## How are multi-clause functions handled?
 
-A single contract applies to **all clauses** of a multi-clause function.
-Put your `@pre` and `@post` annotations before the first clause; Bond
-emits one override that wraps the whole function and lets Elixir's normal
-pattern matching dispatch to the appropriate clause via `super(...)`.
+A single contract applies **uniformly to every clause** of a multi-clause
+function. Put your `@pre` and `@post` annotations before the first clause;
+Bond emits one wrapper clause per user clause (each preserving the user's
+pattern so Elixir's natural pattern-matching dispatch survives) and one
+set of lifted assertion defps that all wrappers delegate to.
 
-Bond raises a compile error if you put `@pre` or `@post` between clauses:
+```elixir
+@pre is_list(input)
+@post is_atom(result)
+def parse([:a | _]), do: :starts_with_a
+def parse(input) when is_list(input), do: :other
+```
+
+Contracts must apply uniformly across clauses, so **all clauses must agree
+on the top-level parameter name at each position** when Bond is wrapping
+the function. The wrapper uses that name when it calls `super` and when
+it passes arguments to the lifted contract defps — the names referenced
+in your assertion expressions are the canonical names.
+
+Heterogeneous naming raises a `CompileError`:
+
+```elixir
+defmodule MyMod do
+  use Bond
+
+  @pre conn != nil
+  def lookup(conn, %Game{} = g, %GameFilm{} = f), do: ...
+  def lookup(conn, league, conference) when is_binary(league), do: ...
+  #             ^^^^^^                 ^^^^^^^^^^
+  # CompileError: positions 1 and 2 disagree on top-level names
+  # (`g` vs `league`, `f` vs `conference`)
+end
+```
+
+The fix is to rename for consistent positional meaning across clauses —
+usually a readability improvement too, since the original names described
+one shape but the function accepts multiple:
+
+```elixir
+@pre conn != nil
+def lookup(conn, %Game{} = resource, %GameFilm{} = scope), do: ...
+def lookup(conn, resource, scope) when is_binary(resource), do: ...
+```
+
+For **shape-dependent** assertions, use the `~>` implication operator
+from `Bond.Predicates`. It short-circuits the consequent when the
+antecedent is falsy, so the consequent only runs for the shape it
+applies to:
+
+```elixir
+@pre is_struct(resource, Game) ~> (resource.published)
+@pre is_binary(resource) ~> (String.length(resource) > 0)
+def lookup(conn, %Game{} = resource, scope), do: ...
+def lookup(conn, resource, scope) when is_binary(resource), do: ...
+```
+
+Wildcard clauses (`def f(_)`) and literal-pattern clauses (`def f(0)`)
+don't bind a top-level name at that position. They adopt whatever name a
+sibling clause provides — Bond rewrites the wildcard or wraps the literal
+to bind the canonical name in the wrapper's pattern.
+
+Bond raises a compile error if you put `@pre` or `@post` between clauses
+— contracts attach to a function, not a clause:
 
 ```elixir
 # COMPILE ERROR — contracts must precede the first clause
@@ -275,3 +332,7 @@ def foo(x) when is_integer(x), do: x * 2
 @pre is_float(x)       # not allowed here
 def foo(x) when is_float(x), do: round(x)
 ```
+
+Per-clause contracts may be added in a future release if the consistent-
+naming restriction turns out to be too tight in practice. If you hit
+a case where it bites, please open an issue.

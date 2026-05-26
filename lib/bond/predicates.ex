@@ -96,11 +96,24 @@ defmodule Bond.Predicates do
   def implies?(p, q), do: !!(!p || q)
 
   @doc """
-  Logical implication operator: `p ~> q` means `implies?(p, q)`.
+  Logical implication operator: `p ~> q` is equivalent to `not p or q`, with
+  **short-circuit evaluation** — `q` is only evaluated when `p` is truthy.
 
-  Note that the `~>` operator has higher precedence than many other operators and it may be
-  necessary to parenthesize the expressions on either side of the operator to get the
-  expected result.
+  This makes `~>` safe for shape-dependent assertions where the consequent
+  would otherwise raise on certain inputs to the antecedent. For example:
+
+      @pre is_binary(x) ~> String.length(x) > 0
+
+  reads "if `x` is a binary, then its length is positive." With the
+  short-circuit, `String.length(x)` is never called when `x` isn't a binary
+  (which would raise `FunctionClauseError`). This pattern is the canonical
+  way to express clause-specific assertions on multi-clause functions where
+  contracts must apply uniformly to every clause.
+
+  Note that the `~>` operator has higher precedence than many other operators
+  and it may be necessary to parenthesize the expressions on either side of
+  the operator to get the expected result. See the
+  ["Operator precedence"](#module-operator-precedence) section above.
 
   ## Examples
 
@@ -118,8 +131,14 @@ defmodule Bond.Predicates do
       4
       iex> (x - y < 0) ~> (y > x)
       true
+      iex> false ~> raise("not evaluated — antecedent is false")
+      true
   """
-  def p ~> q, do: implies?(p, q)
+  defmacro p ~> q do
+    quote do
+      if unquote(p), do: !!unquote(q), else: true
+    end
+  end
 
   @doc """
   Pattern matching operator: equivalent to `match?(pattern, expression)`.

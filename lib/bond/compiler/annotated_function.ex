@@ -16,6 +16,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
   """
 
   alias Bond.Compiler.Assertion
+  alias Bond.Compiler.ClauseWrapper
+  alias Bond.Compiler.Clauses
   alias Bond.Compiler.ContractDocs
   alias Bond.Compiler.FunctionDefinition
   alias Bond.Compiler.Invariants
@@ -250,13 +252,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
     first_clause = List.first(annotated_function.clauses)
     function_info = {fun, arity}
 
-    # `strip_default_args` removes `\\` defaults so the override is a plain arity-N def;
-    # `params_split/3` then partitions into head_params (for def/defp heads) and
-    # super_args (for super/eval call sites). See Invariants.rewrite_call_params/2.
-    clean_params = strip_default_args(first_clause.params)
-
-    {struct_params, head_params, super_args} =
-      Invariants.params_split(clean_params, first_clause, inv_mode)
+    {:ok, canonical_names} =
+      Clauses.assert_clauses_agree!(annotated_function.clauses, first_clause.env, function_info)
 
     {postconditions, old_context} =
       if post_mode != :purge do
@@ -274,37 +271,52 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
     doc_asts = ContractDocs.doc_clauses(annotated_function, first_clause.env, pre_mode, post_mode)
 
-    pre_invariant_stmts =
-      Invariants.all_pre_invariant_stmts(
-        inv_fn_name,
-        struct_params,
-        inv_mode,
-        pre_mode,
-        post_mode
-      )
+    wrapper_context = %{
+      fun: fun,
+      arity: arity,
+      kind: kind,
+      struct_module: struct_module,
+      pre_mode: pre_mode,
+      post_mode: post_mode,
+      inv_mode: inv_mode,
+      pre_fn_name: pre_fn_name,
+      post_fn_name: post_fn_name,
+      inv_fn_name: inv_fn_name,
+      old_pairs: old_pairs,
+      old_assignments: old_assignments
+    }
 
-    post_invariant_stmts =
-      Invariants.post_invariant_stmts(inv_fn_name, inv_mode, struct_module, pre_mode, post_mode)
+    # Lifted-defp parameter strategy depends on whether the function has one
+    # clause or many.
+    #
+    #   * Single-clause: lifted defp's head reproduces the user's pattern, so
+    #     contracts can reference destructured names from the head (e.g.
+    #     `current_count` from `%__MODULE__{count: current_count} = state`).
+    #     The wrapper passes the canonical-named value; the defp re-binds via
+    #     its pattern.
+    #
+    #   * Multi-clause: lifted defp's head is just the canonical names as bare
+    #     vars. Contracts can only reference top-level names — they must apply
+    #     uniformly to every clause, so destructured-name access from any
+    #     individual clause is unavailable. Shape-dependent assertions use the
+    #     `~>` implication operator.
+    lifted_defp_params =
+      case annotated_function.clauses do
+        [_single] -> ClauseWrapper.strip_default_args(first_clause.params)
+        _multi -> Enum.map(canonical_names, &Macro.var(&1, nil))
+      end
 
-    body_stmts =
-      build_override_body(
-        super_args,
-        pre_fn_name,
-        post_fn_name,
-        old_assignments,
-        old_pairs,
-        pre_mode,
-        post_mode,
-        pre_invariant_stmts,
-        post_invariant_stmts
-      )
+    wrapper_clauses =
+      Enum.map(annotated_function.clauses, fn clause ->
+        ClauseWrapper.build_wrapper(clause, canonical_names, wrapper_context)
+      end)
 
     assertion_defs =
       Enum.reject(
         [
           maybe_build_assertion_defp(
             pre_fn_name,
-            head_params,
+            lifted_defp_params,
             [],
             annotated_function.preconditions,
             function_info,
@@ -313,7 +325,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
           ),
           maybe_build_assertion_defp(
             post_fn_name,
-            head_params,
+            lifted_defp_params,
             postcondition_extra_params(old_pairs),
             postconditions,
             function_info,
@@ -336,9 +348,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
       unquote_splicing(doc_asts)
 
-      unquote(kind)(unquote(fun)(unquote_splicing(head_params))) do
-        (unquote_splicing(body_stmts))
-      end
+      unquote_splicing(wrapper_clauses)
 
       unquote_splicing(assertion_defs)
     end
@@ -357,64 +367,6 @@ defmodule Bond.Compiler.AnnotatedFunction do
     result_param = quote(do: var!(result))
     old_params = for {var, _expression} <- old_pairs, do: quote(do: var!(unquote(var)))
     [result_param | old_params]
-  end
-
-  defp build_override_body(
-         call_params,
-         pre_fn_name,
-         post_fn_name,
-         old_assignments,
-         old_pairs,
-         pre_mode,
-         post_mode,
-         pre_invariant_stmts,
-         post_invariant_stmts
-       ) do
-    pre_stmts = pre_eval_stmts(call_params, pre_fn_name, pre_mode)
-    super_call = quote(do: var!(result) = super(unquote_splicing(call_params)))
-    post_stmts = post_eval_stmts(call_params, post_fn_name, old_pairs, post_mode, pre_mode)
-    return_stmt = quote(do: var!(result))
-
-    pre_invariant_stmts ++
-      pre_stmts ++
-      old_assignments ++
-      [super_call] ++ post_stmts ++ post_invariant_stmts ++ [return_stmt]
-  end
-
-  defp pre_eval_stmts(_call_params, _name, :purge), do: []
-
-  defp pre_eval_stmts(call_params, name, mode) do
-    [
-      quote do
-        if Bond.Runtime.Eval.should_evaluate?(:preconditions, unquote(mode)) do
-          Bond.Runtime.Eval.evaluate_preconditions(fn ->
-            unquote(name)(unquote_splicing(call_params))
-          end)
-        end
-      end
-    ]
-  end
-
-  defp post_eval_stmts(_call_params, _name, _old_pairs, :purge, _pre_mode), do: []
-
-  defp post_eval_stmts(call_params, name, old_pairs, mode, pre_mode) do
-    old_args = for {var, _expression} <- old_pairs, do: quote(do: var!(unquote(var)))
-    args = call_params ++ [quote(do: var!(result)) | old_args]
-    chain = %{preconditions: pre_mode}
-
-    [
-      quote do
-        if Bond.Runtime.Eval.should_evaluate?(
-             :postconditions,
-             unquote(mode),
-             unquote(Macro.escape(chain))
-           ) do
-          Bond.Runtime.Eval.evaluate_postconditions(fn ->
-            unquote(name)(unquote_splicing(args))
-          end)
-        end
-      end
-    ]
   end
 
   defp maybe_build_assertion_defp(_name, _params, _extra, _assertions, _info, _env, :purge),
@@ -437,12 +389,5 @@ defmodule Bond.Compiler.AnnotatedFunction do
         unquote(body)
       end
     end
-  end
-
-  defp strip_default_args(params) do
-    Enum.map(params, fn
-      {:\\, _meta, [param, _default]} -> param
-      other -> other
-    end)
   end
 end
