@@ -103,6 +103,71 @@ defmodule Bond.Compiler.Clauses do
     :"__bond_arg_#{idx}__"
   end
 
+  @doc """
+  Underscore-prefixes every bound variable in `pattern` whose name isn't in the
+  `used` set. Names already starting with underscore (`_foo`) and bare wildcards
+  (`_`) are left alone. Pin expressions (`^x`) are treated as uses, not bindings,
+  and are not rewritten.
+
+  This is the #3 fix from the Photon dogfood: when Bond's wrapper duplicates the
+  user's destructure pattern in its head but the wrapper body only references the
+  top-level binding, Elixir emits "unused variable" warnings for every
+  destructured name. Underscore-prefixing those names suppresses the warning
+  while keeping the pattern's match shape identical.
+
+  The `used` set should contain every name that:
+
+    * The wrapper body references (typically the canonical top-level names that
+      get passed to `super/N` and the lifted assertion defps).
+    * Any contract expression references (so contract-author-facing bindings
+      aren't underscored out).
+  """
+  @spec underscore_prefix_unused(Macro.t(), MapSet.t(atom()) | Enumerable.t()) :: Macro.t()
+  def underscore_prefix_unused(pattern, used) do
+    used_set = if is_struct(used, MapSet), do: used, else: MapSet.new(used)
+    do_prefix(pattern, used_set)
+  end
+
+  # Pin: the inner variable is a USE, not a binding. Don't rewrite.
+  defp do_prefix({:^, meta, [inner]}, _used) do
+    {:^, meta, [inner]}
+  end
+
+  # Match: both sides are patterns. Recurse on both.
+  defp do_prefix({:=, meta, [lhs, rhs]}, used) do
+    {:=, meta, [do_prefix(lhs, used), do_prefix(rhs, used)]}
+  end
+
+  # Variable binding.
+  defp do_prefix({name, meta, ctx} = node, used) when is_atom(name) and is_atom(ctx) do
+    cond do
+      name == :_ -> node
+      MapSet.member?(used, name) -> node
+      String.starts_with?(Atom.to_string(name), "_") -> node
+      true -> {:"_#{name}", meta, ctx}
+    end
+  end
+
+  # Other 3-tuple AST node (function call, struct pattern, etc.). Recurse into
+  # head and args. Head is typically an atom (call name) but may be itself a
+  # 3-tuple for remote calls — recursing handles both.
+  defp do_prefix({head, meta, args}, used) when is_list(args) do
+    {do_prefix(head, used), meta, Enum.map(args, &do_prefix(&1, used))}
+  end
+
+  # 2-tuple (keyword pair, two-element tuple literal). Recurse on both elements.
+  defp do_prefix({a, b}, used) do
+    {do_prefix(a, used), do_prefix(b, used)}
+  end
+
+  # List (cons-list literals, args lists). Recurse on each element.
+  defp do_prefix(list, used) when is_list(list) do
+    Enum.map(list, &do_prefix(&1, used))
+  end
+
+  # Literal (atom, integer, binary, etc.). Pass through.
+  defp do_prefix(literal, _used), do: literal
+
   # --- Pattern recognition for one parameter ---
 
   # `{name, _meta, ctx}` where ctx is an atom — bare variable.

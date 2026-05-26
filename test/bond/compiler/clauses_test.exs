@@ -137,4 +137,109 @@ defmodule Bond.Compiler.ClausesTest do
       assert Clauses.generated_name(7) == :__bond_arg_7__
     end
   end
+
+  describe "underscore_prefix_unused/2" do
+    test "leaves a bare variable alone when it's in the used set" do
+      pattern = quote(do: x)
+      assert match?({:x, _, _}, Clauses.underscore_prefix_unused(pattern, [:x]))
+    end
+
+    test "underscore-prefixes a bare variable not in the used set" do
+      pattern = quote(do: x)
+      result = Clauses.underscore_prefix_unused(pattern, [])
+      assert match?({:_x, _, _}, result)
+    end
+
+    test "leaves a wildcard `_` alone" do
+      pattern = quote(do: _)
+      assert match?({:_, _, _}, Clauses.underscore_prefix_unused(pattern, []))
+    end
+
+    test "leaves an already-prefixed `_foo` alone (no double-prefix)" do
+      pattern = quote(do: _foo)
+      assert match?({:_foo, _, _}, Clauses.underscore_prefix_unused(pattern, []))
+    end
+
+    test "handles `pattern = name` matches: bound name on the right" do
+      pattern = quote(do: %{f: x} = state)
+      # `state` is used; `x` isn't.
+      result = Clauses.underscore_prefix_unused(pattern, [:state])
+      source = Macro.to_string(result)
+      assert source =~ "_x"
+      assert source =~ "state"
+      refute source =~ ~r/(?<![_a-z])x[^a-z_]/
+    end
+
+    test "handles `name = pattern` matches: bound name on the left" do
+      pattern = quote(do: state = %{f: x})
+      result = Clauses.underscore_prefix_unused(pattern, [:state])
+      source = Macro.to_string(result)
+      assert source =~ "_x"
+      assert source =~ "state"
+    end
+
+    test "underscore-prefixes destructured names inside a struct pattern" do
+      pattern = quote(do: %BondTest.Mod{id: id, name: name} = subject)
+      # Only `subject` is referenced.
+      result = Clauses.underscore_prefix_unused(pattern, [:subject])
+      source = Macro.to_string(result)
+      assert source =~ "_id"
+      assert source =~ "_name"
+      assert source =~ "subject"
+    end
+
+    test "preserves destructured names that are in the used set" do
+      pattern = quote(do: %BondTest.Mod{count: current_count} = subject)
+      result = Clauses.underscore_prefix_unused(pattern, [:subject, :current_count])
+      source = Macro.to_string(result)
+      assert source =~ "current_count"
+      refute source =~ "_current_count"
+    end
+
+    test "underscore-prefixes inside a list destructure" do
+      pattern = quote(do: [head | tail])
+      result = Clauses.underscore_prefix_unused(pattern, [:head])
+      source = Macro.to_string(result)
+      assert source =~ "head"
+      assert source =~ "_tail"
+    end
+
+    test "doesn't rewrite pinned variables (they're uses, not bindings)" do
+      pattern = quote(do: {:ok, ^expected})
+      result = Clauses.underscore_prefix_unused(pattern, [])
+      source = Macro.to_string(result)
+      # `expected` is pinned — it's a use of a value, not a binding. Must not
+      # rename it; doing so would change which variable is being referenced.
+      assert source =~ "^expected"
+      refute source =~ "_expected"
+    end
+
+    test "underscore-prefixes inside a tuple pattern" do
+      pattern = quote(do: {:ok, payload})
+      result = Clauses.underscore_prefix_unused(pattern, [])
+      source = Macro.to_string(result)
+      assert source =~ "_payload"
+    end
+
+    test "underscore-prefixes inside nested destructures" do
+      pattern = quote(do: %Outer{inner: %Inner{value: v} = inner_struct} = full)
+      result = Clauses.underscore_prefix_unused(pattern, [:full])
+      source = Macro.to_string(result)
+      assert source =~ "_v"
+      assert source =~ "_inner_struct"
+      assert source =~ "full"
+    end
+
+    test "accepts a MapSet for the used set" do
+      pattern = quote(do: x)
+      result = Clauses.underscore_prefix_unused(pattern, MapSet.new([:x]))
+      assert match?({:x, _, _}, result)
+    end
+
+    test "accepts a list for the used set" do
+      pattern = quote(do: x)
+      result = Clauses.underscore_prefix_unused(pattern, [:x])
+      assert match?({:x, _, _}, result)
+    end
+  end
 end
