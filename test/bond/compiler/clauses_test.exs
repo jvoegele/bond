@@ -138,6 +138,161 @@ defmodule Bond.Compiler.ClausesTest do
     end
   end
 
+  describe "referenced_param_names/2" do
+    test "returns empty set when no assertions are given" do
+      clauses = [%{params: quote(do: [x, y])}]
+      assert MapSet.size(Clauses.referenced_param_names([], clauses)) == 0
+    end
+
+    test "collects a single param name referenced in an assertion" do
+      assertions = [%{expression: quote(do: x > 0)}]
+      clauses = [%{params: quote(do: [x, y])}]
+
+      result = Clauses.referenced_param_names(assertions, clauses)
+      assert MapSet.equal?(result, MapSet.new([:x]))
+    end
+
+    test "drops `result` (not a top-level param name)" do
+      assertions = [%{expression: quote(do: is_boolean(result))}]
+      clauses = [%{params: quote(do: [x, y])}]
+
+      result = Clauses.referenced_param_names(assertions, clauses)
+      assert MapSet.size(result) == 0
+    end
+
+    test "drops `subject` (the invariant binding is synthetic, not a top-level name)" do
+      assertions = [%{expression: quote(do: subject.x >= 0)}]
+      clauses = [%{params: quote(do: [stack])}]
+
+      result = Clauses.referenced_param_names(assertions, clauses)
+      assert MapSet.size(result) == 0
+    end
+
+    test "collects names from inside `old(...)` expressions" do
+      assertions = [%{expression: quote(do: result == old(get(agent)) + 1)}]
+      clauses = [%{params: quote(do: [agent])}]
+
+      result = Clauses.referenced_param_names(assertions, clauses)
+      assert MapSet.equal?(result, MapSet.new([:agent]))
+    end
+
+    test "collects from a remote-call assertion" do
+      assertions = [%{expression: quote(do: String.starts_with?(name, "user-"))}]
+      clauses = [%{params: quote(do: [name])}]
+
+      result = Clauses.referenced_param_names(assertions, clauses)
+      assert MapSet.equal?(result, MapSet.new([:name]))
+    end
+
+    test "doesn't treat function-call heads as variables" do
+      # `is_boolean` is a function name, not a variable. Only `result` is a
+      # var reference. (And `result` isn't a top-level name, so the result
+      # is empty.)
+      assertions = [%{expression: quote(do: is_boolean(result))}]
+      clauses = [%{params: quote(do: [x])}]
+
+      result = Clauses.referenced_param_names(assertions, clauses)
+      assert MapSet.size(result) == 0
+    end
+
+    test "unions references across multiple assertions" do
+      assertions = [
+        %{expression: quote(do: x > 0)},
+        %{expression: quote(do: y >= 0)}
+      ]
+
+      clauses = [%{params: quote(do: [x, y, z])}]
+
+      result = Clauses.referenced_param_names(assertions, clauses)
+      assert MapSet.equal?(result, MapSet.new([:x, :y]))
+    end
+
+    test "intersects with the union of top-level names across ALL clauses" do
+      # `g` is a top-level name in clause 1 only. `league` in clause 2 only.
+      # Both are candidates because the union spans every clause.
+      assertions = [%{expression: quote(do: is_atom(g))}]
+
+      clauses = [
+        %{params: quote(do: [g])},
+        %{params: quote(do: [league])}
+      ]
+
+      result = Clauses.referenced_param_names(assertions, clauses)
+      assert MapSet.equal?(result, MapSet.new([:g]))
+    end
+
+    test "known false positive: closure variable matching a param name is collected" do
+      # The AST walker can't distinguish closure scope from outer scope —
+      # the `x` inside `fn x -> x > 0 end` is structurally identical to a
+      # bare-var reference. If `x` happens to be a param name too, it gets
+      # collected (over-strict). Documented behaviour; rename either side.
+      assertions = [%{expression: quote(do: Enum.all?(xs, fn x -> x > 0 end))}]
+      clauses = [%{params: quote(do: [xs, x])}]
+
+      result = Clauses.referenced_param_names(assertions, clauses)
+      assert :x in result
+      assert :xs in result
+    end
+  end
+
+  describe "assert_clauses_agree!/4 with relaxed mode" do
+    test "default :all behaves like the strict 3-arg form (disagreement raises)" do
+      clauses = [
+        %{params: quote(do: [conn, g])},
+        %{params: quote(do: [conn, league])}
+      ]
+
+      assert_raise CompileError, fn ->
+        Clauses.assert_clauses_agree!(clauses, __ENV__, {:f, 2})
+      end
+    end
+
+    test "empty required_names: disagreeing positions get generated names" do
+      clauses = [
+        %{params: quote(do: [conn, g])},
+        %{params: quote(do: [conn, league])}
+      ]
+
+      assert {:ok, [:conn, :bond_arg_1]} =
+               Clauses.assert_clauses_agree!(clauses, __ENV__, {:f, 2}, MapSet.new())
+    end
+
+    test "required_names with a disagreeing name: still raises" do
+      clauses = [
+        %{params: quote(do: [conn, g])},
+        %{params: quote(do: [conn, league])}
+      ]
+
+      assert_raise CompileError, ~r/Position 1 disagrees/, fn ->
+        Clauses.assert_clauses_agree!(clauses, __ENV__, {:f, 2}, MapSet.new([:g]))
+      end
+    end
+
+    test "required_names containing only an agreeing name: passes" do
+      clauses = [
+        %{params: quote(do: [conn, g])},
+        %{params: quote(do: [conn, league])}
+      ]
+
+      # Only `conn` is referenced; `conn` agrees; position 1 disagreement
+      # doesn't matter because neither g nor league is in required_names.
+      assert {:ok, [:conn, :bond_arg_1]} =
+               Clauses.assert_clauses_agree!(clauses, __ENV__, {:f, 2}, MapSet.new([:conn]))
+    end
+
+    test "required_names with one of the disagreeing names: raises at that position" do
+      clauses = [
+        %{params: quote(do: [a, b, c])},
+        %{params: quote(do: [a, b, d])}
+      ]
+
+      # Only position 2 disagrees; `d` is required.
+      assert_raise CompileError, ~r/Position 2 disagrees/, fn ->
+        Clauses.assert_clauses_agree!(clauses, __ENV__, {:f, 3}, MapSet.new([:d]))
+      end
+    end
+  end
+
   describe "assert_clauses_agree!/3" do
     test "returns canonical names when all clauses agree" do
       clauses = [

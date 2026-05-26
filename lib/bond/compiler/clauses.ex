@@ -66,10 +66,17 @@ defmodule Bond.Compiler.Clauses do
       `names` is the deduplicated list of the conflicting names in clause-
       encounter order, for the diagnostic.
   """
-  @spec canonical_names(nonempty_list(clause_names())) ::
+  @spec canonical_names(
+          nonempty_list(clause_names()),
+          MapSet.t(atom()) | :all
+        ) ::
           {:ok, [atom()]}
           | {:error, {:disagreement, non_neg_integer(), [atom()]}}
-  def canonical_names([first | _] = clauses_names) when is_list(first) do
+  def canonical_names(clauses_names, required_names \\ :all)
+
+  def canonical_names([], _required_names), do: {:ok, []}
+
+  def canonical_names([first | _] = clauses_names, required_names) when is_list(first) do
     arity = length(first)
 
     Enum.reduce_while(0..(arity - 1)//1, {:ok, []}, fn idx, {:ok, acc} ->
@@ -80,9 +87,22 @@ defmodule Bond.Compiler.Clauses do
         |> Enum.uniq()
 
       case proposed_names do
-        [] -> {:cont, {:ok, [generated_name(idx) | acc]}}
-        [name] -> {:cont, {:ok, [name | acc]}}
-        more -> {:halt, {:error, {:disagreement, idx, more}}}
+        [] ->
+          {:cont, {:ok, [generated_name(idx) | acc]}}
+
+        [name] ->
+          {:cont, {:ok, [name | acc]}}
+
+        more ->
+          # Multiple distinct names at this position. The disagreement is a
+          # CompileError only if some assertion references a name at this
+          # position (or `required_names` is `:all`). Otherwise generate a
+          # name and move on.
+          if position_required?(more, required_names) do
+            {:halt, {:error, {:disagreement, idx, more}}}
+          else
+            {:cont, {:ok, [generated_name(idx) | acc]}}
+          end
       end
     end)
     |> case do
@@ -91,7 +111,11 @@ defmodule Bond.Compiler.Clauses do
     end
   end
 
-  def canonical_names([]), do: {:ok, []}
+  defp position_required?(_proposed_names, :all), do: true
+
+  defp position_required?(proposed_names, %MapSet{} = required_names) do
+    Enum.any?(proposed_names, &MapSet.member?(required_names, &1))
+  end
 
   @doc """
   Returns the generated canonical name for a 0-based positional argument that
@@ -125,13 +149,19 @@ defmodule Bond.Compiler.Clauses do
   @spec assert_clauses_agree!(
           [%{:params => [Macro.t()], optional(any()) => any()}],
           Macro.Env.t(),
-          {atom(), non_neg_integer()}
+          {atom(), non_neg_integer()},
+          MapSet.t(atom()) | :all
         ) :: {:ok, [atom()]}
-  def assert_clauses_agree!(clauses, %Macro.Env{} = env, {fun, arity} = _function_info)
+  def assert_clauses_agree!(
+        clauses,
+        %Macro.Env{} = env,
+        {fun, arity} = _function_info,
+        required_names \\ :all
+      )
       when is_list(clauses) do
     clauses_names = Enum.map(clauses, &top_level_names(&1.params || []))
 
-    case canonical_names(clauses_names) do
+    case canonical_names(clauses_names, required_names) do
       {:ok, names} ->
         {:ok, names}
 
@@ -141,6 +171,66 @@ defmodule Bond.Compiler.Clauses do
           line: env.line,
           description: disagreement_message(fun, arity, idx, conflicting, clauses_names)
     end
+  end
+
+  @doc """
+  Returns the subset of parameter names that any of the given `assertions`
+  reference. The result is intersected with the union of top-level names
+  across `clauses`, so synthetic bindings like `result`, `old(...)` helpers,
+  and the invariant `subject` (none of which appear as a top-level name on
+  any clause) are filtered out automatically.
+
+  This is the input to `assert_clauses_agree!/4`'s relaxed mode: clauses
+  only need to agree on a positional name when some assertion actually
+  references that name.
+
+  ## False positives
+
+  A closure variable inside a contract expression (`Enum.all?(xs, fn x -> ...
+  end)`) that happens to share a name with a parameter IS collected — the
+  AST walk can't distinguish closure scope from outer scope. The result is
+  over-strict in this edge case (agreement is required at the parameter's
+  position even though the contract doesn't actually depend on it). The
+  workaround is to rename either the closure var or the parameter. Agreement
+  is over-required, never under-required.
+  """
+  @spec referenced_param_names(
+          [%{:expression => Macro.t(), optional(any()) => any()}],
+          [%{:params => [Macro.t()], optional(any()) => any()}]
+        ) :: MapSet.t(atom())
+  def referenced_param_names(assertions, clauses)
+      when is_list(assertions) and is_list(clauses) do
+    candidates =
+      clauses
+      |> Enum.flat_map(&top_level_names(&1.params || []))
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
+
+    referenced =
+      Enum.reduce(assertions, MapSet.new(), fn %{expression: expr}, acc ->
+        MapSet.union(acc, collect_var_names(expr))
+      end)
+
+    MapSet.intersection(referenced, candidates)
+  end
+
+  # Walks an AST collecting every bare-variable reference. A bare variable in
+  # Elixir AST is `{name, _meta, ctx}` where both `name` and `ctx` are atoms
+  # (call AST has a list args at elem 2 instead of an atom context, so it's
+  # not picked up here). Remote-call heads (`{:., _, [_, _]}`) aren't atoms
+  # either and are skipped.
+  defp collect_var_names(ast) do
+    {_, names} =
+      Macro.prewalk(ast, [], fn
+        {name, _meta, ctx} = node, acc
+        when is_atom(name) and is_atom(ctx) and name != :_ ->
+          {node, [name | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    MapSet.new(names)
   end
 
   defp disagreement_message(fun, arity, idx, conflicting, clauses_names) do
@@ -228,10 +318,16 @@ defmodule Bond.Compiler.Clauses do
         end
 
       [_other_name] ->
-        # User bound a different name at top level than canonical. This
-        # shouldn't happen if `assert_clauses_agree!/3` ran first. Leave alone
-        # defensively — the disagreement would have raised before reaching here.
-        param
+        # User bound a different name at top level than canonical. Pre-0.17.2
+        # this couldn't happen — `assert_clauses_agree!/3` strictly required
+        # every position's name to match across clauses. Under the 0.17.2
+        # relaxation, this DOES happen at unreferenced positions (the
+        # canonical there is a generated `bond_arg_<idx>` regardless of what
+        # the user named the param).
+        #
+        # Wrap as `canonical = <original>` so the wrapper binds the canonical
+        # name; the user's name still binds too, via the original pattern.
+        {:=, [], [Macro.var(canonical, nil), param]}
     end
   end
 

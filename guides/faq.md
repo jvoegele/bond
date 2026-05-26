@@ -321,6 +321,35 @@ don't bind a top-level name at that position. They adopt whatever name a
 sibling clause provides — Bond rewrites the wildcard or wraps the literal
 to bind the canonical name in the wrapper's pattern.
 
+### Naming consistency is only required where contracts depend on it
+
+The naming-agreement rule applies *positionally*: only positions whose
+top-level names are *referenced* by some assertion need to agree across
+clauses. A contract that doesn't reference any parameter — for example
+`@post is_boolean(result)` — doesn't constrain naming at all, even on
+multi-clause functions whose clauses bind different names at every
+position:
+
+```elixir
+@post is_boolean(result)
+def can_access?(conn, %Game{} = game, %GameFilm{} = film), do: ...
+def can_access?(conn, league, conference) when is_binary(league), do: ...
+#                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# Positions 1 and 2 disagree on top-level names, but no contract references
+# them — Bond doesn't enforce agreement at those positions. The `@post`
+# compiles cleanly.
+```
+
+If you later add a contract that *does* reference one of the disagreeing
+positions, the agreement rule re-engages at that position and the
+`CompileError` fires. Trivial contracts (result-only, or referencing only
+positions that already agree) are free to attach without first renaming
+parameters across clauses.
+
+`Bond.Predicates` helpers like `is_boolean/1` and other Kernel predicates
+that take only `result` work as universal contracts on any multi-clause
+function regardless of how its parameters are named per clause.
+
 Bond raises a compile error if you put `@pre` or `@post` between clauses
 — contracts attach to a function, not a clause:
 

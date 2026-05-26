@@ -112,7 +112,7 @@ defmodule Bond.MultiClauseDispatchTest do
       defmodule Bond.MultiClauseDispatchTest.HeterogeneousNames do
         use Bond
 
-        @pre conn != nil
+        @pre is_atom(g)
         def lookup(conn, g, f) when is_atom(g), do: {conn, g, f}
         def lookup(conn, league, conference) when is_binary(league), do: {conn, league, conference}
       end
@@ -128,7 +128,7 @@ defmodule Bond.MultiClauseDispatchTest do
       defmodule Bond.MultiClauseDispatchTest.HetNamesDetail do
         use Bond
 
-        @pre conn != nil
+        @pre is_atom(g)
         def lookup(conn, g, f) when is_atom(g), do: {conn, g, f}
         def lookup(conn, league, conference) when is_binary(league), do: {conn, league, conference}
       end
@@ -151,7 +151,7 @@ defmodule Bond.MultiClauseDispatchTest do
       defmodule Bond.MultiClauseDispatchTest.HetNamesHint do
         use Bond
 
-        @pre x != nil
+        @pre x > 0
         def f(x), do: x
         def f(y), do: y
       end
@@ -163,6 +163,47 @@ defmodule Bond.MultiClauseDispatchTest do
         end
 
       assert Exception.message(error) =~ "~>"
+    end
+
+    test "0.17.2 relaxation: contract referencing only `result` doesn't constrain naming" do
+      # The Photon-shape case: clauses use different natural names per shape
+      # but the only contract references `result`. Under 0.17.2 the validator
+      # generates internal names at the unreferenced positions and the module
+      # compiles cleanly.
+      code = """
+      defmodule Bond.MultiClauseDispatchTest.RelaxedResultOnly do
+        use Bond
+
+        @post is_boolean(result)
+        def f(conn, %{}, _), do: is_map(conn)
+        def f(conn, league, conference) when is_binary(league), do: is_binary(conference)
+      end
+      """
+
+      assert {{:module, _, _, _}, _} = Code.eval_string(code)
+    end
+
+    test "0.17.2 relaxation: still raises when a contract DOES reference a disagreeing name" do
+      # Adding a contract that references `league` (a position-1 name in
+      # clause 2) re-engages the agreement check at position 1, where clause
+      # 1's `%{}` literal has no top-level name. clause 2's `league` wins
+      # as the canonical at position 1, so the agreement check passes... BUT
+      # what we want to demonstrate is that referencing a disagreeing name
+      # IS what re-engages the check. Use two clauses that BOTH name
+      # position 1, conflicting.
+      code = """
+      defmodule Bond.MultiClauseDispatchTest.RelaxedStrictAgain do
+        use Bond
+
+        @pre String.length(league) > 0
+        def f(conn, g) when is_atom(g), do: {conn, g}
+        def f(conn, league) when is_binary(league), do: {conn, league}
+      end
+      """
+
+      assert_raise CompileError, ~r/Bond requires consistent top-level parameter names/, fn ->
+        Code.eval_string(code)
+      end
     end
   end
 
