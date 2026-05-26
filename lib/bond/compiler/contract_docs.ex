@@ -32,6 +32,12 @@ defmodule Bond.Compiler.ContractDocs do
           AnnotatedFunction.mode(),
           AnnotatedFunction.mode()
         ) :: [Macro.t()]
+  # Private functions can't carry @doc — Elixir warns "module attribute @doc was
+  # set but never used" / "@doc is always discarded for private functions". Skip
+  # emission entirely for `defp` so contracts on private helpers don't generate
+  # warnings at the user's call site.
+  def doc_clauses(%AnnotatedFunction{kind: :defp}, _env, _pre_mode, _post_mode), do: []
+
   def doc_clauses(
         %AnnotatedFunction{doc_attributes: doc_attributes} = annotated_function,
         env,
