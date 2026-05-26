@@ -11,6 +11,38 @@ defmodule Bond.Compiler.AssertionTest do
       assert is_binary(id)
       assert id =~ ~r/^[[:alnum:]]+$/
     end
+
+    test "accepts a local call as the outermost expression" do
+      assertion = Assertion.new(:precondition, nil, quote(do: is_number(x)))
+      assert assertion.code == "is_number(x)"
+    end
+
+    test "accepts an operator as the outermost expression" do
+      assertion = Assertion.new(:postcondition, nil, quote(do: result >= 0))
+      assert assertion.code == "result >= 0"
+    end
+
+    test "accepts a remote call as the outermost expression" do
+      # AST head is `{:., _, [String, :starts_with?]}` — a 3-tuple, not an
+      # atom. The relaxed guard accepts this shape.
+      assertion = Assertion.new(:precondition, nil, quote(do: String.starts_with?(x, "foo")))
+      assert assertion.code == ~s|String.starts_with?(x, "foo")|
+    end
+
+    test "accepts a remote call via Enum/Map/List" do
+      a1 = Assertion.new(:precondition, nil, quote(do: Enum.all?(xs, &is_integer/1)))
+      a2 = Assertion.new(:precondition, nil, quote(do: Map.has_key?(m, :k)))
+      a3 = Assertion.new(:precondition, nil, quote(do: List.first(xs)))
+
+      assert a1.code == "Enum.all?(xs, &is_integer/1)"
+      assert a2.code == "Map.has_key?(m, :k)"
+      assert a3.code == "List.first(xs)"
+    end
+
+    test "accepts an Erlang remote call" do
+      assertion = Assertion.new(:precondition, nil, quote(do: :erlang.is_atom(x)))
+      assert assertion.code == ":erlang.is_atom(x)"
+    end
   end
 
   describe "assertions_body/2" do

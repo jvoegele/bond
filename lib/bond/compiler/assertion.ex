@@ -36,10 +36,21 @@ defmodule Bond.Compiler.Assertion do
 
   @type function_info :: {atom(), non_neg_integer()}
 
+  # An assertion expression must be a quoted Elixir AST node — a 3-tuple
+  # of `{head, metadata, args}` where `metadata` is a list and `args` is
+  # a list. The head is either an atom (local calls, operators, bare
+  # variables) or itself a 3-tuple with `:.` as ITS head (remote calls
+  # like `String.starts_with?(x, "foo")` and anonymous-fn invocations).
+  # Anything else is not a valid assertion AST and falls through to a
+  # user-facing diagnostic raised at the macro layer in `lib/bond.ex`.
   defguard is_assertion_expression(expression)
            when is_tuple(expression) and
                   tuple_size(expression) == 3 and
-                  is_atom(elem(expression, 0)) and is_list(elem(expression, 1)) and
+                  (is_atom(elem(expression, 0)) or
+                     (is_tuple(elem(expression, 0)) and
+                        tuple_size(elem(expression, 0)) == 3 and
+                        elem(elem(expression, 0), 0) == :.)) and
+                  is_list(elem(expression, 1)) and
                   is_list(elem(expression, 2))
 
   @doc """
