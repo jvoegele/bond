@@ -433,6 +433,28 @@ corresponding `Bond.PreconditionError` / `Bond.PostconditionError` /
 - `:file`, `:line` — source location of the assertion
 - `:binding` — sorted snapshot of `binding()` at the failure site
 
+For example, a violated `@pre non_negative_x: x >= 0` on
+`BondTest.Math.sqrt(-1)` produces a metadata map of this shape:
+
+```elixir
+%{
+  kind: :precondition,
+  module: BondTest.Math,
+  function: {:sqrt, 2},
+  label: :non_negative_x,
+  expression: "x >= 0",
+  assertion_id: "9d8c…",
+  file: "/path/to/math.ex",
+  line: 15,
+  binding: [trap_door: nil, x: -1]
+}
+```
+
+`:function` is a `{name, arity}` tuple — destructure or call
+`elem/2` if you only need one half. The `:assertion_id` is stable
+across firings of the same assertion, so it's safe as an
+aggregation key in a counter or alerting pipeline.
+
 Attach a handler at application start:
 
 ```elixir
