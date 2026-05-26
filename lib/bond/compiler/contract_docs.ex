@@ -121,4 +121,57 @@ defmodule Bond.Compiler.ContractDocs do
     |> List.insert_at(0, header)
     |> Enum.intersperse("\n    ")
   end
+
+  @doc """
+  Returns a markdown section documenting a module's `@invariant` declarations,
+  suitable for appending to the module's `@moduledoc`. Returns `nil` when the
+  module has no invariants or when invariants are `:purge`d (the docs follow
+  the same suppression rule as per-function contract docs).
+
+  The section includes:
+
+    * A preamble naming the struct module and explaining the implicit
+      `subject` binding (so readers landing on the moduledoc without prior
+      Bond context can read the invariants).
+    * A code block listing each invariant in the same `label: expression`
+      format used by per-function contract docs.
+    * A footer noting when invariants fire and the `defp` exemption.
+  """
+  @spec moduledoc_invariants_section(
+          [Bond.Compiler.Assertion.t(:invariant)],
+          module(),
+          AnnotatedFunction.mode()
+        ) :: String.t() | nil
+  def moduledoc_invariants_section([], _module, _mode), do: nil
+  def moduledoc_invariants_section(_invariants, _module, :purge), do: nil
+
+  def moduledoc_invariants_section(invariants, module, _mode) when is_list(invariants) do
+    struct_ref = "%#{inspect(module)}{}"
+
+    invariant_lines =
+      invariants
+      |> Enum.map(&format_invariant_line/1)
+      |> Enum.map(&("    " <> &1))
+      |> Enum.join("\n")
+
+    """
+    ## Invariants
+
+    Bond ensures the following invariants hold for every value of `#{struct_ref}` produced
+    by or passed into this module's public API. Inside each assertion, `subject` refers
+    to the value being checked.
+
+    #{invariant_lines}
+
+    These invariants are checked automatically on entry to and exit from every public
+    function in this module. Private functions are exempt by the Eiffel convention.\
+    """
+  end
+
+  defp format_invariant_line(%{label: nil, code: code}), do: code
+
+  defp format_invariant_line(%{label: label, code: code}) do
+    label_str = label |> inspect() |> String.trim_leading(":")
+    "#{label_str}: #{code}"
+  end
 end

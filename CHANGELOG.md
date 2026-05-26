@@ -5,6 +5,81 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.17.1] - 2026-05-31
+
+A purely additive release closing a doc-symmetry gap: per-function
+`@pre`/`@post` already get rendered into each function's `@doc` as
+`#### Preconditions` / `#### Postconditions` sections, but module-level
+`@invariant` declarations had no rendered home. Readers landing on a
+struct module's docs page couldn't see what invariants the module
+ensures unless the author had hand-written them up.
+
+### Added
+
+- **Auto-generated `## Invariants` moduledoc section** for any module
+  with `@invariant` declarations. The section names the struct, explains
+  the implicit `subject` binding (so readers without prior Bond context
+  can read the assertions), lists each invariant in the same
+  `label: expression` form used by per-function contract docs, and notes
+  when invariants fire plus the `defp` exemption.
+
+  ```
+  ## Invariants
+
+  Bond ensures the following invariants hold for every value of
+  `%BoundedStack{}` produced by or passed into this module's public API.
+  Inside each assertion, `subject` refers to the value being checked.
+
+      non_negative_capacity: subject.capacity >= 0
+      size_within_capacity: length(subject.items) <= subject.capacity
+
+  These invariants are checked automatically on entry to and exit from
+  every public function in this module. Private functions are exempt by
+  the Eiffel convention.
+  ```
+
+  Special cases:
+
+    * Users who already wrote a `@moduledoc` get the generated section
+      appended after their authored content.
+    * Users who wrote `@moduledoc false` have their decision respected
+      — no section is added and the module remains hidden.
+    * Users with `@invariant` but no `@moduledoc` get a moduledoc
+      synthesised containing just the Invariants section, so the
+      contracts surface in the generated docs.
+    * `:invariants` set to `:purge` (compile-time disable) suppresses
+      the auto-generated section, matching the per-function
+      contract-doc suppression rule.
+
+### Changed
+
+- **`Bond.Compiler.ContractDocs.moduledoc_invariants_section/3`** —
+  new internal function producing the markdown section. Reuses the same
+  `label: expression` formatting as the existing per-function doc
+  generation so labelled and bare invariants render consistently across
+  function-level and module-level contract docs.
+
+- Bond's `__before_compile__` hook now augments the user module's
+  `:moduledoc` attribute via `Module.put_attribute/3` at compile-end,
+  reading the current value and appending the generated section.
+
+- **README's `@invariant` section** gains a new "Generated
+  documentation" subsection describing the auto-generation behaviour
+  and the special cases above.
+
+### Internal
+
+- New test/support fixtures
+  (`BondTest.SynthesizedModuledocInvariant`, `…HiddenModuledocFixture`,
+  `…PurgedInvariantsFixture`) exercise the synthesised, hidden, and
+  purge code paths. 17 new tests across `Bond.Compiler.ContractDocsTest`
+  (unit) and `Bond.ModuledocInvariantsTest` (end-to-end via
+  `Code.fetch_docs/1`).
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.17.0] - 2026-05-30
 
 0.17.0 closes the longest-standing bug surfaced by real-world dogfooding:

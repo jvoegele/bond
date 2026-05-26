@@ -206,6 +206,20 @@ the same telemetry event (`[:bond, :assertion, :failure]` with
 `:kind => :invariant`). Test with
 `Bond.Test.assert_invariant_violation/2`.
 
+### Generated documentation
+
+Modules that declare `@invariant`s get an auto-generated `## Invariants`
+section appended to their `@moduledoc`. The section names the struct,
+explains the `subject` binding, lists each invariant in the same
+`label: expression` format as per-function contract docs, and notes
+when the invariants fire. Users who haven't written a `@moduledoc`
+themselves get one synthesised; users who wrote `@moduledoc false`
+have their decision respected.
+
+When `:invariants` is `:purge`d (compile-time disable), the
+auto-generated section is suppressed — matching the per-function
+contract-doc suppression rule.
+
 ### What's not supported
 
 Invariants are scoped to the **struct's own defining module**. External
@@ -567,7 +581,7 @@ enable PBT:
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.17.0"},
+    {:bond, "~> 0.17.1"},
     {:stream_data, "~> 0.6", only: [:dev, :test]}
   ]
 end
@@ -585,7 +599,7 @@ end
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.17.0"}
+    {:bond, "~> 0.17.1"}
   ]
 end
 ```

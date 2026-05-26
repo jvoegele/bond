@@ -22,6 +22,7 @@ defmodule Bond.Compiler do
   alias Bond.Compiler.AnnotatedFunction
   alias Bond.Compiler.Assertion
   alias Bond.Compiler.CompileStateFSM, as: FSM
+  alias Bond.Compiler.ContractDocs
   alias Bond.Compiler.FunctionDefinition
 
   # Functions Elixir auto-generates as a side effect of constructs like `defstruct` and
@@ -210,12 +211,53 @@ defmodule Bond.Compiler do
 
     invariants = FSM.invariants(fsm(env))
 
-    fsm(env)
-    |> FSM.annotated_functions()
-    |> Enum.map(&AnnotatedFunction.put_invariants(&1, invariants))
-    |> Enum.filter(&AnnotatedFunction.override?/1)
-    |> Enum.map(&AnnotatedFunction.apply_contract(&1, config))
-    |> Enum.reject(&is_nil/1)
+    moduledoc_invariants_ast =
+      build_moduledoc_invariants_ast(invariants, env.module, config[:invariants] || true)
+
+    contract_overrides =
+      fsm(env)
+      |> FSM.annotated_functions()
+      |> Enum.map(&AnnotatedFunction.put_invariants(&1, invariants))
+      |> Enum.filter(&AnnotatedFunction.override?/1)
+      |> Enum.map(&AnnotatedFunction.apply_contract(&1, config))
+      |> Enum.reject(&is_nil/1)
+
+    case moduledoc_invariants_ast do
+      nil -> contract_overrides
+      ast -> [ast | contract_overrides]
+    end
+  end
+
+  # Builds the AST that augments the user's `@moduledoc` with a generated
+  # `## Invariants` section. Runs at the user module's compile-end, so
+  # `Module.get_attribute(__MODULE__, :moduledoc)` has the user's authored
+  # value (if any). Returns `nil` when there's nothing to add — no invariants
+  # registered, or invariants are `:purge`d.
+  defp build_moduledoc_invariants_ast(invariants, module, inv_mode) do
+    case ContractDocs.moduledoc_invariants_section(invariants, module, inv_mode) do
+      nil ->
+        nil
+
+      section ->
+        quote do
+          case Module.get_attribute(__MODULE__, :moduledoc) do
+            {line, existing} when is_binary(existing) ->
+              Module.put_attribute(
+                __MODULE__,
+                :moduledoc,
+                {line, existing <> "\n\n" <> unquote(section)}
+              )
+
+            {_line, false} ->
+              # User explicitly hid the moduledoc (`@moduledoc false`); respect that.
+              :ok
+
+            _ ->
+              # No user moduledoc — synthesise one containing just the invariants section.
+              Module.put_attribute(__MODULE__, :moduledoc, {1, unquote(section)})
+          end
+        end
+    end
   end
 
   @doc false
