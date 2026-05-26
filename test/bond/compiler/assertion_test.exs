@@ -45,6 +45,44 @@ defmodule Bond.Compiler.AssertionTest do
     end
   end
 
+  describe "validate_expression!/2" do
+    test "returns :ok for a valid call AST" do
+      assert :ok = Assertion.validate_expression!(quote(do: x > 0), __ENV__)
+    end
+
+    test "returns :ok for a remote call AST (post-0.16.2 relaxation)" do
+      assert :ok =
+               Assertion.validate_expression!(
+                 quote(do: String.starts_with?(x, "foo")),
+                 __ENV__
+               )
+    end
+
+    test "raises CompileError for a bare integer literal" do
+      assert_raise CompileError, ~r/not a valid Elixir expression: 42/, fn ->
+        Assertion.validate_expression!(42, __ENV__)
+      end
+    end
+
+    test "raises CompileError for a bare atom literal" do
+      assert_raise CompileError, ~r/not a valid Elixir expression: :foo/, fn ->
+        Assertion.validate_expression!(:foo, __ENV__)
+      end
+    end
+
+    test "raises CompileError for a bare string literal" do
+      assert_raise CompileError, ~r/not a valid Elixir expression: "hello"/, fn ->
+        Assertion.validate_expression!("hello", __ENV__)
+      end
+    end
+
+    test "error message points at the valid forms" do
+      assert_raise CompileError, ~r/is_integer\(x\)|Map\.has_key\?/, fn ->
+        Assertion.validate_expression!(42, __ENV__)
+      end
+    end
+  end
+
   describe "assertions_body/2" do
     test "produces a block whose code throws {:assertion_failure, info} on a false assertion" do
       assertion = Assertion.new(:precondition, :positive, quote(do: x > 0), __ENV__)

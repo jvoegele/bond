@@ -81,6 +81,51 @@ defmodule Bond.AssertionSyntaxErrorsTest do
     end
   end
 
+  describe "bare literal as the assertion" do
+    test "@pre with a bare integer raises a Bond-shaped CompileError" do
+      code = """
+      defmodule Bond.AssertionSyntaxErrorsTest.BareInteger do
+        use Bond
+        @pre 42
+        def f(x), do: x
+      end
+      """
+
+      assert_raise CompileError, ~r/Bond assertion is not a valid Elixir expression/, fn ->
+        Code.eval_string(code)
+      end
+    end
+
+    test "@pre with a bare string raises with the source in the message" do
+      code = """
+      defmodule Bond.AssertionSyntaxErrorsTest.BareString do
+        use Bond
+        @pre "hello"
+        def f(x), do: x
+      end
+      """
+
+      assert_raise CompileError, ~r/"hello"/, fn ->
+        Code.eval_string(code)
+      end
+    end
+
+    test "@invariant with a bare atom raises a Bond-shaped CompileError" do
+      code = """
+      defmodule Bond.AssertionSyntaxErrorsTest.BareAtomInvariant do
+        use Bond
+        defstruct [:x]
+        @invariant :something
+        def get(%__MODULE__{} = s), do: s
+      end
+      """
+
+      assert_raise CompileError, ~r/Bond assertion is not a valid Elixir expression/, fn ->
+        Code.eval_string(code)
+      end
+    end
+  end
+
   describe "existing valid forms still work" do
     test "single bare assertion compiles" do
       code = """

@@ -233,6 +233,7 @@ defmodule Bond.Compiler do
   end
 
   def register_assertion(kind, expression, label, env, meta) do
+    Assertion.validate_expression!(expression, env)
     assertion = Assertion.new(kind, label, expression, env, meta)
 
     fsm_event =
@@ -246,6 +247,7 @@ defmodule Bond.Compiler do
 
   @doc false
   def register_invariant(expression, label, env, meta) do
+    Assertion.validate_expression!(expression, env)
     # Strip the hygiene context off every reference to `subject` so they resolve to the
     # `subject` variable rebound by `Bond.Compiler.Assertion.invariants_body/2`
     # (which uses `Macro.var(:subject, nil)`). Without this, references inherited from

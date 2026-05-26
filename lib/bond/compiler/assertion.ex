@@ -74,6 +74,45 @@ defmodule Bond.Compiler.Assertion do
   end
 
   @doc """
+  Validates that `expression` is a valid assertion expression — a quoted Elixir
+  AST node satisfying `is_assertion_expression/1`. Returns `:ok` on success;
+  raises `CompileError` with `env`'s file/line and a one-sentence diagnostic
+  otherwise.
+
+  Called at the macro layer in `lib/bond.ex` (via `Bond.Compiler.register_*`)
+  before `new/5`, so the user sees a Bond-shaped error at the assertion site
+  instead of an inscrutable `FunctionClauseError` from `new/5` dumping the
+  full `Macro.Env`.
+  """
+  @spec validate_expression!(term(), Macro.Env.t()) :: :ok
+  def validate_expression!(expression, %Macro.Env{} = _env)
+      when is_assertion_expression(expression) do
+    :ok
+  end
+
+  def validate_expression!(expression, %Macro.Env{} = env) do
+    source = expression_source(expression)
+
+    raise CompileError,
+      file: env.file,
+      line: env.line,
+      description:
+        "Bond assertion is not a valid Elixir expression: #{source}. Assertions " <>
+          "must be a call or operator expression returning a truthy/falsy value " <>
+          "(e.g. `is_integer(x)`, `x > 0`, `Map.has_key?(m, :k)`, " <>
+          "`String.starts_with?(s, \"prefix\")`). Bare literals, variables, and " <>
+          "non-AST terms aren't valid assertion forms."
+  end
+
+  # `Macro.to_string/1` handles literals and AST nodes; fall back to `inspect`
+  # for anything pathological.
+  defp expression_source(expression) do
+    Macro.to_string(expression)
+  rescue
+    _ -> inspect(expression, limit: 80)
+  end
+
+  @doc """
   Returns a quoted block that, when spliced into a function body, evaluates each of the given
   `assertions` in order.
 
