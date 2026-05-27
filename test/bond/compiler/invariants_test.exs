@@ -187,13 +187,18 @@ defmodule Bond.Compiler.InvariantsTest do
       assert Invariants.post_invariant_stmts(:any, :purge, SomeMod, true, true) == []
     end
 
-    test "emits a case extraction matching %Mod{} and {:ok, %Mod{}}" do
+    test "delegates the struct-shape match to Bond.Runtime.Eval.check_struct_invariant" do
       [ast] = Invariants.post_invariant_stmts(:my_inv_fn, true, BoundedStack, true, true)
       code = Macro.to_string(ast)
-      assert code =~ ~r"case var!\(result\)"
-      assert code =~ ~r"%BoundedStack\{\}"
-      assert code =~ ~r"\{:ok, %BoundedStack\{\}"
+      assert code =~ ~r"Bond\.Runtime\.Eval\.check_struct_invariant"
+      assert code =~ ~r"var!\(result\)"
+      assert code =~ ~r"BoundedStack"
       assert code =~ ~r"my_inv_fn\(__bond_post_value__\)"
+      assert code =~ ~r"should_evaluate\?\(:invariants"
+      # The %Mod{} / {:ok, %Mod{}} match no longer lives in the using module — it moved
+      # into Bond.Runtime.Eval so Elixir's type checker can't flag the speculative struct
+      # clauses as unreachable for functions returning other shapes.
+      refute code =~ ~r"case var!\(result\)"
     end
   end
 end

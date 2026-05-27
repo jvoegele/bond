@@ -220,11 +220,19 @@ defmodule Bond.Compiler.Invariants do
   Emits the post-invariant case-extraction statements that go *after* the postconditions
   and before the return.
 
-  Matches both `%<struct_module>{}` and `{:ok, %<struct_module>{}}` return shapes; anything
-  else falls through to a no-op. The same lifted invariants defp used by the pre-check
-  runs against the extracted value. The struct module is unquoted into the user's module
-  rather than spelled `%__MODULE__{}` inside the quote, to avoid a deferred-`__MODULE__`
-  reference that confuses parallel compilation.
+  Delegates the `%<struct_module>{}` / `{:ok, %<struct_module>{}}` shape match to
+  `Bond.Runtime.Eval.check_struct_invariant/3` rather than emitting a `case var!(result)`
+  into the user's module. Emitting that `case` here lets Elixir's type checker (1.18+)
+  prove the struct clauses unreachable for functions that return other shapes (e.g. a
+  `size/1` returning an integer), producing "the following clause will never match"
+  warnings that fail `--warnings-as-errors` in downstream builds. Doing the match in
+  `Eval` (where `result` is typed `term()`) keeps the runtime behaviour identical while
+  emitting no shape-match into the using module. The struct module is unquoted in rather
+  than spelled `%__MODULE__{}` to avoid a deferred-`__MODULE__` reference that confuses
+  parallel compilation.
+
+  The runtime `should_evaluate?/3` gate stays at the call site so the bridging closure is
+  allocated only when invariants are actually evaluated.
   """
   @spec post_invariant_stmts(
           atom(),
@@ -240,31 +248,16 @@ defmodule Bond.Compiler.Invariants do
 
     [
       quote do
-        case var!(result) do
-          %unquote(struct_module){} = __bond_post_value__ ->
-            if Bond.Runtime.Eval.should_evaluate?(
-                 :invariants,
-                 unquote(mode),
-                 unquote(Macro.escape(chain))
-               ) do
-              Bond.Runtime.Eval.evaluate_invariants(fn ->
-                unquote(name)(__bond_post_value__)
-              end)
-            end
-
-          {:ok, %unquote(struct_module){} = __bond_post_value__} ->
-            if Bond.Runtime.Eval.should_evaluate?(
-                 :invariants,
-                 unquote(mode),
-                 unquote(Macro.escape(chain))
-               ) do
-              Bond.Runtime.Eval.evaluate_invariants(fn ->
-                unquote(name)(__bond_post_value__)
-              end)
-            end
-
-          _ ->
-            :ok
+        if Bond.Runtime.Eval.should_evaluate?(
+             :invariants,
+             unquote(mode),
+             unquote(Macro.escape(chain))
+           ) do
+          Bond.Runtime.Eval.check_struct_invariant(
+            var!(result),
+            unquote(struct_module),
+            fn __bond_post_value__ -> unquote(name)(__bond_post_value__) end
+          )
         end
       end
     ]

@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
+    # Pinned to 22.04: erlef/setup-beam has no prebuilt OTP < 26 for ubuntu-24.04.
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      # NOTE: this is a starter matrix. Issue #3 owns confirming/extending the
+      # supported Elixir/OTP range and the `~> 1.14` floor in mix.exs.
+      matrix:
+        include:
+          - elixir: "1.14.5"
+            otp: "25.3"
+          - elixir: "1.16.3"
+            otp: "26.2"
+          - elixir: "1.18.3"
+            otp: "27.2"
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+      - name: Cache deps and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-
+      - run: mix deps.get
+      - run: mix test
+
+  lint:
+    name: Format and library warnings
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned to the project's own toolchain (.tool-versions). `mix format` output
+      # drifts across Elixir versions (e.g. 1.19 rewrites `(() -> t)` to `(-> t)`),
+      # so the format check must run on the version the project is formatted with.
+      # Newer-Elixir compatibility is tracked separately in #3.
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "25.3"
+          elixir-version: "1.14.5"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-lint-${{ hashFiles('**/mix.lock') }}
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      # Compiles the library (dev env, so the deliberately-illustrative
+      # test/support fixtures are not in scope) with warnings as errors.
+      - run: mix compile --warnings-as-errors
+
+  downstream:
+    name: Downstream consumer (warnings-as-errors + Dialyzer)
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: integration/consumer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27.2"
+          elixir-version: "1.18.3"
+      - name: Cache consumer deps, build, and PLT
+        uses: actions/cache@v4
+        with:
+          path: |
+            integration/consumer/deps
+            integration/consumer/_build
+            integration/consumer/priv/plts
+          key: ${{ runner.os }}-downstream-${{ hashFiles('integration/consumer/mix.lock', 'mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-downstream-
+      - run: mix deps.get
+      # The core of issue #2: prove the code Bond generates into a using module
+      # is warning-free and Dialyzer-clean in a real consumer.
+      - run: mix compile --warnings-as-errors
+      - run: mix test
+      - run: mix dialyzer --format github
