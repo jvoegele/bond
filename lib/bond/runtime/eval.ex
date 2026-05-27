@@ -41,6 +41,13 @@ defmodule Bond.Runtime.Eval do
   @type compile_default :: boolean()
   @type kind :: :preconditions | :postconditions | :checks | :invariants
 
+  # A lower kind's resolved mode as it appears in the chain map. It can be `:purge` —
+  # not just a boolean — because a function with no `@pre`/`@post` of its own contributes
+  # `:purge` for that kind (e.g. an invariant-only `size/1` passes
+  # `%{preconditions: :purge, postconditions: :purge}`). `runtime_enabled?/2` treats a
+  # `:purge` default as non-disabling (`:purge != false`).
+  @type chain_default :: boolean() | :purge
+
   @doc """
   Returns `true` when assertions of `kind` should be evaluated at this call site.
 
@@ -59,7 +66,7 @@ defmodule Bond.Runtime.Eval do
   carries `:preconditions`; for `:invariants` it carries both. The `:checks` kind is
   independent of the chain — its callers pass `%{}`.
   """
-  @spec should_evaluate?(kind(), compile_default(), %{optional(kind()) => compile_default()}) ::
+  @spec should_evaluate?(kind(), compile_default(), %{optional(kind()) => chain_default()}) ::
           boolean()
   def should_evaluate?(kind, compile_default, chain_defaults \\ %{}) do
     if runtime_enabled?(kind, compile_default) do
@@ -136,6 +143,40 @@ defmodule Bond.Runtime.Eval do
   @spec evaluate_invariants(assertion_fun()) :: term()
   def evaluate_invariants(invariants_fun) when is_function(invariants_fun, 0) do
     evaluate_assertions(invariants_fun)
+  end
+
+  @doc """
+  Runs the lifted invariant check against a function's return value when that value carries
+  the struct the invariants are declared on.
+
+  Detects the `%module{}` and `{:ok, %module{}}` return shapes *here*, with `result` typed
+  as `term()`, rather than via a `case` spliced into the using module. A struct `case`
+  emitted into the user's module would let Elixir's type checker (1.18+) prove the struct
+  clauses unreachable for functions that return other shapes (e.g. a `size/1` returning an
+  integer), raising "the following clause will never match" — a warning that becomes a hard
+  error under `--warnings-as-errors`. Keeping the match in this separately-compiled,
+  `term()`-typed module avoids that while preserving identical runtime behaviour.
+
+  `check_fun` bridges back to the using module's private lifted-invariant defp. Any other
+  return shape falls through with no check.
+  """
+  @spec check_struct_invariant(term(), module(), (struct() -> term())) :: :ok
+  def check_struct_invariant(result, module, check_fun)
+      when is_atom(module) and is_function(check_fun, 1) do
+    case extract_subject(result, module) do
+      {:ok, subject} -> evaluate_invariants(fn -> check_fun.(subject) end)
+      :error -> :ok
+    end
+
+    :ok
+  end
+
+  defp extract_subject(result, module) do
+    cond do
+      is_struct(result, module) -> {:ok, result}
+      match?({:ok, inner} when is_struct(inner, module), result) -> {:ok, elem(result, 1)}
+      true -> :error
+    end
   end
 
   defp evaluate_assertions(assertions_fun) do
