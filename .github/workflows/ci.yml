@@ -2,20 +2,22 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   test:
     name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
-    runs-on: ubuntu-latest
+    # Pinned to 22.04: erlef/setup-beam has no prebuilt OTP < 26 for ubuntu-24.04.
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       # NOTE: this is a starter matrix. Issue #3 owns confirming/extending the
@@ -50,7 +52,7 @@ jobs:
 
   lint:
     name: Format and library warnings
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -71,10 +73,10 @@ jobs:
 
   downstream:
     name: Downstream consumer (warnings-as-errors + Dialyzer)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     defaults:
       run:
-        working-directory: test/integration/consumer
+        working-directory: integration/consumer
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -85,10 +87,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            test/integration/consumer/deps
-            test/integration/consumer/_build
-            test/integration/consumer/priv/plts
-          key: ${{ runner.os }}-downstream-${{ hashFiles('test/integration/consumer/mix.lock', 'mix.lock') }}
+            integration/consumer/deps
+            integration/consumer/_build
+            integration/consumer/priv/plts
+          key: ${{ runner.os }}-downstream-${{ hashFiles('integration/consumer/mix.lock', 'mix.lock') }}
           restore-keys: |
             ${{ runner.os }}-downstream-
       - run: mix deps.get
