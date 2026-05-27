@@ -37,7 +37,11 @@ defmodule ContractConsumer.Classifier do
   use Bond
 
   @pre non_empty_string: is_binary(value) ~> (String.length(value) > 0)
-  @post atom_result: is_atom(result)
+  # A relational postcondition (input shape -> output value), not a type tautology like
+  # `is_atom(result)` — that would duplicate the typespec and leave Bond's generated
+  # violation branch statically dead, which Dialyzer (rightly) flags.
+  @post string_for_binary: is_binary(value) ~> (result == :string),
+        integer_for_int: is_integer(value) ~> (result == :integer)
   @spec classify(binary() | integer()) :: :string | :integer
   def classify(value) when is_binary(value), do: :string
   def classify(value) when is_integer(value), do: :integer

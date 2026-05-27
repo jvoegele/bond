@@ -55,10 +55,14 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      # Pinned to the project's own toolchain (.tool-versions). `mix format` output
+      # drifts across Elixir versions (e.g. 1.19 rewrites `(() -> t)` to `(-> t)`),
+      # so the format check must run on the version the project is formatted with.
+      # Newer-Elixir compatibility is tracked separately in #3.
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: "27.2"
-          elixir-version: "1.18.3"
+          otp-version: "25.3"
+          elixir-version: "1.14.5"
       - uses: actions/cache@v4
         with:
           path: |
