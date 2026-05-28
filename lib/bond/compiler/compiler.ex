@@ -21,7 +21,12 @@ defmodule Bond.Compiler do
 
   alias Bond.Compiler.AnnotatedFunction
   alias Bond.Compiler.Assertion
-  alias Bond.Compiler.CompileStateFSM, as: FSM
+  # `require` (not `alias`) so Mix creates a strong compile-time dep on
+  # CompileStateFSM and schedules compile_state_fsm.ex (and transitively
+  # server.ex) before this file. User modules have compile deps on Bond.Compiler
+  # via @before_compile/@on_definition; requiring CompileStateFSM here ensures
+  # the gen_statem and its callback module are on disk before they are started.
+  require Bond.Compiler.CompileStateFSM, as: FSM
   alias Bond.Compiler.ContractDocs
   alias Bond.Compiler.FunctionDefinition
 

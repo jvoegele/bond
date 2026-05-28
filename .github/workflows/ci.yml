@@ -20,15 +20,20 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
-      # NOTE: this is a starter matrix. Issue #3 owns confirming/extending the
-      # supported Elixir/OTP range and the `~> 1.14` floor in mix.exs.
+      # Spans the declared floor (1.14) through the current latest stable (1.19),
+      # pairing each minor with the highest OTP it supports. 1.19 supports OTP
+      # 26–28; we test against OTP 27 here — OTP 28+ coverage is tracked in #18.
       matrix:
         include:
           - elixir: "1.14.5"
             otp: "25.3"
           - elixir: "1.16.3"
             otp: "26.2"
+          - elixir: "1.17.3"
+            otp: "27.2"
           - elixir: "1.18.3"
+            otp: "27.2"
+          - elixir: "1.19.5"
             otp: "27.2"
     env:
       MIX_ENV: test
@@ -58,7 +63,7 @@ jobs:
       # Pinned to the project's own toolchain (.tool-versions). `mix format` output
       # drifts across Elixir versions (e.g. 1.19 rewrites `(() -> t)` to `(-> t)`),
       # so the format check must run on the version the project is formatted with.
-      # Newer-Elixir compatibility is tracked separately in #3.
+      # Lifting this pin (and resolving the formatter drift) is tracked in #18.
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "25.3"
