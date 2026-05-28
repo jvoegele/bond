@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Documentation
 
+- **Closed #9 and #20 — overhead benchmarked and published.** New
+  `guides/overhead.md` publishes concrete compile-time and runtime
+  overhead numbers from a documented reference environment (Apple M3
+  Max, OTP 27.2, Elixir 1.19.5). Two benchmark files under `bench/`
+  back the numbers and are documented as the "re-run on your hardware"
+  recipe.
+  - **Compile-time** (`bench/compile_overhead.exs`): ~10 ms/module
+    overhead for modules using Bond + a handful of contracts. For a
+    200-module application, that's ~2 s added to a clean
+    `mix compile`. Bond starts a `:gen_statem` per compiling module
+    (stopped in `__after_compile__`); the per-module cost is roughly
+    constant in the number of modules. Closes #9.
+  - **Runtime** (`bench/runtime_check_overhead.exs`, expanded from
+    the previous `@pre`-only-with-three-modes version): full grid of
+    `(baseline, @pre, @post, @invariant, check/1)` ×
+    `(true, false, :purge)`. Headline numbers: enabled `@pre` adds
+    ~130 ns/call; runtime-disabled `@pre` (`false`) adds ~70 ns;
+    `:purge` is indistinguishable from baseline. `@invariant` is the
+    most expensive at ~440 ns/call (entry + exit checks). Closes #20.
+  - FAQ entry "Will contracts slow down my production code?" gains a
+    closing paragraph linking the new guide and surfacing the headline
+    figures.
+
 - **Closed #1 — public API surface frozen and documented for 1.0.**
   Two new guides published to hexdocs:
   - `guides/public-api.md` enumerates every name covered by the 1.0
