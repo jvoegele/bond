@@ -408,7 +408,7 @@ exposed by Elixir 1.19's more aggressive parallel compiler.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.17.3] - 2026-06-03
+## [0.17.3] - 2026-05-26
 
 A small additive release: `_name` and `name` are now treated as semantically
 equivalent in the consistent-naming check. Surfaced by a Photon dogfood
@@ -457,7 +457,7 @@ contracted `def f(a, b, c)`) tripped the agreement rule unnecessarily.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.17.2] - 2026-06-02
+## [0.17.2] - 2026-05-26
 
 A purely additive release narrowing the 0.17.0 consistent-naming rule from
 "all positions must agree" to "positions referenced by some contract must
@@ -533,7 +533,7 @@ otherwise have required renaming every parameter across all clauses.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.17.1] - 2026-05-31
+## [0.17.1] - 2026-05-26
 
 A purely additive release closing a doc-symmetry gap: per-function
 `@pre`/`@post` already get rendered into each function's `@doc` as
@@ -608,7 +608,7 @@ ensures unless the author had hand-written them up.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.17.0] - 2026-05-30
+## [0.17.0] - 2026-05-26
 
 0.17.0 closes the longest-standing bug surfaced by real-world dogfooding:
 multi-clause functions whose first body clause had shape-specific
@@ -735,7 +735,7 @@ antecedent. `~>` is now a `defmacro` that short-circuits.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.16.2] - 2026-05-28
+## [0.16.2] - 2026-05-26
 
 A patch release covering eight issues surfaced by dogfooding Bond 0.16.1
 on a real-world Elixir umbrella application (Photon, ~200+ modules). Six
@@ -837,7 +837,7 @@ conversation.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.16.1] - 2026-05-27
+## [0.16.1] - 2026-05-22
 
 A patch release covering a 1.0-prep test-coverage audit (no behavioural
 change, just locking down behaviour that wasn't directly tested) plus
@@ -948,7 +948,7 @@ date with 0.16.0.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.16.0] - 2026-05-26
+## [0.16.0] - 2026-05-22
 
 0.16.0 is the first 1.0-prep release. It tightens the public API in two
 places where the surface had accumulated friction: `@invariant` drops its
@@ -1052,7 +1052,7 @@ call site with a migration message.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.15.0] - 2026-05-25
+## [0.15.0] - 2026-05-22
 
 0.15.0 closes a correctness gap in conditional compilation: previously
 `:preconditions`, `:postconditions`, and `:invariants` could be toggled
@@ -1121,7 +1121,7 @@ independent of the chain.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.14.0] - 2026-05-24
+## [0.14.0] - 2026-05-22
 
 0.14.0 adds **`Bond.PropertyTest`** — a property-based testing layer that
 uses Bond's contracts as the oracle. The hard part of PBT is usually
@@ -1171,7 +1171,7 @@ inputs through already-instrumented code.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.13.0] - 2026-05-23
+## [0.13.0] - 2026-05-22
 
 0.13.0 adds **`@invariant`** declarations for struct modules — module-scoped
 properties that hold across every public function in the struct's defining
