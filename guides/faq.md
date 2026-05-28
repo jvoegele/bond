@@ -200,18 +200,27 @@ runtime-disabled by default; flippable via `Application.put_env/3`).
 
 ## How do I disable a single failing contract while debugging?
 
-There's no per-contract toggle in the source code today. Options:
+Bond intentionally has no per-contract on/off knob. The contract toggles
+that exist are coarser by design — per-kind (`:preconditions`,
+`:postconditions`, `:invariants`, `:checks`) and per-module (via
+`:overrides` or `use Bond` options) — because a contract is part of a
+function's stated agreement with its caller, and adding a fourth axis of
+"this individual assertion is off" tends to mask broken agreements
+rather than resolve them. For debugging, pick whichever of these fits:
 
-1. **Comment it out.** Simplest. Add a `TODO` so it doesn't stay
-   commented forever.
-2. **Disable the kind globally.** If you only have one failing
-   precondition, set `config :bond, preconditions: false` in the relevant
-   environment and recompile. Heavy-handed but quick.
-3. **Move the assertion to `check/1` inside the body**, where you can
-   wrap it in a conditional.
-
-If this comes up often, file an issue — there are reasonable designs for
-a per-contract disable flag.
+1. **Comment it out.** Simplest, and the right answer most of the time.
+   Add a `TODO` so it doesn't stay commented past the debugging session.
+2. **Move the assertion to `check/1` inside the body.** `check/1` is
+   wrappable in a conditional and is the right home for an assertion
+   you want to gate on runtime state (e.g. a feature flag) rather than
+   on contract policy.
+3. **Disable the kind globally for the relevant environment.** If you're
+   investigating a precondition storm in dev, `config :bond,
+   preconditions: false` in `config/dev.exs` skips all preconditions at
+   runtime without recompiling consumers. Heavy-handed but cheap. The
+   chain rule (preconditions ≤ postconditions ≤ invariants) means
+   disabling preconditions also skips the higher kinds; see "Why can't
+   I have postconditions on while preconditions are off?" for why.
 
 ## What does Bond do that typespecs don't?
 
