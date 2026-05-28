@@ -185,7 +185,9 @@ defmodule Bond.Compiler do
   @doc false
   def __on_definition__(_env, kind, _fun, _params, _guards, _body)
       when kind in [:defmacro, :defmacrop] do
-    # Bond does not (yet) support contracts on macros.
+    # Contracts on macros are out of scope for Bond 1.0. The workaround is to
+    # wrap the macro body in a regular function (def) annotated with contracts
+    # and call that function from the macro.
     :ok
   end
 

@@ -79,7 +79,10 @@ idea that has become popular in the functional programming community via
 [clojure.spec](https://clojure.org/about/spec). In Elixir, the de facto standard
 for data specification and validation is the aforementioned
 [Norm](https://github.com/elixir-toniq/norm) library from Chris Keathley, et al.
-Although Bond does not currently support data specification, if there is ever
-a demonstrated need for integrating Design By Contract with data specification,
-Bond may be extended to support it, perhaps with a `Bond.Spec` module. In the
-meantime, it is entirely possible to use Norm in conjunction with Bond.
+
+Bond does not provide a data-specification facility of its own, and won't —
+data specification is Norm's job, and contract programming is Bond's. The
+two compose by calling Norm's validators from within Bond assertions; see
+"How does Bond compare to Norm?" in the FAQ for the canonical pattern and
+the per-module caveat (both libraries override `Kernel.@/1`, so they can't
+share a single module).

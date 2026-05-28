@@ -444,6 +444,26 @@ def foo(x) when is_integer(x), do: x * 2
 def foo(x) when is_float(x), do: round(x)
 ```
 
-Per-clause contracts may be added in a future release if the consistent-
-naming restriction turns out to be too tight in practice. If you hit
-a case where it bites, please open an issue.
+Per-clause contracts are out of scope for Bond 1.0 — by design.
+Contracts describe the function's behavioural agreement with its caller,
+which is one agreement per function regardless of how many clauses
+implement it. If different clauses genuinely have different contracts,
+that's a sign they're really two different functions; split them.
+
+When the contract is the same across clauses but a parameter is named
+differently in each clause, use a bodyless function head to attach the
+contract to a single canonical parameter list, then define the clauses
+with whatever names suit each:
+
+```elixir
+@pre is_integer(n)
+def double(n)
+
+def double(n) when n >= 0, do: n * 2
+def double(n), do: -n * -2
+```
+
+The "Naming consistency is only required where contracts depend on it"
+relaxation (see above) also makes the workaround lighter: cross-clause
+agreement is only enforced at parameter positions a contract actually
+references.
