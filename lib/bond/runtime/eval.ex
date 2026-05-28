@@ -37,7 +37,7 @@ defmodule Bond.Runtime.Eval do
     invariant: Bond.InvariantError
   }
 
-  @type assertion_fun :: (() -> term())
+  @type assertion_fun :: (-> term())
   @type compile_default :: boolean()
   @type kind :: :preconditions | :postconditions | :checks | :invariants
 
