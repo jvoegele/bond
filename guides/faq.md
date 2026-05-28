@@ -332,55 +332,67 @@ struct parameter in the function head and pre-checks against it:
 - **Never for `defp`** — private functions are exempt by the Eiffel
   convention (they often hold transiently-invalid state mid-operation).
 
-If your function doesn't pattern-match the struct at all (no struct in
-the head, no guard mentioning it), invariants are silently skipped for
-that function. The other contract kinds still apply. Bond emits a
-compile-time warning when it detects this case — see the next entry.
+If a function has neither a struct-matching head **nor** a return
+value Bond recognises as the struct (a literal `%__MODULE__{}` or
+`{:ok, %__MODULE__{}}`), both the on-entry and on-exit checks are
+skipped — invariants don't fire for that function at all. The other
+contract kinds still apply. Bond emits a compile-time warning when it
+detects this case — see the next entry.
 
 Violations raise `Bond.InvariantError` and emit `[:bond, :assertion, :failure]`
 telemetry with `:kind => :invariant`. See the
 [Invariants](Bond.html#module-invariant-for-struct-modules) section in the
 moduledoc.
 
-## Why is Bond warning that my function "matched no struct parameter"?
+## Why is Bond warning about skipped invariants?
 
 You're seeing something like:
 
 ```
 public function `update/2` in invariant-declaring module
-`MyApp.BoundedStack` matched no struct parameter; invariants are not
-checked here. If intentional, suppress with `@bond_warn_skipped_invariants
-false` (per function), `use Bond, warn_skipped_invariants: false`
-(per module), or `config :bond, warn_skipped_invariants: false`
-(globally).
+`MyApp.BoundedStack` has no clause that pattern-matches the struct or
+returns one; invariants are skipped here. If intentional, suppress
+with `@bond_warn_skipped_invariants false` (per function), `use Bond,
+warn_skipped_invariants: false` (per module), or `config :bond,
+warn_skipped_invariants: false` (globally).
 ```
 
-Bond emits this at compile time when a public function (`def`, not
-`defp`) in an invariant-declaring module has no clause whose head
-pattern-matches the struct. Without a matching head, Bond has no
-`subject` to bind, so invariants are silently skipped for that
-function — and "silently skipped" was the footgun before this warning
-existed.
+Bond's invariants fire in two places: on entry (when the function head
+pattern-matches the struct, giving Bond a `subject` to bind) and on
+exit (when the return value is a literal `%__MODULE__{}` or
+`{:ok, %__MODULE__{}}`). Bond warns when a public function (`def`, not
+`defp`) in an invariant-declaring module has **neither** mechanism —
+neither a struct-matching head nor a statically-detectable struct
+return. In that case both the on-entry and on-exit checks are skipped,
+and the function silently bypasses invariants entirely.
+
+The detection is intentionally conservative on the post-side: only the
+literal shapes `%__MODULE__{...}` and `{:ok, %__MODULE__{...}}` (or
+the same as the last expression of a block) suppress the warning.
+Functions that build the struct via a helper call (`def from_map(m),
+do: build(m)`) still warn, because Bond can't tell statically that the
+helper returns a struct — use per-function suppression there.
 
 **If the function is supposed to operate on the struct**, the fix is
-usually a missing pattern or guard:
+usually a missing pattern or guard on the head:
 
 ```elixir
-# Footgun — head doesn't match the struct, so the @invariant doesn't fire here:
-def update(stack, x), do: ...
+# Footgun — head doesn't match the struct, body doesn't return one:
+def update(stack, x), do: Map.put(stack, :counter, x)
 
-# Fixed — Bond detects the struct and the @invariant fires:
-def update(%__MODULE__{} = stack, x), do: ...
+# Fixed — Bond detects the struct on entry and the @invariant fires:
+def update(%__MODULE__{} = stack, x), do: Map.put(stack, :counter, x)
 # or:
 def update(stack, x) when is_struct(stack, __MODULE__), do: ...
 ```
 
 See "When does Bond check invariants?" above for every shape Bond
-detects.
+detects on entry, and the shapes it recognises on exit.
 
 **If the function is genuinely not about the struct** (a utility
-function, an alternate constructor, a class-name helper), suppress
-the warning at the right scope. From narrowest to broadest:
+function, a class-name helper, a constructor whose body Bond can't
+statically read as a struct return), suppress the warning at the right
+scope. From narrowest to broadest:
 
 ```elixir
 # Per function — only this def. Other public functions in the same

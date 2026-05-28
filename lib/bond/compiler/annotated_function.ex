@@ -222,8 +222,9 @@ defmodule Bond.Compiler.AnnotatedFunction do
   end
 
   # Emits a compile-time warning when a public function in an invariant-declaring
-  # module has no clause that pattern-matches the struct — meaning invariants are
-  # silently skipped for that function. On by default; suppression is layered:
+  # module has no clause that exercises ANY invariant check — neither a pre-check
+  # (struct in head) nor a statically-detectable post-check (body returns the
+  # struct or `{:ok, struct}`). On by default; suppression is layered:
   #
   #   * global:       `config :bond, warn_skipped_invariants: false`
   #   * per-module:   `use Bond, warn_skipped_invariants: false`
@@ -237,16 +238,21 @@ defmodule Bond.Compiler.AnnotatedFunction do
   #   - invariants are attached to this function (i.e. module declares @invariant)
   #   - inv_mode != :purge (user hasn't explicitly opted out)
   #   - resolved warn flag is true (per-function override > module/global config)
-  #   - no clause's head matches a struct parameter
+  #   - no clause has either a struct in head or a statically-detectable struct
+  #     return (so invariants are truly skipped both on entry and exit)
   defp maybe_warn_skipped_invariants(
-         %__MODULE__{kind: :def, invariants: [_ | _]} = annotated_function,
+         %__MODULE__{kind: :def, invariants: [_ | _], module: struct_module} = annotated_function,
          inv_mode,
          config
        )
        when inv_mode != :purge do
     warn? = resolve_warn_skipped_invariants(annotated_function.clauses, config)
 
-    if warn? and not Invariants.any_clause_matches_struct?(annotated_function.clauses) do
+    if warn? and
+         not Invariants.any_clause_checks_invariants?(
+           annotated_function.clauses,
+           struct_module
+         ) do
       first_clause = List.first(annotated_function.clauses)
 
       IO.warn(
@@ -283,9 +289,9 @@ defmodule Bond.Compiler.AnnotatedFunction do
          arity: arity
        }) do
     "public function `#{fun}/#{arity}` in invariant-declaring module " <>
-      "`#{inspect(module)}` matched no struct parameter; invariants are not " <>
-      "checked here. If intentional, suppress with " <>
-      "`@bond_warn_skipped_invariants false` (per function), " <>
+      "`#{inspect(module)}` has no clause that pattern-matches the struct " <>
+      "or returns one; invariants are skipped here. If intentional, " <>
+      "suppress with `@bond_warn_skipped_invariants false` (per function), " <>
       "`use Bond, warn_skipped_invariants: false` (per module), or " <>
       "`config :bond, warn_skipped_invariants: false` (globally)."
   end

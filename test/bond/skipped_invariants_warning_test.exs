@@ -50,6 +50,24 @@ defmodule Bond.SkippedInvariantsWarningTest do
       assert %BondTest.SkippedInvariants.MixedClauses{value: 3} =
                BondTest.SkippedInvariants.MixedClauses.coerce(3)
     end
+
+    test "constructors that return %__MODULE__{...} or {:ok, %__MODULE__{...}} do not warn" do
+      # The post-invariant check fires at runtime on the returned struct, so
+      # invariants ARE checked for these functions — Bond's static heuristic
+      # detects the struct return shape and skips the warning. No per-function
+      # suppression needed.
+      assert %BondTest.SkippedInvariants.ConstructorReturnsStruct{n: 3} =
+               BondTest.SkippedInvariants.ConstructorReturnsStruct.new(3)
+
+      assert {:ok, %BondTest.SkippedInvariants.ConstructorReturnsStruct{n: 3}} =
+               BondTest.SkippedInvariants.ConstructorReturnsStruct.try_new(3)
+
+      # And the error-returning clause runs fine — its post-check is a runtime
+      # no-op (return value isn't a struct), but invariants fire on the OK
+      # clause, so the function as a whole has an active check path.
+      assert {:error, :invalid} =
+               BondTest.SkippedInvariants.ConstructorReturnsStruct.try_new(-1)
+    end
   end
 
   describe "warning emission via Code.compile_string/1" do
@@ -69,7 +87,7 @@ defmodule Bond.SkippedInvariantsWarningTest do
       assert Enum.any?(diagnostics, fn d ->
                d.severity == :warning and
                  String.contains?(d.message, "label/0") and
-                 String.contains?(d.message, "invariants are not checked here")
+                 String.contains?(d.message, "invariants are skipped here")
              end),
              "expected a warn-skipped-invariants diagnostic for label/0; got #{inspect(diagnostics)}"
     end
@@ -236,6 +254,89 @@ defmodule Bond.SkippedInvariantsWarningTest do
 
       refute Enum.any?(diagnostics, &(&1.severity == :warning)),
              "expected no diagnostics for mixed-clause function; got #{inspect(diagnostics)}"
+    end
+
+    test "does NOT fire for a constructor whose body returns `%__MODULE__{...}`" do
+      # Post-invariant check fires at runtime on the returned struct, so
+      # invariants ARE checked. Bond's static heuristic detects the bare-
+      # struct return shape.
+      source = """
+      defmodule BondTest.SkippedScratch.BareConstructor do
+        use Bond
+        defstruct [:value]
+        @invariant subject.value >= 0
+
+        def new(n), do: %__MODULE__{value: n}
+      end
+      """
+
+      diagnostics = capture_diagnostics(source)
+
+      refute Enum.any?(diagnostics, &(&1.severity == :warning)),
+             "expected no diagnostics for bare-struct constructor; got #{inspect(diagnostics)}"
+    end
+
+    test "does NOT fire for a constructor whose body returns `{:ok, %__MODULE__{...}}`" do
+      # Bond extracts the wrapped struct at the post-check site, so the runtime
+      # check fires and the static heuristic detects the wrapped shape.
+      source = """
+      defmodule BondTest.SkippedScratch.WrappedConstructor do
+        use Bond
+        defstruct [:value]
+        @invariant subject.value >= 0
+
+        def try_new(n), do: {:ok, %__MODULE__{value: n}}
+      end
+      """
+
+      diagnostics = capture_diagnostics(source)
+
+      refute Enum.any?(diagnostics, &(&1.severity == :warning)),
+             "expected no diagnostics for {:ok, struct} constructor; got #{inspect(diagnostics)}"
+    end
+
+    test "does NOT fire when ONE clause of a multi-clause function returns a struct" do
+      # `try_new/1` shape: one clause returns {:ok, struct}, another returns
+      # {:error, _}. The first clause exercises the post-check; that's enough
+      # for the function as a whole to be considered "has an active check path."
+      source = """
+      defmodule BondTest.SkippedScratch.MixedReturn do
+        use Bond
+        defstruct [:value]
+        @invariant subject.value >= 0
+
+        def try_new(n) when is_integer(n) and n >= 0, do: {:ok, %__MODULE__{value: n}}
+        def try_new(_), do: {:error, :invalid}
+      end
+      """
+
+      diagnostics = capture_diagnostics(source)
+
+      refute Enum.any?(diagnostics, &(&1.severity == :warning)),
+             "expected no diagnostics for multi-clause with one struct-returning clause; got #{inspect(diagnostics)}"
+    end
+
+    test "FIRES for the genuine footgun: no struct in head AND no static struct return" do
+      # `def update(stack, x), do: Map.put(stack, :counter, x)` — Bond can't
+      # statically see that the return is a struct (it's a Map.put call), and
+      # the head doesn't match the struct either. Both pre- AND post-checks
+      # are skipped. THIS is the case the warning was designed to catch.
+      source = """
+      defmodule BondTest.SkippedScratch.GenuineFootgun do
+        use Bond
+        defstruct [:counter]
+        @invariant subject.counter >= 0
+
+        def update(stack, x), do: Map.put(stack, :counter, x)
+      end
+      """
+
+      diagnostics = capture_diagnostics(source)
+
+      assert Enum.any?(diagnostics, fn d ->
+               d.severity == :warning and String.contains?(d.message, "update/2")
+             end),
+             "expected a warning for the genuine footgun (Map.put return); got #{inspect(diagnostics)}"
     end
 
     test "does NOT fire for a module with no @invariant declarations" do

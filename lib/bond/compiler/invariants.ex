@@ -96,20 +96,65 @@ defmodule Bond.Compiler.Invariants do
   def resolve_mode(value, _kind, _invariants) when value in [true, false], do: value
 
   @doc """
-  Returns `true` when at least one clause in the given list has a detectable struct
-  parameter (so invariants will fire for that clause), and `false` when no clause
-  matches the struct (so invariants are silently skipped for the entire function —
-  the footgun `:warn_skipped_invariants` warns about).
+  Returns `true` when at least one clause in the given list has SOME invariant-
+  check mechanism — either:
+
+    * its head pattern-matches the struct (pre-invariant fires on entry), or
+    * its body statically returns the struct or `{:ok, struct}` (post-invariant
+      fires on exit).
+
+  Returns `false` when no clause has either mechanism, meaning invariants are
+  fully skipped for the function — the footgun `:warn_skipped_invariants` warns
+  about.
 
   Used by `Bond.Compiler.AnnotatedFunction.apply_contract/2` to decide whether to
-  emit the warning at the function definition site.
+  emit the warning at the function definition site. The post-invariant body
+  heuristic is intentionally conservative: it detects the common constructor
+  shapes (`%__MODULE__{...}`, `{:ok, %__MODULE__{...}}`, and the same as the last
+  expression in a block) but not function calls or branching expressions whose
+  return shape can't be determined statically. Users with constructors that
+  build the struct via a helper call still suppress with
+  `@bond_warn_skipped_invariants false`.
   """
-  @spec any_clause_matches_struct?([term()]) :: boolean()
-  def any_clause_matches_struct?(clauses) when is_list(clauses) do
+  @spec any_clause_checks_invariants?([term()], module()) :: boolean()
+  def any_clause_checks_invariants?(clauses, struct_module) when is_list(clauses) do
     Enum.any?(clauses, fn clause ->
-      detect_struct_params(clause.params || [], clause.guards || []) != []
+      detect_struct_params(clause.params || [], clause.guards || []) != [] or
+        body_returns_struct?(clause.body, struct_module)
     end)
   end
+
+  # Detects whether a function clause's body statically returns the struct (so
+  # the runtime post-invariant check will fire). Returns true for:
+  #
+  #   - direct: `%__MODULE__{...}`
+  #   - wrapped: `{:ok, %__MODULE__{...}}`
+  #   - block-bodied versions of either (last expression of a `:__block__`)
+  #
+  # `struct_module` is passed through for future extension (e.g. detecting
+  # `%MyMod{...}` aliases), but is currently unused — Bond's idiomatic form
+  # for invariant-declaring modules is `%__MODULE__{...}` (see
+  # `detect_struct_params/2`'s @doc).
+  defp body_returns_struct?([{:do, expr} | _], struct_module) do
+    expression_returns_struct?(expr, struct_module)
+  end
+
+  defp body_returns_struct?(_body, _struct_module), do: false
+
+  defp expression_returns_struct?({:__block__, _, statements}, struct_module) do
+    case List.last(statements) do
+      nil -> false
+      last -> expression_returns_struct?(last, struct_module)
+    end
+  end
+
+  defp expression_returns_struct?({:%, _, [{:__MODULE__, _, _}, _]}, _struct_module), do: true
+
+  defp expression_returns_struct?({:ok, inner}, struct_module) do
+    expression_returns_struct?(inner, struct_module)
+  end
+
+  defp expression_returns_struct?(_expr, _struct_module), do: false
 
   @doc """
   Detects every struct-bearing parameter in a function clause, or returns `[]` when

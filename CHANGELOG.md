@@ -11,11 +11,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - **Closed #5 — opt-out compile warning for silently-skipped
   invariants.** A public function in an invariant-declaring module
-  whose head doesn't pattern-match the struct previously had its
-  invariants silently skipped — documented as a footgun in the README
-  and FAQ, but uncatchable without reading every diff. Bond now emits
-  a compile-time warning at the function's definition site naming the
-  offender and offering all three suppression knobs.
+  whose head doesn't pattern-match the struct AND whose body doesn't
+  return one (statically detectable: `%__MODULE__{...}` or `{:ok,
+  %__MODULE__{...}}`, including as the last expression of a block) has
+  both its on-entry pre-check AND its on-exit post-check silently
+  skipped — documented as a footgun in the README and FAQ, but
+  uncatchable without reading every diff. Bond now emits a compile-
+  time warning at the function's definition site naming the offender
+  and offering all three suppression knobs.
+
+  Detection is intentionally conservative on the post side: only
+  literal struct returns suppress the warning. Functions that build
+  the struct via a helper call (e.g. `def from_map(m), do: build(m)`)
+  still warn; the per-function attribute is the workaround.
 
 - **New `:warn_skipped_invariants` knob, three layers** (all public
   API as of 1.0; default `true` at every layer):

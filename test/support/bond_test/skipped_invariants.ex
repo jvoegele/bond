@@ -63,6 +63,24 @@ defmodule BondTest.SkippedInvariants.SilentDefp do
   defp _helper(x), do: x
 end
 
+defmodule BondTest.SkippedInvariants.ConstructorReturnsStruct do
+  @moduledoc false
+
+  # No suppression needed: the body statically returns `%__MODULE__{...}` or
+  # `{:ok, %__MODULE__{...}}`, so Bond's static heuristic detects that the
+  # post-invariant check fires at runtime and skips the warning. Exercises
+  # both the bare-struct and `{:ok, struct}` constructor shapes.
+  use Bond
+
+  defstruct [:n]
+
+  @invariant non_negative: subject.n >= 0
+
+  def new(n), do: %__MODULE__{n: n}
+  def try_new(n) when is_integer(n) and n >= 0, do: {:ok, %__MODULE__{n: n}}
+  def try_new(_), do: {:error, :invalid}
+end
+
 defmodule BondTest.SkippedInvariants.MixedClauses do
   @moduledoc false
 
