@@ -1,0 +1,56 @@
+%% Mikado graph for #1 — Freeze and audit the public API surface for 1.0.
+%%
+%% This is the LAST 1.0 blocker (per #11). The deliverable is a semver
+%% promise: from 1.0 onward, the enumerated surface stops changing in
+%% breaking ways. Everything else (the Should-do bucket #5/#6/#7 and #4)
+%% landed first so that this audit operates on the final surface, not a
+%% draft one.
+%%
+%% Inventory of what currently exists (verified via grep):
+%%
+%%   Public modules (no `internal: true`):
+%%     - Bond (main)
+%%     - Bond.Test
+%%     - Bond.Predicates
+%%     - Bond.PropertyTest
+%%     - Bond.PreconditionError / PostconditionError / CheckError / InvariantError
+%%
+%%   Internal modules (already marked `internal: true` or `false`):
+%%     - Bond.AssertionError
+%%     - Bond.Runtime.Eval
+%%     - Bond.PropertyTest.Sequence
+%%     - All Bond.Compiler.*
+%%     - Bond.Compiler.CompileStateFSM.Server
+%%
+%%   Known audit items found during planning:
+%%     - `Bond.Predicates.__opaque__/1` and `__truthy__/1` are `@doc false`
+%%       but referenced from public moduledocs → 3 pre-existing hexdoc
+%%       warnings ("documentation references function but it is hidden").
+%%       Decide: rephrase the moduledoc refs, or expose these as documented
+%%       low-level helpers, or move the cross-refs out of public reach.
+%%     - `Bond.Compiler.CompileStateFSM.Server` is referenced from a public
+%%       guide/CHANGELOG → 1 pre-existing hexdoc warning. Same options.
+%%
+%% Acceptance from issue #1:
+%%   - A written, reviewed list of the public surface.
+%%   - Stability guarantees documented.
+%%   - No internal modules/types in published API docs.
+%%
+%% Arrows point from a goal to its prerequisites. Leaves (green) have no
+%% further prerequisites and are safe to start first. Depth-first per
+%% Mikado: pick a leaf, finish it, keep tests green, commit, repeat.
+
+flowchart TD
+    G(["**Goal**<br/>#1 closed: public surface enumerated and locked;<br/>stability guarantees published; zero internal leaks in hexdocs.<br/>Last 1.0 blocker — this clears the path for the 1.0.0 release."])
+
+    G --> S5["5. CHANGELOG entry under Unreleased + close #1 on GitHub +<br/>check off in #11 (Road to 1.0.0). After this, only the Polish<br/>bucket (#8/#9/#10) remains before 1.0.0.<br/><b>#1-wrap</b>"]
+
+    S5 --> S4["4. Write 'Stability guarantees' doc (new guides/stability.md OR<br/>a top-level section in the main Bond moduledoc — decide based on<br/>length once drafted). Short and decisive: what semver covers from<br/>1.0 onward, what's explicitly excluded (compile error message text,<br/>internal modules, generated-code shapes), and the deprecation policy<br/>(at least one minor with a deprecation warning before removal in<br/>the next major).<br/>Cross-references the public-surface enumeration from step 3.<br/><b>#1-stability-guarantees</b>"]
+
+    S5 --> S3["3. Enumerate the public surface in a durable doc. Covers:<br/>(a) module-attribute syntax: @pre / @post / @invariant / @doc<br/>    forms (bare, labelled, keyword-list), and the implicit `subject`<br/>    binding semantics.<br/>(b) macros: check/1, old/1, ~>, <~, &lt;~ pattern, |||, plus<br/>    `use Bond` and its options.<br/>(c) Bond.Predicates: xor/2, |||/2, implies?/2, ~>/2, <~/2 (note<br/>    the `~>`/`<~` precedence gotcha already in Predicates moduledoc).<br/>(d) Bond.Test helpers: assert_* / refute_* / capture functions.<br/>(e) Bond.PropertyTest: forall and the property-test integration.<br/>(f) Telemetry event: [:bond, :assertion, :failure] event name +<br/>    measurement/metadata field shapes.<br/>(g) Error structs: Bond.PreconditionError / PostconditionError /<br/>    CheckError / InvariantError — name, fields, where raised.<br/>(h) Config keys: :preconditions, :postconditions, :invariants,<br/>    :checks, :overrides, :warn_skipped_invariants — each with its<br/>    accepted value set.<br/>(i) Module attribute: @bond_warn_skipped_invariants (tri-state).<br/>(j) use Bond options: same key set as config; per-module overrides.<br/><b>#1-public-surface-doc</b>"]
+
+    S4 --> S3
+    S3 --> S2["2. Audit hexdocs output for internal leaks. Run `mix docs`,<br/>inspect for: (a) any Bond.Compiler.* or Bond.Runtime.* module<br/>appearing in the rendered API list; (b) any public @spec/@type<br/>referencing an internal type (Bond.Compiler.Assertion.t,<br/>Bond.Compiler.AnnotatedFunction.t, etc.); (c) the 4 pre-existing<br/>hexdoc warnings — decide for each whether to keep the cross-link<br/>(promoting the referenced helper to documented public API) or<br/>rephrase the moduledoc to not link directly. Apply fixes.<br/><b>#1-leak-audit</b>"]
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S2 leaf;
