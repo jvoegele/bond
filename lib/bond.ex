@@ -9,6 +9,15 @@ defmodule Bond do
              |> String.split("<!-- README END -->")
              |> List.first()
 
+  # `require` (not `alias`) so Mix creates a strong compile-time dep on
+  # AnnotatedFunction and schedules annotated_function.ex before this file.
+  # Every user module has a compile dep on bond.ex via `use Bond`, so this
+  # transitively ensures Bond.Compiler.AnnotatedFunction is compiled before
+  # any user module's @on_definition callbacks fire. Without this, the parallel
+  # compiler can race: annotated_function.ex is still in flight when the first
+  # `use Bond` module's gen_statem event handlers call AnnotatedFunction.new/1.
+  require Bond.Compiler.AnnotatedFunction
+
   @typedoc false
   @type assertion_kind :: :precondition | :postcondition | :check | :invariant
 

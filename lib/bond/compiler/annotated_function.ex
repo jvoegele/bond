@@ -22,6 +22,11 @@ defmodule Bond.Compiler.AnnotatedFunction do
   alias Bond.Compiler.FunctionDefinition
   alias Bond.Compiler.Invariants
   alias Bond.Compiler.OldExpression
+  # `require` (not `alias`) so Mix creates a strong compile-time dep on Clause and schedules
+  # clause.ex before this file. This is required on Elixir 1.19+ where the parallel compiler
+  # can write AnnotatedFunction.beam to disk before AnnotatedFunction.Clause.beam, causing
+  # AnnotatedFunction.Clause.new/1 to be unavailable when the gen_statem calls it.
+  require Bond.Compiler.AnnotatedFunction.Clause, as: Clause
 
   defstruct kind: nil,
             module: nil,
@@ -44,28 +49,6 @@ defmodule Bond.Compiler.AnnotatedFunction do
           invariants: [Bond.Compiler.Assertion.t()],
           doc_attributes: [FunctionDefinition.doc_attribute()]
         }
-
-  defmodule Clause do
-    @moduledoc internal: true
-    @moduledoc """
-    Struct to represent an individual clause of a function.
-    """
-
-    alias Bond.Compiler.FunctionDefinition
-
-    defstruct [:env, :params, :guards, :body]
-
-    @type t :: %__MODULE__{
-            env: Macro.Env.t() | nil,
-            params: list() | nil,
-            guards: list() | nil,
-            body: keyword() | nil
-          }
-
-    def new(%FunctionDefinition{} = function_def) do
-      struct(__MODULE__, Map.take(function_def, [:env, :params, :guards, :body]))
-    end
-  end
 
   def new(%FunctionDefinition{} = function_def) do
     %__MODULE__{
