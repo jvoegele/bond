@@ -1,7 +1,7 @@
 defmodule Bond.MixProject do
   use Mix.Project
 
-  @version "0.18.0"
+  @version "1.0.0-rc.1"
   @source_url "https://github.com/jvoegele/bond"
 
   def project do
@@ -77,7 +77,10 @@ defmodule Bond.MixProject do
       files: ["lib", "mix.exs", "README.md", "LICENSE", "CHANGELOG.md", ".formatter.exs"],
       maintainers: ["Jason Voegele"],
       licenses: ["Apache-2.0"],
-      links: %{"GitHub" => @source_url}
+      links: %{
+        "GitHub" => @source_url,
+        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
+      }
     ]
   end
 

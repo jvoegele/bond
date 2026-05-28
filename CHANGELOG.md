@@ -5,7 +5,90 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0-rc.1] - 2026-05-28
+
+First **release candidate** for Bond 1.0.0. Published to gather
+feedback from the Elixir community before the stability guarantees in
+`guides/stability.md` lock in at 1.0.0 final. Bug reports and design
+feedback are welcome at https://github.com/jvoegele/bond/issues — small
+adjustments to the public surface are still possible between RC and
+final, based on what we hear.
+
+### 1.0 highlights
+
+- **Documented and frozen public API surface.** See
+  [Public API surface](guides/public-api.md) for the exhaustive
+  enumeration of every name covered by the semver contract — module
+  attributes, macros, operators, the `Bond.Predicates` callables,
+  `Bond.Test` and `Bond.PropertyTest` helpers, the telemetry event
+  and metadata shape, the four error structs, the configuration keys,
+  and the public type set. Internal namespaces (`Bond.Compiler.*`,
+  `Bond.Runtime.*`) are explicitly carved out.
+- **A semver-style stability promise.** See
+  [Stability guarantees](guides/stability.md) for what patch / minor /
+  major mean in practice, what's explicitly excluded (compile-error
+  message text, generated-code shape, `Exception.message/1` output),
+  and the deprecation policy (minimum one minor with a deprecation
+  warning before removal in next major).
+- **Published overhead numbers.** See
+  [Overhead](guides/overhead.md) for concrete compile-time and runtime
+  cost figures from a documented reference environment, with
+  `mix run bench/...` recipes for re-running on your hardware.
+  Headlines: a `:purge`d contract is free; an enabled `@pre` adds ~130
+  ns/call; Bond compile-time overhead is ~10 ms per module that uses
+  contracts.
+- **Compatibility verified across Elixir 1.16–1.19 in CI** — the
+  declared `~> 1.16` floor, with parallel-compile races fixed and a
+  Dialyzer baseline established for Bond's own library code.
+- **Known footguns either fixed, documented, or surfaced as
+  compile-time warnings.** New `:warn_skipped_invariants` opt-out
+  warning catches the most common silent-skip case (see Migration
+  below).
+
+### Migrating from 0.18.x
+
+**No breaking API changes.** Code written against 0.18.x continues to
+compile and run identically. There is, however, one new opt-out
+compile warning that may surface in code that previously compiled
+without diagnostics — described next.
+
+**`:warn_skipped_invariants` is the only new behaviour you may see.**
+Bond now emits a compile-time warning when a public function in an
+invariant-declaring module has neither a head that pattern-matches the
+struct nor a body that returns one — those functions silently skip
+invariants entirely (the footgun the warning was designed to catch).
+If your codebase has struct modules with utility or constructor
+functions whose bodies don't return literal `%__MODULE__{...}` or
+`{:ok, %__MODULE__{...}}`, you may see warnings of the form:
+
+```
+public function `MyMod.helper/0` in invariant-declaring module
+`MyMod` has no clause that pattern-matches the struct or returns
+one; invariants are skipped here. If intentional, suppress with
+`@bond_warn_skipped_invariants false` (per function), `use Bond,
+warn_skipped_invariants: false` (per module), or `config :bond,
+warn_skipped_invariants: false` (globally).
+```
+
+The detection is conservative on the post-side: only literal struct
+returns suppress the warning automatically. Helpers like
+`def from_map(m), do: build(m)` still warn; the per-function attribute
+is the workaround.
+
+Three suppression knobs ship; pick the narrowest scope that fits the
+intent:
+
+- **Per function** (recommended for individual utility/constructor
+  functions): `@bond_warn_skipped_invariants false` placed before the
+  `def`. Tri-state — `true` re-enables under a module/global `false`.
+- **Per module** (for modules whose whole purpose isn't the struct —
+  rare; reconsider whether `@invariant` belongs there at all):
+  `use Bond, warn_skipped_invariants: false`.
+- **Global** (use sparingly — you lose the footgun-catcher
+  everywhere): `config :bond, warn_skipped_invariants: false`.
+
+See the FAQ entry "Why is Bond warning about skipped invariants?" for
+the full diagnostic guide.
 
 ### Documentation
 
@@ -325,7 +408,7 @@ exposed by Elixir 1.19's more aggressive parallel compiler.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.17.3] - 2026-06-03
+## [0.17.3] - 2026-05-26
 
 A small additive release: `_name` and `name` are now treated as semantically
 equivalent in the consistent-naming check. Surfaced by a Photon dogfood
@@ -374,7 +457,7 @@ contracted `def f(a, b, c)`) tripped the agreement rule unnecessarily.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.17.2] - 2026-06-02
+## [0.17.2] - 2026-05-26
 
 A purely additive release narrowing the 0.17.0 consistent-naming rule from
 "all positions must agree" to "positions referenced by some contract must
@@ -450,7 +533,7 @@ otherwise have required renaming every parameter across all clauses.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.17.1] - 2026-05-31
+## [0.17.1] - 2026-05-26
 
 A purely additive release closing a doc-symmetry gap: per-function
 `@pre`/`@post` already get rendered into each function's `@doc` as
@@ -525,7 +608,7 @@ ensures unless the author had hand-written them up.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.17.0] - 2026-05-30
+## [0.17.0] - 2026-05-26
 
 0.17.0 closes the longest-standing bug surfaced by real-world dogfooding:
 multi-clause functions whose first body clause had shape-specific
@@ -652,7 +735,7 @@ antecedent. `~>` is now a `defmacro` that short-circuits.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.16.2] - 2026-05-28
+## [0.16.2] - 2026-05-26
 
 A patch release covering eight issues surfaced by dogfooding Bond 0.16.1
 on a real-world Elixir umbrella application (Photon, ~200+ modules). Six
@@ -754,7 +837,7 @@ conversation.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.16.1] - 2026-05-27
+## [0.16.1] - 2026-05-22
 
 A patch release covering a 1.0-prep test-coverage audit (no behavioural
 change, just locking down behaviour that wasn't directly tested) plus
@@ -865,7 +948,7 @@ date with 0.16.0.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.16.0] - 2026-05-26
+## [0.16.0] - 2026-05-22
 
 0.16.0 is the first 1.0-prep release. It tightens the public API in two
 places where the surface had accumulated friction: `@invariant` drops its
@@ -969,7 +1052,7 @@ call site with a migration message.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.15.0] - 2026-05-25
+## [0.15.0] - 2026-05-22
 
 0.15.0 closes a correctness gap in conditional compilation: previously
 `:preconditions`, `:postconditions`, and `:invariants` could be toggled
@@ -1038,7 +1121,7 @@ independent of the chain.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.14.0] - 2026-05-24
+## [0.14.0] - 2026-05-22
 
 0.14.0 adds **`Bond.PropertyTest`** — a property-based testing layer that
 uses Bond's contracts as the oracle. The hard part of PBT is usually
@@ -1088,7 +1171,7 @@ inputs through already-instrumented code.
 
 - Unchanged. Elixir `~> 1.14`.
 
-## [0.13.0] - 2026-05-23
+## [0.13.0] - 2026-05-22
 
 0.13.0 adds **`@invariant`** declarations for struct modules — module-scoped
 properties that hold across every public function in the struct's defining

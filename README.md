@@ -230,7 +230,7 @@ clean.
 Process-level invariants (for `GenServer`/`Agent` state) aren't a
 separate feature. The recommended pattern is to keep the process state
 in a struct and declare invariants on that struct's module. See the
-[Contracts in a Concurrent World](contracts-and-concurrency.html) guide.
+[Contracts in a Concurrent World](guides/contracts-and-concurrency.md) guide.
 
 ## Inline `check/1` assertions
 
@@ -306,7 +306,7 @@ closure.
 > the snapshot and the postcondition evaluation — an `Agent`, a
 > `GenServer.call/3`, a shared ETS table — another process can
 > interleave and the comparison becomes meaningless. The
-> [Contracts in a Concurrent World](contracts-and-concurrency.html)
+> [Contracts in a Concurrent World](guides/contracts-and-concurrency.md)
 > guide covers the locking pattern that recovers correctness there.
 > For struct-based state machines, `@invariant` is usually a better
 > fit than `old` — it constrains every operation's input and output
@@ -601,7 +601,7 @@ enable PBT:
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.18.0"},
+    {:bond, "~> 1.0.0-rc.1"},
     {:stream_data, "~> 1.0", only: [:dev, :test]}
   ]
 end
@@ -614,9 +614,9 @@ end
 
 From 1.0 onward, Bond follows [Semantic Versioning](https://semver.org/)
 over an enumerated public API surface. The
-[Public API surface](public-api.md) guide lists every covered name —
+[Public API surface](guides/public-api.md) guide lists every covered name —
 attributes, macros, functions, telemetry event, error structs, config
-keys. The [Stability guarantees](stability.md) guide states what semver
+keys. The [Stability guarantees](guides/stability.md) guide states what semver
 means in practice, what's explicitly *not* covered (internal modules,
 generated-code shape, error-message text), and the deprecation policy.
 
@@ -632,7 +632,7 @@ on is safe across upgrades, those two guides are the source of truth.
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.18.0"}
+    {:bond, "~> 1.0.0-rc.1"}
   ]
 end
 ```
