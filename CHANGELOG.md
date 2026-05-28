@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.17.5] - 2026-05-28
+
+A patch release eliminating downstream `mix dialyzer` warnings emitted by
+Bond-generated code when the user's assertion duplicates a typespec-implied
+guard. Surfaced by a dogfood round in a real consumer (Photon) where every
+`use Bond` module produced one `pattern_match` or `pattern_match_cov`
+warning, forcing the consumer to suppress with `@dialyzer :no_match` per
+module.
+
+### Fixed
+
+- **Lifted assertion defps no longer emit `if`/`else` inline.** The
+  truthiness check and throw-on-failure moved into two new
+  `Bond.Runtime.Eval` functions — `check_assertion/3` (used by `@pre`,
+  `@post`, and `@invariant`) and `check_value/3` (used by `Bond.check/1`).
+  Each is defined as a multi-clause function matching `false`/`nil`/`_`,
+  which prevents Dialyzer's caller-flow narrowing from killing the falsy
+  clause when the user's expression is statically `true` (e.g. `@pre
+  is_binary(x)` on a function `@spec`-narrowed to `binary()`).
+
+- **Lifted-defp arguments are routed through a type-laundering helper.**
+  `Bond.Predicates.__opaque__/1` (and `__truthy__/1` for the `~>` operator)
+  use `:persistent_term.get/2` to defeat Dialyzer's parameter-type
+  propagation from the wrapper into the lifted defp. Without this, an
+  assertion expression containing `and`/`or`/`case` (which expand to their
+  own internal `case`) would still narrow under the wrapper's `@spec`,
+  producing `pattern_match` warnings inside the user's expression itself —
+  e.g. `@post is_binary(result) and result != ""` on a function returning
+  `binary()` had a dead `false ->` clause in the `and/2` expansion.
+
+- **`Bond.Predicates.<~/2` discriminator is laundered.** The pattern-match
+  operator's `case expr do pattern -> true; _unmatched -> false end`
+  previously produced `pattern_match_cov` warnings when the user's pattern
+  exhausted the `@spec`-narrowed type of `expr` (e.g. `{:ok, _} <~ result`
+  on a function returning `{:ok, integer()}`). Routing `expr` through
+  `__opaque__/1` keeps the `_unmatched` clause reachable.
+
+- **`Bond.Predicates.~>/2` antecedent is laundered.** The implication
+  operator's `if antecedent do !!consequent else true end` previously
+  produced a `pattern_match` warning on the `else: true` branch when the
+  antecedent was statically `true` (e.g. `is_binary(x) ~> ...` on a binary
+  argument). Routing the antecedent through `__truthy__/1` keeps the
+  `else` branch reachable.
+
+### Internal
+
+- **Five new fixtures** in `integration/consumer/lib/contract_consumer.ex`
+  (`TypedGuard` and `TypedInvariant`) exercise every shape that previously
+  warned: tautological `@pre` / `@post` / `@invariant`, `~>` antecedent
+  tautology, `<~` exhaustive pattern. The existing downstream-Dialyzer CI
+  job (added in 0.17.4) is now also a regression guard for this fix.
+
+- **Generated-AST unit tests updated** in
+  `test/bond/compiler/{annotated_function,assertion,invariants}_test.exs`
+  to assert that wrapper → lifted-defp call sites route every argument
+  through `Bond.Predicates.__opaque__/1` and that the lifted defps
+  delegate the if/throw to `Bond.Runtime.Eval.check_assertion/3` /
+  `check_value/3`.
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.17.4] - 2026-05-28
 
 A patch release fixing two Elixir 1.18+ compatibility issues, surfaced by a
