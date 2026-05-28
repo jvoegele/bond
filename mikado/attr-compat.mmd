@@ -1,0 +1,34 @@
+%% Mikado graph for Issue #4 — Kernel.@/1 override compatibility
+%%
+%% Bond's `use Bond` does `import Kernel, except: [@: 1]` then `import Bond`,
+%% placing Bond's @pre/@post/@invariant/@doc clauses and a catch-all
+%% `defmacro @attr` (which forwards to `Kernel.@/1`) in scope.
+%%
+%% Two separate concerns under test:
+%%   A. Does the catch-all correctly forward standard Elixir attributes
+%%      (@derive, @enforce_keys, typespecs, accumulating attrs, etc.)?
+%%   B. What happens when another library also overrides @/1?
+%%      (Conflict: last `use` wins; Bond's catch-all routes to Kernel,
+%%       bypassing the other lib's interception. Order matters.)
+%%
+%% Arrows point from a goal to its prerequisites. Leaves (green) have no
+%% further prerequisites and are safe to start first. Depth-first per Mikado:
+%% pick a leaf, finish it, keep tests green, commit, repeat.
+%%
+%% Out of scope: testing every conceivable third-party library. We use a
+%% synthetic FakeAttrLib (test/support) to isolate the exact conflict shape
+%% without adding a real external dep we don't otherwise need.
+
+flowchart TD
+    G(["**Goal**<br/>Issue #4 closed: @/1 override compatibility verified;<br/>attribute forwarding + cross-library interaction tested;<br/>compatibility note documented in FAQ"])
+
+    G --> S4["4. Add 'Compatibility with @/1-overriding libraries' section to guides/faq.md.<br/>Document: catch-all routes to Kernel (not third-party @); ordering rules;<br/>known-good standard attributes; recommended `use` order.<br/><b>#4-compat-guide</b>"]
+
+    S4 --> S3["3. Cross-library conflict fixtures + tests<br/>(test/support/bond_test/attr_compat.ex + test/bond/attr_compat_test.exs).<br/>Two orderings: `use FakeAttrLib; use Bond` vs `use Bond; use FakeAttrLib`.<br/>Assert: Bond annotations active iff Bond is last; @fake_contract stored<br/>as plain attr (via Kernel catch-all) when Bond is last.<br/><b>#4-cross-lib-tests</b>"]
+
+    S4 --> S1["1. Attribute forwarding fixtures + tests<br/>(test/support/bond_test/attr_compat.ex + test/bond/attr_compat_test.exs).<br/>Modules combining `use Bond` with: @derive, @enforce_keys, @spec/@type/<br/>@typep/@opaque/@callback, accumulating custom attrs, @external_resource,<br/>@behaviour. Assert each attribute is present and has the expected value.<br/><b>#4-forwarding-tests</b>"]
+
+    S3 --> S2["2. FakeAttrLib support module<br/>(test/support/bond_test/fake_attr_lib.ex).<br/>A synthetic `use`-able library that does `import Kernel, except: [@: 1]`<br/>and defines its own `defmacro @{:fake_contract, _, [expr]}` clause plus<br/>a catch-all forwarding to `Kernel.@`. Stores intercepted values in<br/>a module attribute for test assertions.<br/><b>#4-fake-attr-lib</b>"]
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S1,S2 leaf;
