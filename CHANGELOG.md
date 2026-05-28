@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Closed #5 — opt-out compile warning for silently-skipped
+  invariants.** A public function in an invariant-declaring module
+  whose head doesn't pattern-match the struct previously had its
+  invariants silently skipped — documented as a footgun in the README
+  and FAQ, but uncatchable without reading every diff. Bond now emits
+  a compile-time warning at the function's definition site naming the
+  offender and offering both suppression knobs.
+- **New config key `:warn_unmatched_invariant_subject`** (default
+  `true`, boolean only). Suppressible per-module via `use Bond,
+  warn_unmatched_invariant_subject: false` and globally via
+  `config :bond, warn_unmatched_invariant_subject: false`. Both knobs
+  are part of the public API as of 1.0.
+
+### Changed
+
+- **Closed #6 — per-contract disable mechanism scoped out of 1.0
+  (FAQ rewrite).** The FAQ entry "How do I disable a single failing
+  contract while debugging?" no longer punts on the design question.
+  The three existing workarounds (comment out, move to `check/1`,
+  disable the kind globally for the env) are presented as the
+  supported answer with a one-line "when this is the right choice"
+  hint each. Per-contract on/off knobs intentionally don't ship: Bond
+  already has rich per-kind / per-module / per-`use Bond` toggles, and
+  per-assertion off-switches tend to mask broken agreements rather
+  than resolve them.
+
+- **Closed #7 — three deferred features reframed as 1.0 scope
+  boundaries.** Each restated as a deliberate scope decision with a
+  workaround, replacing "not yet" / "may be added" / "if there is ever
+  a demonstrated need" framing:
+  - Contracts on macros (`lib/bond/compiler/compiler.ex:188` internal
+    comment) — wrap the macro body in a contracts-annotated regular
+    function and call that from the macro.
+  - Per-clause contracts (`guides/faq.md`) — by-design at 1.0; if
+    different clauses genuinely have different contracts, they're
+    really two different functions. Bodyless-head + per-clause
+    implementation is the workaround when parameter names differ.
+  - Data-specification facility / `Bond.Spec` (`guides/history.md`) —
+    won't ship. Data specification is Norm's job, contract programming
+    is Bond's. Compose them via remote calls (see the FAQ).
+
 ### Internal
 
 - **Closed #4 — `Kernel.@/1` override compatibility verified.** Adds
