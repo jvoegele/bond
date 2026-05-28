@@ -1,0 +1,38 @@
+%% Mikado graph for the runtime + compile-time overhead benchmarks
+%% (issues #20 and #9). Doing them together because the publishing surface
+%% is shared (`guides/overhead.md` with two top-level sections) and the
+%% env/methodology preamble is written once. The benchmark fixtures and
+%% measurement logic are orthogonal — runtime measures :timer.tc per call,
+%% compile-time measures `mix compile --force` wall-clock — so steps 2
+%% and 3 are independent leaves.
+%%
+%% Design decisions (user-approved before plan):
+%%   - Reference numbers come from my local Mac with env fully disclosed
+%%     (CPU model, RAM, OS, Elixir/OTP versions). The doc invites readers
+%%     to re-run on their target hardware via documented `mix run` recipes.
+%%   - Doc lives at `guides/overhead.md`, registered in mix.exs extras,
+%%     cross-linked from the FAQ ("Will contracts slow down my production
+%%     code?") and the Stability guide.
+%%
+%% Existing benchmark coverage that motivates the expansion:
+%%   - `bench/runtime_check_overhead.exs` currently measures only `@pre`
+%%     in three modes (:purge, true, false). Issue #20 wants the full
+%%     grid: (pre, post, invariant, check) × (true, false, :purge) +
+%%     baseline.
+%%   - No compile-time benchmark exists. Issue #9 wants a synthetic app
+%%     with many `use Bond` modules and a parallel baseline, measured
+%%     end-to-end with `mix compile`.
+
+flowchart TD
+    G(["**Goal**<br/>#9 and #20 closed; `guides/overhead.md` publishes concrete<br/>compile-time and runtime overhead numbers from a documented env.<br/>The polish bucket shrinks from 4 to 2 (only #8 and #10 remain)."])
+
+    G --> S5["5. **Wrap-up**: CHANGELOG entry under Documentation; update FAQ entry<br/>'Will contracts slow down my production code?' to cross-link the new<br/>guide and surface the headline numbers; close #9 + #20 on GitHub;<br/>check off in #11 (Road to 1.0.0).<br/><b>#overhead-wrap</b>"]
+
+    S5 --> S4["4. **`guides/overhead.md`** — durable publishing doc. Two top-level<br/>sections (Compile-time / Runtime). Shared env preamble (CPU/RAM/OS/<br/>Elixir-OTP versions/methodology). Results tables for each section.<br/>'How to re-run on your hardware' footer with recipes. Register in<br/>mix.exs extras alongside the Stability and Public API guides.<br/><b>#overhead-doc</b>"]
+
+    S4 --> S3["3. **#9 — compile-time benchmark**. New fixture under<br/>`bench/compile_overhead/`: two parallel Mix projects, `with_bond/`<br/>(N modules each `use Bond` + a trivial `@pre`/`@post`) and `baseline/`<br/>(N identical modules without contracts). Driver script runs<br/>`mix compile --force` on both with the deps already compiled and<br/>reports wall-clock. Pick N to be representative of 'real app'<br/>(~200 modules per the reviewer feedback).<br/><b>#9-compile</b>"]
+
+    S4 --> S2["2. **#20 — runtime benchmark grid**. Expand<br/>`bench/runtime_check_overhead.exs` from 3 measurements (pre only ×<br/>3 modes) to the full grid: baseline (no contracts) + each of<br/>{@pre, @post, @invariant, check/1} × {true, false, :purge}, totalling<br/>1 + 4×3 = 13 cells. Use the existing :timer.tc methodology;<br/>report median of multiple runs to dampen GC spikes. Verify the<br/>script runs locally and produces sensible numbers.<br/><b>#20-runtime</b>"]
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S2,S3 leaf;
