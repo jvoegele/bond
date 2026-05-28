@@ -9,13 +9,25 @@ defmodule Bond do
              |> String.split("<!-- README END -->")
              |> List.first()
 
-  # `require` (not `alias`) so Mix creates a strong compile-time dep on
-  # AnnotatedFunction and schedules annotated_function.ex before this file.
-  # Every user module has a compile dep on bond.ex via `use Bond`, so this
-  # transitively ensures Bond.Compiler.AnnotatedFunction is compiled before
-  # any user module's @on_definition callbacks fire. Without this, the parallel
-  # compiler can race: annotated_function.ex is still in flight when the first
-  # `use Bond` module's gen_statem event handlers call AnnotatedFunction.new/1.
+  # `require` (not `alias`) so Mix creates strong compile-time deps on both
+  # Bond.Compiler and Bond.Compiler.AnnotatedFunction, and schedules both
+  # before this file. Every user module has a compile dep on bond.ex via
+  # `use Bond`, so this transitively ensures:
+  #
+  #   (a) Bond.Compiler.AnnotatedFunction is compiled before any user
+  #       module's @on_definition callbacks fire (the original 0.17.4 race
+  #       fix, see the bond-compile-order memory note).
+  #   (b) The full chain Bond.Compiler → CompileStateFSM → Server is on
+  #       disk before this file's __using__ macro body calls
+  #       `Bond.Compiler.init/1` (which starts the gen_statem).
+  #
+  # (b) is needed because the call to Bond.Compiler.init/1 from the macro
+  # body would otherwise be just a fully-qualified reference — sometimes
+  # tracked as a compile dep by Mix's parallel scheduler, sometimes not.
+  # Under cache-warm CI conditions, a doc-only change to server.ex was
+  # enough to flip a previously-working race and break compilation of
+  # `use Bond` modules — see the gotcha note for the symptom + diagnosis.
+  require Bond.Compiler
   require Bond.Compiler.AnnotatedFunction
 
   @typedoc false
