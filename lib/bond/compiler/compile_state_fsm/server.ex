@@ -2,8 +2,12 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
   @moduledoc false
   @behaviour :gen_statem
 
-  alias Bond.Compiler.AnnotatedFunction
-  alias Bond.Compiler.FunctionDefinition
+  # `require` (not `alias`) so Mix creates strong compile-time deps on both modules and
+  # schedules them before this file. Without this, the parallel compiler on Elixir 1.19+
+  # can race: the gen_statem event handler calls AnnotatedFunction.new/1 at user-module
+  # compile time before AnnotatedFunction.beam has been written to disk.
+  require Bond.Compiler.AnnotatedFunction, as: AnnotatedFunction
+  require Bond.Compiler.FunctionDefinition, as: FunctionDefinition
 
   defstruct module: nil,
             last_mfa: nil,

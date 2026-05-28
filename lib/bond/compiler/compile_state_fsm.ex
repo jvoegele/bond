@@ -168,5 +168,4 @@ defmodule Bond.Compiler.CompileStateFSM do
   def functions_with_contracts(fsm) do
     :gen_statem.call(fsm, :functions_with_contracts)
   end
-
 end
