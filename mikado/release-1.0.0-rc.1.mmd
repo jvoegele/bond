@@ -1,0 +1,46 @@
+%% Mikado plan for the 1.0.0-rc.1 release cut.
+%%
+%% This is the final pre-1.0 milestone — a release candidate published to
+%% solicit feedback from Elixir community forums before the actual 1.0.0
+%% goes out. SemVer-canonical pre-release format (`1.0.0-rc.1`, dot-
+%% separated), matching Phoenix / Ecto / Elixir core convention. The RC
+%% gives a window to receive feedback and apply small polish before the
+%% stability guarantees in `guides/stability.md` lock in at 1.0.0 proper.
+%%
+%% Release-branch convention (from bond-workflow memory):
+%%   - Created from `main` as `release/1.0.0-rc.1` (already done).
+%%   - All commits below land on this branch.
+%%   - Merge to `main` happens at the user's hand-off point via `--no-ff`
+%%     merge with message `Merge release/1.0.0-rc.1: <summary>`.
+%%   - Tag `1.0.0-rc.1` (NO `v` prefix; bare-version form per the user's
+%%     existing tags).
+%%   - User runs `mix hex.publish` themselves.
+%%
+%% Per the bond-workflow memory, version references to update:
+%%   - `mix.exs` `@version`
+%%   - CHANGELOG (new entry at top)
+%%   - README.md install snippets — TWO of them:
+%%     - inside the moduledoc/PBT section between <!-- README START/END -->
+%%     - in `## Installation` section below <!-- README END -->
+%%   - guides/getting-started.md install snippet
+%%
+%% Issue #10 acceptance criteria add:
+%%   - `mix docs` produces no broken links
+%%   - CHANGELOG has 1.0.0 + migration entry (here: 1.0.0-rc.1 + migration)
+%%   - Package metadata in mix.exs verified for hex publish
+
+flowchart TD
+    G(["**Goal**<br/>1.0.0-rc.1 release branch merge-ready and handed off to user<br/>for tag + mix hex.publish. The final 1.0.0 release will be a smaller<br/>follow-up cut after any RC feedback is folded in."])
+
+    G --> S6["6. **Wrap-up**: close #10 on GitHub, check off in #11 (Road to<br/>1.0.0.0), update bond-project-state memory with the RC status.<br/>The bond-workflow memory's 'tags use bare X.Y.Z form' rule applies<br/>here (1.0.0-rc.1, not v1.0.0-rc.1). Document the hand-off steps the<br/>user needs to run.<br/><b>#10-wrap</b>"]
+
+    S6 --> S5["5. **CHANGELOG consolidation** — convert the Unreleased section<br/>into `[1.0.0-rc.1] - YYYY-MM-DD`. Add a top-of-entry 'Migration from<br/>0.18.x' subsection (no breaking changes; one new opt-out compile<br/>warning suppressible via three knobs) and a '1.0 highlights' summary<br/>linking the new public-api / stability / overhead guides. Preserve<br/>the existing Documentation + Added + Changed + Internal subsections<br/>that document the polish bucket work.<br/><b>#10-changelog</b>"]
+
+    S6 --> S4["4. **Version bumps** — `mix.exs` @version → '1.0.0-rc.1'; README<br/>install snippets (BOTH: the one inside the moduledoc PBT section<br/>between START/END markers, and the one in ## Installation below<br/>END marker); guides/getting-started.md install snippet. Bump 0.18.0<br/>→ 1.0.0-rc.1 in all three places.<br/><b>#10-version-bumps</b>"]
+
+    S6 --> S3["3. **Doc-link audit** — grep every .md file for cross-links of the<br/>form `[label](target.html)` or `[label](target.md)`; verify each<br/>target exists in doc/ after `mix docs`. The #10 issue specifically<br/>flags the README mixing .html and .md link forms — adjudicate the<br/>convention and apply it uniformly. Also verify the public-api,<br/>stability, and overhead guide cross-references all render.<br/><b>#10-doc-link-audit</b>"]
+
+    S6 --> S2["2. **Package metadata audit** — verify mix.exs package config<br/>(files, maintainers, licenses, links, description) is correct for<br/>the 1.0 hex publish. The `files:` list must include every directory<br/>needed for downstream compilation; license is Apache-2.0; links<br/>currently include GitHub; description is the short pitch shown on<br/>hex.pm. Decide whether `bench/` should ship with the package (lean:<br/>no — saves package size, users can read it on GitHub).<br/><b>#10-package-audit</b>"]
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S2,S3,S4,S5 leaf;
