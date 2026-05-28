@@ -31,7 +31,7 @@ defmodule Bond.PropertyTest do
   [`stream_data`](https://hex.pm/packages/stream_data). It's listed as an optional
   dependency in `bond`'s mix file, so users opting into PBT add it to their own deps:
 
-      {:stream_data, "~> 0.6", only: [:dev, :test]}
+      {:stream_data, "~> 1.0", only: [:dev, :test]}
 
   Then in a test file:
 
@@ -53,7 +53,7 @@ defmodule Bond.PropertyTest do
 
       defp deps do
         [
-          {:stream_data, "~> 0.6", only: [:dev, :test]},
+          {:stream_data, "~> 1.0", only: [:dev, :test]},
           # ...
         ]
       end

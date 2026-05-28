@@ -52,7 +52,7 @@ defmodule Bond.MixProject do
       # Marked `optional: true` so it's available for Bond's own test suite (and to lib/
       # references guarded by `Code.ensure_loaded?/1`) without becoming a transitive dep
       # for downstream apps.
-      {:stream_data, "~> 0.6", optional: true},
+      {:stream_data, "~> 1.0", optional: true},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: [:dev, :test]},
