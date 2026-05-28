@@ -1,0 +1,11 @@
+graph TD
+    DONE["Issue #3 closed:<br/>`~> 1.14` floor confirmed;<br/>CI green across 1.14–1.19"]
+
+    DONE --> CONFIRM["Verify CI passes on all 5 cells;<br/>confirm or update mix.exs<br/>version constraint"]
+
+    CONFIRM --> MATRIX["Expand test matrix from 3→5 cells:<br/>add 1.17.3/OTP27 and 1.19.5/OTP27;<br/>remove 'starter matrix' comment<br/><b>#3-matrix</b>"]
+
+    MATRIX --> PLAN["Write Mikado graph<br/>(this commit)<br/><b>#3-plan</b>"]
+
+    style PLAN fill:#90EE90
+    style MATRIX fill:#90EE90
