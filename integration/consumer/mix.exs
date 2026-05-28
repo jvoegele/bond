@@ -27,7 +27,7 @@ defmodule ContractConsumer.MixProject do
   defp deps do
     [
       {:bond, path: "../.."},
-      {:stream_data, "~> 0.6", only: [:dev, :test]},
+      {:stream_data, "~> 1.0", only: [:dev, :test]},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
   end
