@@ -1,13 +1,21 @@
 # Contracts in a Concurrent World
 
-The `Bond` moduledocs touched on the pitfalls of defining contracts for
-stateful concurrent processes. This guide will provide a more in-depth
-discussion of the problem and offer a solution for devising contracts in such
-a context that does not compromise the strength of the assertions in the
-contracts.
+Bond's `old/1` macro snapshots a value at function entry so a postcondition
+can compare the after-state to the before-state. That works cleanly when the
+captured state is owned by the running process — a struct field, a process-
+dictionary entry, an ETS table the process has exclusive access to. The
+trickier case is state shared across processes: an `Agent`, a `GenServer`,
+a shared ETS table, a database row. Another process can interleave between
+the `old` snapshot and the postcondition's read of the new state, and the
+comparison becomes meaningless.
 
-Let's revisit the example of a stateful `Counter` module in the form it was
-originally presented, this time with all of the `Agent` details provided:
+This guide works through the problem with a concrete example — a counter
+built on top of `Agent` — and ends with a refactoring pattern that recovers
+the strong "incremented by exactly one" assertion the natural postcondition
+wanted to express. The first half shows the race; the second half shows the
+fix.
+
+Here's the `Counter` module:
 
 ```elixir
 defmodule Counter do
@@ -29,17 +37,17 @@ defmodule Counter do
 end
 ```
 
-As we saw, this implementation of the `Counter` agent suffers from race
-conditions that invalidate the correctness of the postcondition for
-`increment_count/1`: if a concurrent call to `increment_count/1` is interleaved
-anywhere between the two calls to `get_count/1` (in the postcondition) and the
-call to `Agent.update/3`, then the postcondition will fail because the count
-will have increased by more than one. (Keep in mind that `old` expressions are
-resolved prior to function execution, and therefore the call to `get_count/1`
-in `old(get_count(agent))` will be done before the call to `Agent.update/3`.)
+This implementation suffers from race conditions that invalidate the
+correctness of the postcondition for `increment_count/1`: if a concurrent
+call to `increment_count/1` is interleaved anywhere between the two calls
+to `get_count/1` (in the postcondition) and the call to `Agent.update/3`,
+then the postcondition will fail because the count will have increased by
+more than one. (Keep in mind that `old` expressions are resolved prior to
+function execution, and therefore the call to `get_count/1` in
+`old(get_count(agent))` will be done before the call to `Agent.update/3`.)
 
-Our solution to this problem was to weaken the assertion in the postcondition
-so that it guaranteed only that the count increased by some amount, not
+The first thing we can do is weaken the assertion in the postcondition so
+that it guarantees only that the count increased by some amount, not
 necessarily by exactly one:
 
 ```elixir
