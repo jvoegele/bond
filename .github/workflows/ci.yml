@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       # Spans the declared floor (1.16) through the current latest stable (1.19),
       # pairing each minor with the highest OTP it supports. 1.19 supports OTP
-      # 26–28; we test against OTP 27 here — OTP 28+ coverage is tracked in #18.
+      # 26–28; we test against OTP 27 here — OTP 28 coverage is a future addition.
       matrix:
         include:
           - elixir: "1.16.3"
@@ -73,6 +73,34 @@ jobs:
       # Compiles the library (dev env, so the deliberately-illustrative
       # test/support fixtures are not in scope) with warnings as errors.
       - run: mix compile --warnings-as-errors
+
+  dialyzer:
+    name: Dialyzer (Bond library)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27.2"
+          elixir-version: "1.19.5"
+      - name: Cache deps and build
+        uses: actions/cache@v5
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-dialyzer-build-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-dialyzer-build-
+      - name: Cache PLT
+        uses: actions/cache@v5
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-dialyzer-plt-${{ hashFiles('lib/**/*.ex', '**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-dialyzer-plt-
+      - run: mix deps.get
+      - run: mix dialyzer --format github
 
   downstream:
     name: Downstream consumer (warnings-as-errors + Dialyzer)
