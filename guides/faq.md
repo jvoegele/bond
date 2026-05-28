@@ -35,6 +35,13 @@ for that function.
 
 A typical pattern: contracts on in dev/test, `:purge`d in prod.
 
+For concrete numbers — how many nanoseconds each contract kind adds per
+call, and how much compile time Bond costs per module — see the
+[Overhead](overhead.md) guide. Headline figures from the reference
+environment: a `:purge`d contract is free; an enabled `@pre` adds ~130
+ns/call; an enabled `@invariant` (entry + exit) adds ~440 ns/call; Bond
+compile-time overhead is ~10 ms per module that uses contracts.
+
 ## Can I toggle contracts at runtime without recompiling?
 
 Yes — that's what `true` and `false` (as distinct from `:purge`) give you.

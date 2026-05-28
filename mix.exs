@@ -90,6 +90,7 @@ defmodule Bond.MixProject do
         "guides/getting-started.md",
         "guides/stability.md",
         "guides/public-api.md",
+        "guides/overhead.md",
         "guides/faq.md",
         "guides/about.md",
         "guides/history.md",
