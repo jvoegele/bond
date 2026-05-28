@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Documentation
+
+- **Closed #1 — public API surface frozen and documented for 1.0.**
+  Two new guides published to hexdocs:
+  - `guides/public-api.md` enumerates every name covered by the 1.0
+    semver contract: attribute syntax (`@pre` / `@post` / `@invariant`
+    / `@doc` and accepted argument shapes), macros and operators in
+    `use Bond` scope, `use Bond` options, the
+    `@bond_warn_skipped_invariants` per-function attribute, the
+    public `Bond.Predicates` callables (with `__opaque__/1` and
+    `__truthy__/1` explicitly called out as infrastructure-only),
+    `Bond.Test` and `Bond.PropertyTest` helpers, the
+    `[:bond, :assertion, :failure]` telemetry event and its metadata
+    shape, the four error structs and their field layout, application
+    config keys, and the public type set.
+  - `guides/stability.md` states the semver promise (what patch /
+    minor / major mean), the explicit exclusions (internal modules,
+    generated-code shape, compile-error message text,
+    `Exception.message/1` rendering), and the deprecation policy
+    (minimum one minor with a deprecation warning before removal in
+    next major).
+  The main Bond moduledoc (README between the START/END markers)
+  gains a short "Stability and the public API surface" section
+  pointing to both guides.
+
+- **`mix docs` warning-free for the first time.** Three pre-existing
+  cross-link warnings adjudicated as part of the surface audit:
+  `Bond.Compiler.CompileStateFSM.Server` switched from `@moduledoc
+  false` to `@moduledoc internal: true` (consistent with the rest of
+  `Bond.Compiler.*`); two CHANGELOG references to internal helpers
+  rephrased to drop the `Mod.fun/arity` cross-link pattern without
+  losing the technical detail. No public surface change.
+
 ### Added
 
 - **Closed #5 — opt-out compile warning for silently-skipped
