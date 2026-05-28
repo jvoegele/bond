@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Documentation
 
+- **Closed #8 — `old/1` docs lead with a non-racy example.** The
+  README's `old expressions` section and the getting-started guide
+  both previously led with a stateful `Agent` example that has an
+  acknowledged race (another process can interleave between the `old`
+  snapshot and the postcondition evaluation). New users would copy the
+  racy pattern as their starting point. Replaced with a process-
+  dictionary turn counter — stateful (so `old` has a meaningful
+  purpose; for an immutable parameter `old(x)` and `x` are the same
+  value) but local to a single process (so the snapshot and the
+  post-check observe the same world). The concurrency caveat is
+  retained as a callout with a link to the concurrency guide; the
+  Agent example stays in the concurrency guide proper, where it's the
+  case study for the locking workaround.
+
 - **Closed #9 and #20 — overhead benchmarked and published.** New
   `guides/overhead.md` publishes concrete compile-time and runtime
   overhead numbers from a documented reference environment (Apple M3

@@ -265,17 +265,24 @@ the keyword-list form). On failure it raises `Bond.CheckError`.
 
 `old` expressions in postconditions snapshot a value before the function
 body runs, so the postcondition can compare the after-state to the
-before-state.
+before-state. Useful when a function mutates state that the postcondition
+needs to talk about as both "before" and "after."
 
 ```elixir
-defmodule Counter do
+defmodule TurnCounter do
   use Bond
 
-  def get_count(agent), do: Agent.get(agent, & &1)
+  # Per-process turn counter stored in the process dictionary. Single-
+  # process state by design — owned by exactly the process running the
+  # function, so `old` captures a snapshot nothing else can interleave
+  # against.
 
-  @post incremented: get_count(agent) == old(get_count(agent)) + 1
-  def increment_count(agent) do
-    Agent.update(agent, &(&1 + 1))
+  def current_turn, do: Process.get(:turn, 0)
+
+  @post incremented: current_turn() == old(current_turn()) + 1
+  def take_turn do
+    Process.put(:turn, current_turn() + 1)
+    :ok
   end
 end
 ```
@@ -284,13 +291,26 @@ Bond resolves every `old(...)` expression at the start of function
 execution and threads the captured value into the postcondition. `old`
 is only available inside `@post`.
 
-The naive form above has a race condition when used against stateful
-concurrent components — another `increment_count/1` can interleave
-between the `old` snapshot and the postcondition evaluation. See the
-[Contracts in a Concurrent World](contracts-and-concurrency.html) guide
-for the pattern that handles this. For struct-based state machines,
-`@invariant` is usually a better fit than `old` — it constrains every
-operation's input and output struct rather than a single delta.
+The process dictionary fits the demo cleanly because it's stateful
+(otherwise there'd be no "old" to talk about — for an immutable
+parameter `x`, `old(x)` and `x` are the same value) but local to a
+single process (so the snapshot and the post-check observe the same
+world). The same shape works for any single-process-owned state: an
+ETS table created with `:protected` or `:private` access, a `Process`
+dictionary entry like above, a value held in the current process's
+closure.
+
+> #### Concurrent state needs a different pattern {: .warning}
+>
+> If `old(expr)` reads state that another process can write to between
+> the snapshot and the postcondition evaluation — an `Agent`, a
+> `GenServer.call/3`, a shared ETS table — another process can
+> interleave and the comparison becomes meaningless. The
+> [Contracts in a Concurrent World](contracts-and-concurrency.html)
+> guide covers the locking pattern that recovers correctness there.
+> For struct-based state machines, `@invariant` is usually a better
+> fit than `old` — it constrains every operation's input and output
+> struct rather than a single delta.
 
 ## Documenting contracts
 

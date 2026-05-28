@@ -107,25 +107,36 @@ See `Bond.Predicates` for the complete list.
 
 ## `old` expressions in postconditions
 
-For functions that mutate state, a postcondition often needs to compare the
-*new* state to the *old* state. The `old/1` macro snapshots a value before
-the function body runs:
+For functions that mutate state, a postcondition often needs to compare
+the *new* state to the *old* state. The `old/1` macro snapshots a value
+before the function body runs:
 
 ```elixir
-defmodule Counter do
+defmodule TurnCounter do
   use Bond
-  use Agent
 
-  def start_link(initial), do: Agent.start_link(fn -> initial end)
-  def get(agent), do: Agent.get(agent, & &1)
+  # Per-process turn counter stored in the process dictionary. Owned by
+  # the running process, so the snapshot and the post-check observe the
+  # same world.
+  def current_turn, do: Process.get(:turn, 0)
 
-  @post incremented: get(agent) == old(get(agent)) + 1
-  def increment(agent), do: Agent.update(agent, &(&1 + 1))
+  @post incremented: current_turn() == old(current_turn()) + 1
+  def take_turn do
+    Process.put(:turn, current_turn() + 1)
+    :ok
+  end
 end
 ```
 
-See the [Contracts in a Concurrent World](contracts-and-concurrency.md)
-guide for the subtleties of using `old` with stateful, concurrent code.
+`old` is only available inside `@post`. Bond resolves every `old(...)`
+expression at the start of function execution and threads the captured
+value into the postcondition.
+
+For state shared across processes — an `Agent`, a `GenServer`, an ETS
+table — `old(...)` reads a snapshot that another process can race
+against before the post-check runs. See the
+[Contracts in a Concurrent World](contracts-and-concurrency.md) guide
+for the locking pattern that handles this.
 
 ## Inline checks
 
