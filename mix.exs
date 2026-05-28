@@ -60,7 +60,13 @@ defmodule Bond.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: [:dev, :test]},
-      {:excoveralls, "~> 0.18", only: :test}
+      {:excoveralls, "~> 0.18", only: :test},
+      # `norm` is used only by test/bond/norm_compat_test.exs to verify Bond's
+      # `Kernel.@/1` override coexists with another library that also overrides
+      # `@/1`. Norm uses the identical technique to Bond (import Kernel exc. @,
+      # specific clause + catch-all forwarding), so it's the natural conflict
+      # counterpart. Not a transitive dep — only_test.
+      {:norm, "~> 0.13", only: :test}
     ]
   end
 

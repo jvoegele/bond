@@ -15,20 +15,33 @@
 %% further prerequisites and are safe to start first. Depth-first per Mikado:
 %% pick a leaf, finish it, keep tests green, commit, repeat.
 %%
-%% Out of scope: testing every conceivable third-party library. We use a
-%% synthetic FakeAttrLib (test/support) to isolate the exact conflict shape
-%% without adding a real external dep we don't otherwise need.
+%% Cross-library test uses Norm (`only: :test` dep) as the conflict counterpart.
+%% Norm's `Norm.Contract` uses the IDENTICAL technique to Bond — `import Kernel,
+%% except: [@: 1]`, a specific `@{:contract, _, expr}` clause, and a catch-all
+%% forwarding to `Kernel.@(unquote(other))`. Originally I considered a synthetic
+%% `FakeAttrLib`, but Norm is the real-world twin: testing against it validates
+%% the exact conflict shape that real users will hit and lets the FAQ name a
+%% concrete library. Norm has no extra runtime deps (only optional stream_data,
+%% which Bond already has).
+%%
+%% Empirical finding from Step 2: combining `use Bond` and `use Norm` in the same
+%% module fails to compile with `function @/1 imported from both Bond and
+%% Norm.Contract, call is ambiguous`, REGARDLESS of `use` ordering. Elixir does
+%% NOT do "last import wins" — both imports end up at the same scope level and
+%% Elixir flags the call site as ambiguous. The conflict is loud (clear compile
+%% error pointing at the first `@`-using line), not silent. Recommended workaround:
+%% split into separate modules, one per contract library.
 
 flowchart TD
     G(["**Goal**<br/>Issue #4 closed: @/1 override compatibility verified;<br/>attribute forwarding + cross-library interaction tested;<br/>compatibility note documented in FAQ"])
 
-    G --> S4["4. Add 'Compatibility with @/1-overriding libraries' section to guides/faq.md.<br/>Document: catch-all routes to Kernel (not third-party @); ordering rules;<br/>known-good standard attributes; recommended `use` order.<br/><b>#4-compat-guide</b>"]
+    G --> S4["4. Add 'Compatibility with @/1-overriding libraries' section to guides/faq.md.<br/>Document the empirical finding: combining `use Bond` with another @/1-<br/>overriding lib (e.g. Norm) in one module fails at compile time with a<br/>clear 'ambiguous import' error, regardless of ordering. Recommend the<br/>split-modules workaround, with a concrete code example.<br/><b>#4-compat-guide</b>"]
 
-    S4 --> S3["3. Cross-library conflict fixtures + tests<br/>(test/support/bond_test/attr_compat.ex + test/bond/attr_compat_test.exs).<br/>Two orderings: `use FakeAttrLib; use Bond` vs `use Bond; use FakeAttrLib`.<br/>Assert: Bond annotations active iff Bond is last; @fake_contract stored<br/>as plain attr (via Kernel catch-all) when Bond is last.<br/><b>#4-cross-lib-tests</b>"]
+    S4 --> S3["3. Cross-library conflict tests (test/bond/norm_compat_test.exs).<br/>Smoke-test each standalone fixture works (BondValidator raises<br/>Bond.PreconditionError; NormValidator raises Norm.MismatchError on bad<br/>input). Use Code.compile_string/1 to demonstrate that combining `use<br/>Bond` and `use Norm` in one module fails with the ambiguous-import<br/>error in both orderings.<br/><b>#4-cross-lib-tests</b>"]
 
     S4 --> S1["1. Attribute forwarding fixtures + tests<br/>(test/support/bond_test/attr_compat.ex + test/bond/attr_compat_test.exs).<br/>Modules combining `use Bond` with: @derive, @enforce_keys, @spec/@type/<br/>@typep/@opaque/@callback, accumulating custom attrs, @external_resource,<br/>@behaviour. Assert each attribute is present and has the expected value.<br/><b>#4-forwarding-tests</b>"]
 
-    S3 --> S2["2. FakeAttrLib support module<br/>(test/support/bond_test/fake_attr_lib.ex).<br/>A synthetic `use`-able library that does `import Kernel, except: [@: 1]`<br/>and defines its own `defmacro @{:fake_contract, _, [expr]}` clause plus<br/>a catch-all forwarding to `Kernel.@`. Stores intercepted values in<br/>a module attribute for test assertions.<br/><b>#4-fake-attr-lib</b>"]
+    S3 --> S2["2. Add Norm as `only: :test` dep + standalone fixtures<br/>(test/support/bond_test/norm_compat.ex). Two single-library modules<br/>demonstrating the split-modules workaround: BondValidator (use Bond +<br/>@pre) and NormValidator (use Norm + @contract). Originally planned as<br/>'both orderings of combined use', but step-2 compilation revealed the<br/>combination is ambiguous in either order, so the fixtures became<br/>standalone modules.<br/><b>#4-norm-dep-and-fixtures</b>"]
 
     classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
     class S1,S2 leaf;
