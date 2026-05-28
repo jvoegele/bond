@@ -36,13 +36,13 @@ jobs:
     env:
       MIX_ENV: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ matrix.otp }}
           elixir-version: ${{ matrix.elixir }}
       - name: Cache deps and build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             deps
@@ -57,12 +57,12 @@ jobs:
     name: Format and library warnings
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "27.2"
           elixir-version: "1.19.5"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             deps
@@ -81,13 +81,13 @@ jobs:
       run:
         working-directory: integration/consumer
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "27.2"
           elixir-version: "1.18.3"
       - name: Cache consumer deps and build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             integration/consumer/deps
@@ -98,7 +98,7 @@ jobs:
       # PLT cache is keyed on Bond source so it rebuilds when the library API changes,
       # not just when mix.lock changes.
       - name: Cache consumer PLT
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: integration/consumer/priv/plts
           key: ${{ runner.os }}-downstream-plt-${{ hashFiles('lib/**/*.ex', 'integration/consumer/mix.lock', 'mix.lock') }}
