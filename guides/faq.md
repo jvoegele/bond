@@ -334,12 +334,67 @@ struct parameter in the function head and pre-checks against it:
 
 If your function doesn't pattern-match the struct at all (no struct in
 the head, no guard mentioning it), invariants are silently skipped for
-that function. The other contract kinds still apply.
+that function. The other contract kinds still apply. Bond emits a
+compile-time warning when it detects this case — see the next entry.
 
 Violations raise `Bond.InvariantError` and emit `[:bond, :assertion, :failure]`
 telemetry with `:kind => :invariant`. See the
 [Invariants](Bond.html#module-invariant-for-struct-modules) section in the
 moduledoc.
+
+## Why is Bond warning that my function "matched no struct parameter"?
+
+You're seeing something like:
+
+```
+public function `update/2` in invariant-declaring module
+`MyApp.BoundedStack` matched no struct parameter; invariants are not
+checked here. If intentional, suppress with `use Bond,
+warn_unmatched_invariant_subject: false` (per module) or `config :bond,
+warn_unmatched_invariant_subject: false` (globally).
+```
+
+Bond emits this at compile time when a public function (`def`, not
+`defp`) in an invariant-declaring module has no clause whose head
+pattern-matches the struct. Without a matching head, Bond has no
+`subject` to bind, so invariants are silently skipped for that
+function — and "silently skipped" was the footgun before this warning
+existed.
+
+**If the function is supposed to operate on the struct**, the fix is
+usually a missing pattern or guard:
+
+```elixir
+# Footgun — head doesn't match the struct, so the @invariant doesn't fire here:
+def update(stack, x), do: ...
+
+# Fixed — Bond detects the struct and the @invariant fires:
+def update(%__MODULE__{} = stack, x), do: ...
+# or:
+def update(stack, x) when is_struct(stack, __MODULE__), do: ...
+```
+
+See "When does Bond check invariants?" above for every shape Bond
+detects.
+
+**If the function is genuinely not about the struct** (a utility
+function in the same module, an alternate constructor, etc.), suppress
+the warning explicitly. Per module is the usual choice:
+
+```elixir
+use Bond, warn_unmatched_invariant_subject: false
+```
+
+If most of your invariant-declaring modules legitimately have mixed
+struct and non-struct public functions, suppress globally instead:
+
+```elixir
+# config/config.exs
+config :bond, warn_unmatched_invariant_subject: false
+```
+
+The warning is opt-out so the footgun is caught by default; both
+suppression knobs ship with 1.0 and are part of the public API.
 
 ## How are multi-clause functions handled?
 

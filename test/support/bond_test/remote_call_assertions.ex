@@ -10,7 +10,12 @@ defmodule BondTest.RemoteCallAssertions do
   the module fails to compile.
   """
 
-  use Bond
+  # Most public functions in this fixture deliberately don't operate on the
+  # struct — the @invariant exists for the `push_atom/2` case alone, and the
+  # other defs (greet/1, squares/1, fetch_id/1, inline_check_example/1) are
+  # remote-call-assertion fixtures whose subjects are non-struct values.
+  # Suppress the per-function "no struct parameter matched" warning here.
+  use Bond, warn_unmatched_invariant_subject: false
 
   defstruct [:items]
 

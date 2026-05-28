@@ -21,7 +21,8 @@ defmodule Bond.CompilerTest do
                preconditions: true,
                postconditions: true,
                checks: true,
-               invariants: true
+               invariants: true,
+               warn_unmatched_invariant_subject: true
              }
     end
 
@@ -42,7 +43,8 @@ defmodule Bond.CompilerTest do
                preconditions: true,
                postconditions: true,
                checks: true,
-               invariants: :purge
+               invariants: :purge,
+               warn_unmatched_invariant_subject: true
              }
     end
 
@@ -123,7 +125,8 @@ defmodule Bond.CompilerTest do
                preconditions: :purge,
                postconditions: :purge,
                checks: :purge,
-               invariants: :purge
+               invariants: :purge,
+               warn_unmatched_invariant_subject: true
              }
     end
 

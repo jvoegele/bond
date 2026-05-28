@@ -54,7 +54,8 @@ defmodule Bond.Compiler do
           preconditions: mode(),
           postconditions: mode(),
           checks: mode(),
-          invariants: mode()
+          invariants: mode(),
+          warn_unmatched_invariant_subject: boolean()
         }
 
   @doc """
@@ -85,7 +86,9 @@ defmodule Bond.Compiler do
       preconditions: Keyword.fetch!(global, :preconditions),
       postconditions: Keyword.fetch!(global, :postconditions),
       checks: Keyword.fetch!(global, :checks),
-      invariants: Keyword.get(global, :invariants, true)
+      invariants: Keyword.get(global, :invariants, true),
+      warn_unmatched_invariant_subject:
+        Keyword.get(global, :warn_unmatched_invariant_subject, true)
     }
 
     resolved =
@@ -174,9 +177,24 @@ defmodule Bond.Compiler do
   end
 
   defp apply_settings(config, settings) do
+    config
+    |> apply_kind_settings(settings)
+    |> apply_boolean_settings(settings, [:warn_unmatched_invariant_subject])
+  end
+
+  defp apply_kind_settings(config, settings) do
     Enum.reduce([:preconditions, :postconditions, :checks, :invariants], config, fn key, acc ->
       case Keyword.fetch(settings, key) do
         {:ok, value} when value in [true, false, :purge] -> Map.put(acc, key, value)
+        _ -> acc
+      end
+    end)
+  end
+
+  defp apply_boolean_settings(config, settings, keys) do
+    Enum.reduce(keys, config, fn key, acc ->
+      case Keyword.fetch(settings, key) do
+        {:ok, value} when is_boolean(value) -> Map.put(acc, key, value)
         _ -> acc
       end
     end)

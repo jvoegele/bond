@@ -214,9 +214,54 @@ defmodule Bond.Compiler.AnnotatedFunction do
         annotated_function.invariants
       )
 
+    maybe_warn_unmatched_invariant_subject(annotated_function, inv_mode, config)
+
     if pre_mode != :purge or post_mode != :purge or inv_mode != :purge do
       build_contract_override(annotated_function, pre_mode, post_mode, inv_mode)
     end
+  end
+
+  # Emits a compile-time warning when a public function in an invariant-declaring
+  # module has no clause that pattern-matches the struct — meaning invariants are
+  # silently skipped for that function. The warning is on by default; suppress with
+  # `use Bond, warn_unmatched_invariant_subject: false` per module or `config :bond,
+  # warn_unmatched_invariant_subject: false` globally.
+  #
+  # Triggers ONLY when ALL of:
+  #   - the function is `def` (defp is exempt from invariants by design)
+  #   - invariants are attached to this function (i.e. module declares @invariant)
+  #   - inv_mode != :purge (user hasn't explicitly opted out)
+  #   - no clause's head matches a struct parameter
+  #   - the warning isn't suppressed in config
+  defp maybe_warn_unmatched_invariant_subject(
+         %__MODULE__{kind: :def, invariants: [_ | _]} = annotated_function,
+         inv_mode,
+         config
+       )
+       when inv_mode != :purge do
+    if Map.get(config, :warn_unmatched_invariant_subject, true) and
+         not Invariants.any_clause_matches_struct?(annotated_function.clauses) do
+      first_clause = List.first(annotated_function.clauses)
+
+      IO.warn(
+        unmatched_invariant_subject_message(annotated_function),
+        first_clause.env
+      )
+    end
+  end
+
+  defp maybe_warn_unmatched_invariant_subject(_annotated_function, _inv_mode, _config), do: :ok
+
+  defp unmatched_invariant_subject_message(%__MODULE__{
+         module: module,
+         fun: fun,
+         arity: arity
+       }) do
+    "public function `#{fun}/#{arity}` in invariant-declaring module " <>
+      "`#{inspect(module)}` matched no struct parameter; invariants are not " <>
+      "checked here. If intentional, suppress with `use Bond, " <>
+      "warn_unmatched_invariant_subject: false` (per module) or " <>
+      "`config :bond, warn_unmatched_invariant_subject: false` (globally)."
   end
 
   # A kind is effectively purged if either the user purged it OR the function has no

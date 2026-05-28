@@ -25,7 +25,12 @@ defmodule BondTest.SubjectInvariantSmoke do
       silently; the function returns its non-struct value.
   """
 
-  use Bond
+  # `const_zero/1` below is specifically constructed to exercise the
+  # "no struct in head → invariants silently skipped" path; the new
+  # `warn_unmatched_invariant_subject` warning would otherwise fire on it.
+  # Suppress at the module level because that's exactly the behaviour we
+  # want to test here.
+  use Bond, warn_unmatched_invariant_subject: false
 
   defstruct [:items, :capacity]
 

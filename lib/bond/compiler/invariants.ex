@@ -96,6 +96,22 @@ defmodule Bond.Compiler.Invariants do
   def resolve_mode(value, _kind, _invariants) when value in [true, false], do: value
 
   @doc """
+  Returns `true` when at least one clause in the given list has a detectable struct
+  parameter (so invariants will fire for that clause), and `false` when no clause
+  matches the struct (so invariants are silently skipped for the entire function —
+  the footgun `:warn_unmatched_invariant_subject` warns about).
+
+  Used by `Bond.Compiler.AnnotatedFunction.apply_contract/2` to decide whether to
+  emit the warning at the function definition site.
+  """
+  @spec any_clause_matches_struct?([term()]) :: boolean()
+  def any_clause_matches_struct?(clauses) when is_list(clauses) do
+    Enum.any?(clauses, fn clause ->
+      detect_struct_params(clause.params || [], clause.guards || []) != []
+    end)
+  end
+
+  @doc """
   Detects every struct-bearing parameter in a function clause, or returns `[]` when
   invariants are purged for the function.
 
