@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.17.4] - 2026-05-28
+
+A patch release fixing two Elixir 1.18+ compatibility issues, surfaced by a
+new downstream-consumer integration test that compiles and Dialyzer-checks
+the code Bond generates into a using module. Also expands the CI matrix to
+five Elixir versions and eliminates a family of parallel-compile races
+exposed by Elixir 1.19's more aggressive parallel compiler.
+
+### Fixed
+
+- **Invariant post-check no longer emits a struct `case` into user modules.**
+  Elixir 1.18+'s type checker (under `--warnings-as-errors`) rejects a
+  `case var!(result)` with struct clauses when the function's return type
+  can't be a struct — for example `size/1` returning an integer — producing
+  "the following clause will never match" warnings that fail downstream
+  builds. The shape match moved into
+  `Bond.Runtime.Eval.check_struct_invariant/3`, whose `result` is typed
+  `term()`, eliminating the false positive. Runtime behaviour is unchanged.
+
+- **`Bond.Runtime.Eval.should_evaluate?/3` type-spec widened.** The
+  `chain_defaults` map's value type previously excluded `:purge`, but a
+  function with no `@pre`/`@post` of its own (e.g. an invariant-only
+  `size/1`) legitimately contributes `:purge` for those kinds. Dialyzer
+  flagged the mismatch and cascaded into six spurious downstream findings
+  for users running `mix dialyzer` on their projects.
+
+### Internal
+
+- **Downstream-consumer integration test added** (`integration/consumer`).
+  A standalone Mix project that `use`s Bond is now compiled and
+  Dialyzer-checked as part of CI. This is the test that surfaced the two
+  fixes above.
+
+- **CI matrix expanded from 3 to 5 cells.** Covers every Elixir minor
+  from 1.14 to the current stable (1.19), each paired with the highest
+  OTP it supports: 1.14.5/OTP 25.3, 1.16.3/OTP 26.2, 1.17.3/OTP 27.2,
+  1.18.3/OTP 27.2, 1.19.5/OTP 27.2. Confirms the `~> 1.14` floor
+  is accurate across the full matrix.
+
+- **Parallel-compile races eliminated.** Elixir 1.19's more aggressive
+  parallel compiler exposed race conditions where Bond's internal BEAM
+  files could be read before they were fully written to disk. Fixed by:
+  - Extracting `Bond.Compiler.CompileStateFSM.Server` from
+    `compile_state_fsm.ex` into its own file.
+  - Extracting `Bond.Compiler.AnnotatedFunction.Clause` from
+    `annotated_function.ex` into its own file.
+  - Changing `alias` to `require` in `bond.ex` and `compiler.ex` to
+    establish a complete compile-dep chain that Mix's parallel scheduler
+    enforces.
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.14`.
+
 ## [0.17.3] - 2026-06-03
 
 A small additive release: `_name` and `name` are now treated as semantically
