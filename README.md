@@ -590,6 +590,19 @@ end
 `use Bond.PropertyTest` raises a `CompileError` with an explanation if
 `stream_data` isn't on the path.
 
+## Stability and the public API surface
+
+From 1.0 onward, Bond follows [Semantic Versioning](https://semver.org/)
+over an enumerated public API surface. The
+[Public API surface](public-api.md) guide lists every covered name —
+attributes, macros, functions, telemetry event, error structs, config
+keys. The [Stability guarantees](stability.md) guide states what semver
+means in practice, what's explicitly *not* covered (internal modules,
+generated-code shape, error-message text), and the deprecation policy.
+
+If you're building on Bond and want to know whether something you depend
+on is safe across upgrades, those two guides are the source of truth.
+
 <!-- README END -->
 
 ## Installation
