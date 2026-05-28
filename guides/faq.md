@@ -84,18 +84,92 @@ value matches a spec or it doesn't. Bond verifies **function behaviour** —
 a contract asserts something about the relationship between inputs,
 outputs, and (optionally) prior state.
 
-They compose well. A common pattern: use Norm to describe the shape of
-data that flows in and out of your boundary functions; use Bond to assert
-invariants and relationships internal to the functions that process the
-data.
+The two libraries are conceptually complementary, but they can't share a
+module: both override `Kernel.@/1`, and Elixir refuses to pick a winner
+(see [the next FAQ entry](#can-i-use-bond-and-norm-in-the-same-module)).
+You can still call Norm's validation helpers from a Bond module as
+ordinary remote calls:
 
 ```elixir
-# Pseudocode — Norm for shape, Bond for behaviour
-@pre matches_input_spec: Norm.valid?(input, input_spec())
-@post matches_output_spec: Norm.valid?(result, output_spec())
-@post "no items lost": length(result) == length(input)
-def transform(input), do: ...
+defmodule MyApp.Boundary do
+  use Bond
+
+  @pre matches_input_spec: Norm.valid?(input, MyApp.Specs.input())
+  @post matches_output_spec: Norm.valid?(result, MyApp.Specs.output())
+  @post "no items lost": length(result) == length(input)
+  def transform(input), do: ...
+end
 ```
+
+…where `MyApp.Specs` is a separate module that does `use Norm` and
+defines `input/0` and `output/0` with Norm's `spec/1`.
+
+## Can I use Bond and Norm in the same module?
+
+**No.** `use Bond` and `use Norm` in the same module fails to compile
+with:
+
+```
+function @/1 imported from both Bond and Norm.Contract, call is ambiguous
+```
+
+Both libraries use the same technique to intercept module attributes:
+`import Kernel, except: [@: 1]` followed by importing their own `@/1`
+macros. When both `use` lines land in one module, both imports end up
+at the same scope level — Elixir does not pick a winner — and the first
+`@`-using line fails. The error is loud and points at the offending
+line; contracts are never silently dropped.
+
+The same applies to any other library that overrides `Kernel.@/1`. In
+practice, very few do — overriding `@/1` is an invasive technique.
+Standard attribute-based libraries (Ecto's `schema/2`, TypedStruct,
+etc.) work fine alongside Bond.
+
+### Recommended workaround: split into separate modules
+
+Use each library in its own module and have one call into the other:
+
+```elixir
+defmodule MyApp.Specs do
+  use Norm
+
+  def positive_int, do: spec(is_integer() and (&(&1 > 0)))
+
+  @contract validate(n :: positive_int()) :: positive_int()
+  def validate(n), do: n
+end
+
+defmodule MyApp.Worker do
+  use Bond
+
+  @pre is_integer(n)
+  @post result == n * 2
+  def double(n) do
+    n = MyApp.Specs.validate(n)
+    n * 2
+  end
+end
+```
+
+### Alternative: use Norm's data helpers without `use Norm`
+
+If you only need Norm's data-shape helpers (`spec/1`, `conform/2`,
+`valid?/2`) inside a Bond module, call them as ordinary remote calls
+on the `Norm` module — no `use Norm` required:
+
+```elixir
+defmodule MyApp.Worker do
+  use Bond
+
+  @pre positive: Norm.valid?(n, positive_int_spec())
+  def double(n), do: n * 2
+
+  defp positive_int_spec, do: Norm.spec(is_integer() and (&(&1 > 0)))
+end
+```
+
+This keeps Bond's `@/1` interception intact and uses Norm only for
+spec construction and validation.
 
 ## Why can't I have postconditions on while preconditions are off?
 
