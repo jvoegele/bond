@@ -139,6 +139,11 @@ defmodule Bond.Compiler.Invariants do
     for sp <- struct_params do
       arg_var = subject_var(sp)
 
+      # `__opaque__` widens the subject's narrowed type at the lifted-defp call boundary —
+      # without this, an `@invariant` like `subject.capacity >= 0` on a `non_neg_integer()`
+      # field would let Dialyzer prove `and`/`or` branches in the assertion expression dead
+      # under a `pattern_match` warning. Same motivation as
+      # `Bond.Compiler.ClauseWrapper.opaque_args/1`.
       quote do
         if Bond.Runtime.Eval.should_evaluate?(
              :invariants,
@@ -146,7 +151,7 @@ defmodule Bond.Compiler.Invariants do
              unquote(Macro.escape(chain))
            ) do
           Bond.Runtime.Eval.evaluate_invariants(fn ->
-            unquote(name)(unquote(arg_var))
+            unquote(name)(Bond.Predicates.__opaque__(unquote(arg_var)))
           end)
         end
       end
@@ -246,6 +251,8 @@ defmodule Bond.Compiler.Invariants do
   def post_invariant_stmts(name, mode, struct_module, pre_mode, post_mode) do
     chain = %{preconditions: pre_mode, postconditions: post_mode}
 
+    # `__opaque__` widens the post-extracted subject's type at the lifted-defp call
+    # boundary — see the corresponding comment in `all_pre_invariant_stmts/5`.
     [
       quote do
         if Bond.Runtime.Eval.should_evaluate?(
@@ -256,7 +263,9 @@ defmodule Bond.Compiler.Invariants do
           Bond.Runtime.Eval.check_struct_invariant(
             var!(result),
             unquote(struct_module),
-            fn __bond_post_value__ -> unquote(name)(__bond_post_value__) end
+            fn __bond_post_value__ ->
+              unquote(name)(Bond.Predicates.__opaque__(__bond_post_value__))
+            end
           )
         end
       end

@@ -147,14 +147,18 @@ defmodule Bond.Compiler.Assertion do
           function: function_info
         }
 
+        # Delegate the truthiness check and throw-on-failure to
+        # `Bond.Runtime.Eval.check_assertion/3`, where `result` is typed `term()`. Emitting
+        # `if expression do :ok else throw(...) end` directly here would let Dialyzer prove
+        # the falsy branch unreachable when the user's expression is statically `true`
+        # (e.g. `@pre is_binary(x)` on a `@spec`-narrowed argument), producing Pattern:
+        # `false`, Type: `true` warnings in downstream apps.
         quote do
-          if unquote(expression) do
-            :ok
-          else
-            assertion_info = unquote(Macro.escape(assertion_info))
-            # Sort the binding so failure messages are stable across runs and easy to diff.
-            throw({:assertion_failure, Map.put(assertion_info, :binding, Enum.sort(binding()))})
-          end
+          Bond.Runtime.Eval.check_assertion(
+            unquote(expression),
+            unquote(Macro.escape(assertion_info)),
+            binding()
+          )
         end
       end
 
@@ -200,15 +204,17 @@ defmodule Bond.Compiler.Assertion do
           function: function_info
         }
 
+        # See the corresponding comment in `assertions_body/2` — the if/throw lives in
+        # `Bond.Runtime.Eval.check_assertion/3` so Dialyzer can't prove the falsy branch
+        # unreachable for tautological invariants.
         quote do
           unquote(subject_var) = var!(bond_invariant_value)
 
-          if unquote(expression) do
-            :ok
-          else
-            assertion_info = unquote(Macro.escape(assertion_info))
-            throw({:assertion_failure, Map.put(assertion_info, :binding, Enum.sort(binding()))})
-          end
+          Bond.Runtime.Eval.check_assertion(
+            unquote(expression),
+            unquote(Macro.escape(assertion_info)),
+            binding()
+          )
         end
       end
 
@@ -244,15 +250,17 @@ defmodule Bond.Compiler.Assertion do
       function: env.function
     }
 
+    # `check_value/3` returns the expression's value on success (so `check expr` evaluates
+    # to `expr`'s value) and throws on failure, with the same Dialyzer-laundering motivation
+    # as `check_assertion/3`.
     quote do
       import Bond.Predicates
 
-      if value = unquote(expression) do
-        value
-      else
-        assertion_info = unquote(Macro.escape(assertion_info))
-        throw({:assertion_failure, Map.put(assertion_info, :binding, Enum.sort(binding()))})
-      end
+      Bond.Runtime.Eval.check_value(
+        unquote(expression),
+        unquote(Macro.escape(assertion_info)),
+        binding()
+      )
     end
   end
 

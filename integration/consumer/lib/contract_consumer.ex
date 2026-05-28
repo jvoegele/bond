@@ -98,3 +98,85 @@ defmodule ContractConsumer.Stats do
     sum / length(numbers)
   end
 end
+
+defmodule ContractConsumer.TypedGuard do
+  @moduledoc """
+  Regression fixture for downstream-Dialyzer "Pattern: `false`, Type: `true`"
+  warnings caused by tautological assertions.
+
+  Each function below has an `@pre`/`@post`/`@invariant` whose expression
+  duplicates a type-narrowing guard already implied by the `@spec`. Without
+  Bond's parameter-laundering through `Bond.Predicates.__opaque__/1`,
+  Dialyzer narrowed the lifted defp's parameter types from the wrapper's
+  `@spec`, then proved branches of the user expression's `if`/`and`/`or`/
+  `case` expansion dead — emitting a `pattern_match` warning at the lifted
+  defp's `generated: true` location (line 1 of the using module).
+
+  The smoke tests are downstream Dialyzer running clean against this module
+  and the runtime behaviour still firing on actual violations.
+  """
+  use Bond
+
+  @pre binary_value: is_binary(value)
+  @spec stringify(binary()) :: binary()
+  def stringify(value) do
+    value <> "!"
+  end
+
+  @pre atom_key: is_atom(key)
+  @spec atom_label(atom()) :: binary()
+  def atom_label(key) do
+    Atom.to_string(key)
+  end
+
+  @post non_empty_result: is_binary(result) and result != ""
+  @spec key_to_string(atom()) :: binary()
+  def key_to_string(key) do
+    Atom.to_string(key)
+  end
+
+  # `~>` antecedent is statically `true` under the spec: without laundering, the
+  # `else: true` branch of `~>`'s `if` expansion is unreachable.
+  @pre matches_ok_shape: is_tuple(pair) ~> (tuple_size(pair) >= 1)
+  @spec normalize(tuple()) :: :ok
+  def normalize(pair) when is_tuple(pair), do: :ok
+
+  # `<~` discriminator is statically a tuple matching the pattern: without laundering,
+  # the `_unmatched -> false` clause is `pattern_match_cov`.
+  @post returns_ok: {:ok, _} <~ result
+  @spec wrap(integer()) :: {:ok, integer()}
+  def wrap(n) do
+    {:ok, n}
+  end
+end
+
+defmodule ContractConsumer.TypedInvariant do
+  @moduledoc """
+  Regression fixture for tautological `@invariant` expressions whose `@type`
+  already implies the invariant's truthiness. The lifted invariant defp's
+  parameter is laundered at the call site (see
+  `Bond.Compiler.Invariants.all_pre_invariant_stmts/5`) so user expressions
+  containing `and`/`or`/etc. don't get one branch flagged as dead by Dialyzer.
+  """
+  use Bond
+
+  defstruct count: 0, label: ""
+
+  @type t :: %__MODULE__{count: non_neg_integer(), label: binary()}
+
+  # `is_binary(subject.label)` is statically true given the `@type`, and
+  # `subject.count >= 0` is statically true given `non_neg_integer()`. The
+  # `and/2` expansion contains a `case` whose `false` clause Dialyzer would
+  # otherwise prove unreachable.
+  @invariant well_formed: is_binary(subject.label) and subject.count >= 0
+
+  @spec new(binary(), non_neg_integer()) :: t()
+  def new(label, count) do
+    %__MODULE__{label: label, count: count}
+  end
+
+  @spec increment(t()) :: t()
+  def increment(%__MODULE__{} = state) do
+    %{state | count: state.count + 1}
+  end
+end

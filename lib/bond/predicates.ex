@@ -135,8 +135,31 @@ defmodule Bond.Predicates do
       true
   """
   defmacro p ~> q do
+    # The antecedent goes through `implies?/2` (truthy?) so its narrowed type doesn't reach
+    # the `if`; otherwise Dialyzer would flag the `else: true` branch as unreachable when
+    # the antecedent is statically `true` (e.g. `is_binary(x) ~> ...` on a binary-typed
+    # argument). Lazy evaluation is preserved by emitting the consequent inside the `if`.
     quote do
-      if unquote(p), do: !!unquote(q), else: true
+      if Bond.Predicates.__truthy__(unquote(p)) do
+        !!unquote(q)
+      else
+        true
+      end
+    end
+  end
+
+  @doc false
+  # Identity-on-truthiness function used as a Dialyzer-opaque laundering point for `~>`
+  # and other places where a guard's narrowed type would make a `false` branch appear
+  # unreachable to the type checker. Routes through `:persistent_term.get/2` so Dialyzer
+  # genuinely loses the input type at the function boundary (a clause-only `def
+  # __truthy__(false) -> false; (_) -> true` still gets narrowed by caller analysis).
+  @spec __truthy__(term()) :: boolean()
+  def __truthy__(value) do
+    case :persistent_term.get(:__bond_opaque_neutralize__, value) do
+      false -> false
+      nil -> false
+      _ -> true
     end
   end
 
@@ -145,17 +168,34 @@ defmodule Bond.Predicates do
 
   ## Examples
 
-      iex> {:ok, %Date{}} <~ Date.new(1974, 6, 6) 
+      iex> {:ok, %Date{}} <~ Date.new(1974, 6, 6)
       true
       iex> {:error, _} <~ Date.new(-1, -1, -1)
       true
   """
   defmacro pattern <~ expression do
+    # The expression flows through `__opaque__/1` so its static type is widened to
+    # `term()` at the `case` discriminator. Without this, a typespec-implied match (e.g.
+    # `{:ok, _} <~ result` where `result :: {:ok, integer()}`) lets Dialyzer prove the
+    # `_unmatched` clause unreachable, producing `pattern_match_cov` warnings in
+    # downstream apps.
     quote do
-      case unquote(expression) do
+      case Bond.Predicates.__opaque__(unquote(expression)) do
         unquote(pattern) -> true
         _unmatched -> false
       end
     end
+  end
+
+  @doc false
+  # Identity function used as a Dialyzer-opaque laundering point. The body routes through
+  # `:persistent_term.get/2` whose return type is `term() | Default` — Dialyzer cannot
+  # narrow the result. Used by `<~` as a pattern-match discriminator launderer and by
+  # Bond's compiler to widen lifted-defp parameter types so user assertions can duplicate
+  # typespec-implied guards (`@pre is_binary(x)` on a `@spec` argument of `binary()`)
+  # without producing pattern_match warnings in downstream apps.
+  @spec __opaque__(term()) :: term()
+  def __opaque__(value) do
+    :persistent_term.get(:__bond_opaque_neutralize__, value)
   end
 end

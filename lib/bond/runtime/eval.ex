@@ -125,6 +125,51 @@ defmodule Bond.Runtime.Eval do
     end
   end
 
+  @doc """
+  Evaluates a single assertion result and throws an `:assertion_failure` if the result is
+  falsy. Returns `:ok` if the result is truthy.
+
+  Used as the building block for the lifted assertion defps emitted by
+  `Bond.Compiler.Assertion.assertions_body/2` and `invariants_body/2`. Centralising the
+  truthiness check here — where `result` is typed as `term()` at the function boundary —
+  prevents Dialyzer from proving the falsy branch unreachable when the caller's expression
+  is statically known to be `true` (e.g. `@pre is_binary(x)` on a function whose `@spec`
+  already narrows `x` to `binary()`). Inlining the same `if result do :ok else throw(...) end`
+  into the user's lifted defp emitted Pattern: `false`, Type: `true` warnings under
+  downstream `mix dialyzer`.
+
+  `assertion_info` is the map carrying the assertion's label/kind/file/line/etc. `binding`
+  is the calling-function's `binding()` snapshot — kept here so the lifted defp doesn't
+  have to wrap it itself.
+  """
+  @spec check_assertion(term(), map(), keyword()) :: :ok
+  def check_assertion(false, assertion_info, binding),
+    do: assertion_failure(assertion_info, binding)
+
+  def check_assertion(nil, assertion_info, binding),
+    do: assertion_failure(assertion_info, binding)
+
+  def check_assertion(_result, _assertion_info, _binding), do: :ok
+
+  @doc """
+  Variant of `check_assertion/3` for `Bond.check/1` calls: returns the assertion's value on
+  success (so the `check expr` expression evaluates to `expr`'s value) rather than `:ok`.
+
+  Same Dialyzer-laundering motivation as `check_assertion/3`: clause-matching on `false`/`nil`
+  (rather than an `if` body) is what defeats Dialyzer's narrowing — a single-clause function
+  with `if result do ... else ... end` lets caller-inferred narrowing prove the falsy branch
+  dead even when the spec widens `result` to `term()`.
+  """
+  @spec check_value(term(), map(), keyword()) :: term()
+  def check_value(false, assertion_info, binding), do: assertion_failure(assertion_info, binding)
+  def check_value(nil, assertion_info, binding), do: assertion_failure(assertion_info, binding)
+  def check_value(value, _assertion_info, _binding), do: value
+
+  @spec assertion_failure(map(), keyword()) :: no_return()
+  defp assertion_failure(assertion_info, binding) do
+    throw({:assertion_failure, Map.put(assertion_info, :binding, Enum.sort(binding))})
+  end
+
   @spec evaluate_preconditions(assertion_fun()) :: term()
   def evaluate_preconditions(preconditions_fun) when is_function(preconditions_fun, 0) do
     evaluate_assertions(preconditions_fun)

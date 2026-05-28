@@ -12,6 +12,8 @@ defmodule ContractConsumerTest do
   alias ContractConsumer.Classifier
   alias ContractConsumer.Increment
   alias ContractConsumer.Stats
+  alias ContractConsumer.TypedGuard
+  alias ContractConsumer.TypedInvariant
 
   test "single-clause contract passes on valid input" do
     assert Account.withdraw(100, 30) == 70
@@ -41,5 +43,29 @@ defmodule ContractConsumerTest do
 
   test "inline check passes on valid input" do
     assert Stats.mean([2, 4, 6]) == 4.0
+  end
+
+  describe "tautological-assertion fixtures (regression for dialyzer pattern_match warnings)" do
+    test "typespec-implied @pre runs and validates" do
+      assert TypedGuard.stringify("hi") == "hi!"
+      assert TypedGuard.atom_label(:foo) == "foo"
+    end
+
+    test "typespec-implied @post runs and validates" do
+      assert TypedGuard.key_to_string(:bar) == "bar"
+    end
+
+    test "~> antecedent that's a tautological guard still fires the consequent" do
+      assert TypedGuard.normalize({:ok, 1}) == :ok
+    end
+
+    test "<~ pattern that's a typespec-exhaustive match still returns true on success" do
+      assert TypedGuard.wrap(7) == {:ok, 7}
+    end
+
+    test "tautological @invariant on a struct still runs cleanly" do
+      state = TypedInvariant.new("starting", 0)
+      assert TypedInvariant.increment(state).count == 1
+    end
   end
 end

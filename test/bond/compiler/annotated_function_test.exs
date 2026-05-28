@@ -189,14 +189,17 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
         code = Macro.to_string(do_block)
         assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:preconditions,\s*true"
 
+        # Lifted-defp arguments are routed through `Bond.Predicates.__opaque__/1` so the
+        # wrapper's narrowed parameter type doesn't propagate into the lifted defp —
+        # otherwise Dialyzer can prove user-assertion sub-branches dead.
         assert code =~
-                 ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__new__1\(input\)\s+end\)/s
+                 ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__new__1\(Bond\.Predicates\.__opaque__\(input\)\)\s+end\)/s
 
         assert code =~ ~r"var!\(result\) = super\(input\)"
         assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:postconditions,\s*true"
 
         assert code =~
-                 ~r/Bond\.Runtime\.Eval\.evaluate_postconditions\(fn ->\s+__bond_postconditions__new__1\(input, var!\(result\)\)\s+end\)/s
+                 ~r/Bond\.Runtime\.Eval\.evaluate_postconditions\(fn ->\s+__bond_postconditions__new__1\(\s*Bond\.Predicates\.__opaque__\(input\),\s*Bond\.Predicates\.__opaque__\(var!\(result\)\)\s*\)\s+end\)/s
 
         assert code =~ ~r"var!\(result\)$"
       end)
@@ -214,8 +217,12 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
 
       pre_code = Macro.to_string(pre_body)
       assert pre_code =~ ~r"import Bond\.Predicates"
-      assert pre_code =~ ~r"if x > 0"
-      assert pre_code =~ ~r"throw.*:assertion_failure"
+      # The if/throw plumbing now lives in `Bond.Runtime.Eval.check_assertion/3`, so the
+      # lifted defp body is a routing call rather than an inline branch — this is what
+      # eliminates the `pattern_match` "Pattern: false, Type: true" warning Dialyzer
+      # would otherwise emit when the user's assertion is statically true.
+      assert pre_code =~ ~r"Bond\.Runtime\.Eval\.check_assertion\(\s*x > 0,"
+      refute pre_code =~ ~r"\bthrow\("
 
       assert {:__bond_postconditions__new__1, post_params, post_body} =
                Enum.find(defps, fn {name, _, _} -> name == :__bond_postconditions__new__1 end)
@@ -225,7 +232,7 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
 
       post_code = Macro.to_string(post_body)
       assert post_code =~ ~r"import Bond\.Predicates"
-      assert post_code =~ ~r"if result < x"
+      assert post_code =~ ~r"Bond\.Runtime\.Eval\.check_assertion\(\s*result < x,"
     end
   end
 
@@ -335,7 +342,7 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:preconditions,\s*false"
 
       assert code =~
-               ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__add__2\(x, y\)\s+end\)/s
+               ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__add__2\(Bond\.Predicates\.__opaque__\(x\), Bond\.Predicates\.__opaque__\(y\)\)\s+end\)/s
     end
 
     test "preconditions: true — override emits evaluate_preconditions with true default",
@@ -352,12 +359,12 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:preconditions,\s*true"
 
       assert code =~
-               ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__add__2\(x, y\)\s+end\)/s
+               ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__add__2\(Bond\.Predicates\.__opaque__\(x\), Bond\.Predicates\.__opaque__\(y\)\)\s+end\)/s
 
       assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:postconditions,\s*true"
 
       assert code =~
-               ~r/Bond\.Runtime\.Eval\.evaluate_postconditions\(fn ->\s+__bond_postconditions__add__2\(x, y, var!\(result\)\)\s+end\)/s
+               ~r/Bond\.Runtime\.Eval\.evaluate_postconditions\(fn ->\s+__bond_postconditions__add__2\(\s*Bond\.Predicates\.__opaque__\(x\),\s*Bond\.Predicates\.__opaque__\(y\),\s*Bond\.Predicates\.__opaque__\(var!\(result\)\)\s*\)\s+end\)/s
     end
 
     test "function with only preconditions: purging postconditions still emits override" do

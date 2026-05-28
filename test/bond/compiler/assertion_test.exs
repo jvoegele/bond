@@ -84,27 +84,29 @@ defmodule Bond.Compiler.AssertionTest do
   end
 
   describe "assertions_body/2" do
-    test "produces a block whose code throws {:assertion_failure, info} on a false assertion" do
+    test "delegates each assertion to Bond.Runtime.Eval.check_assertion/3" do
       assertion = Assertion.new(:precondition, :positive, quote(do: x > 0), __ENV__)
       body = Assertion.assertions_body([assertion], {:f, 1})
       code = Macro.to_string(body)
 
       assert code =~ ~r"import Bond\.Predicates"
-      assert code =~ ~r"if x > 0"
-      assert code =~ ~r"throw"
-      assert code =~ ~r":assertion_failure"
+      assert code =~ ~r"Bond\.Runtime\.Eval\.check_assertion\(\s*x > 0,"
+      # The throw/info-map plumbing lives inside `Bond.Runtime.Eval.check_assertion/3`,
+      # not in the emitted body — the emitted body just routes the expression's value
+      # through it.
+      refute code =~ ~r"\bthrow\("
     end
   end
 
   describe "check_body/1" do
-    test "produces a block that returns the check expression's value on success" do
+    test "delegates to Bond.Runtime.Eval.check_value/3, which returns the value on success" do
       assertion = Assertion.new(:check, nil, quote(do: 1 + 1), __ENV__)
       body = Assertion.check_body(assertion)
       code = Macro.to_string(body)
 
       assert code =~ ~r"import Bond\.Predicates"
-      assert code =~ ~r"value = 1 \+ 1"
-      assert code =~ ~r"throw"
+      assert code =~ ~r"Bond\.Runtime\.Eval\.check_value\(\s*1 \+ 1,"
+      refute code =~ ~r"\bthrow\("
     end
   end
 end

@@ -177,7 +177,7 @@ defmodule Bond.Compiler.ClauseWrapper do
       quote do
         if Bond.Runtime.Eval.should_evaluate?(:preconditions, unquote(mode)) do
           Bond.Runtime.Eval.evaluate_preconditions(fn ->
-            unquote(name)(unquote_splicing(call_params))
+            unquote(name)(unquote_splicing(opaque_args(call_params)))
           end)
         end
       end
@@ -199,10 +199,23 @@ defmodule Bond.Compiler.ClauseWrapper do
              unquote(Macro.escape(chain))
            ) do
           Bond.Runtime.Eval.evaluate_postconditions(fn ->
-            unquote(name)(unquote_splicing(args))
+            unquote(name)(unquote_splicing(opaque_args(args)))
           end)
         end
       end
     ]
+  end
+
+  # Wrap each lifted-defp argument with `Bond.Predicates.__opaque__/1` so the wrapper's
+  # typed parameters don't propagate into the lifted defp's parameter types. Without this
+  # widening, the user's assertion expression — which often duplicates a typespec-implied
+  # guard like `is_binary(x)` — gets analysed under the narrowed type and Dialyzer proves
+  # internal branches (e.g. the `false ->` clause of `and/2`'s expansion) dead, producing
+  # `pattern_match` warnings at the lifted defp's line-1 generated location in downstream
+  # apps.
+  defp opaque_args(args) do
+    Enum.map(args, fn arg ->
+      quote(do: Bond.Predicates.__opaque__(unquote(arg)))
+    end)
   end
 end
