@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Internal
+
+- **Closed #4 — `Kernel.@/1` override compatibility verified.** Adds
+  test coverage that Bond's `@/1` catch-all forwards seven categories
+  of standard Elixir attributes intact (`@derive`, `@enforce_keys`,
+  `@spec`/`@type`/`@typep`/`@opaque`, `@callback`/`@behaviour`/`@impl`,
+  accumulating custom attributes, `@external_resource`), and adds
+  cross-library tests using Norm as the real-world counterpart (the
+  only popular Elixir library that uses the same `import Kernel,
+  except: [@: 1]` + specific clause + catch-all forwarding technique
+  Bond does). Empirical finding: combining `use Bond` with another
+  `@/1`-overriding library in a single module fails to compile with a
+  clear `function @/1 imported from both ..., call is ambiguous` error,
+  regardless of `use` ordering. The conflict is loud, not silent —
+  contracts are never dropped without a diagnostic. 24 new tests
+  (18 forwarding + 6 cross-library).
+
+- FAQ entry "Can I use Bond and Norm in the same module?" documents
+  the conflict, the exact error message, and two workarounds
+  (split-modules pattern + using Norm's spec helpers as plain remote
+  calls without `use Norm`). The existing "How does Bond compare to
+  Norm?" entry is updated to cross-reference the new section instead
+  of glossing over the per-module conflict.
+
+- `norm ~> 0.13` added as a `:test`-only dependency (no transitive
+  runtime cost — Norm has only optional `stream_data`, which Bond
+  already declares).
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.16`.
+
 ## [0.18.0] - 2026-05-28
 
 Raises the Elixir version floor to 1.16 and aligns optional dependencies
