@@ -214,7 +214,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
         annotated_function.invariants
       )
 
-    maybe_warn_unmatched_invariant_subject(annotated_function, inv_mode, config)
+    maybe_warn_skipped_invariants(annotated_function, inv_mode, config)
 
     if pre_mode != :purge or post_mode != :purge or inv_mode != :purge do
       build_contract_override(annotated_function, pre_mode, post_mode, inv_mode)
@@ -223,45 +223,71 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
   # Emits a compile-time warning when a public function in an invariant-declaring
   # module has no clause that pattern-matches the struct — meaning invariants are
-  # silently skipped for that function. The warning is on by default; suppress with
-  # `use Bond, warn_unmatched_invariant_subject: false` per module or `config :bond,
-  # warn_unmatched_invariant_subject: false` globally.
+  # silently skipped for that function. On by default; suppression is layered:
+  #
+  #   * global:       `config :bond, warn_skipped_invariants: false`
+  #   * per-module:   `use Bond, warn_skipped_invariants: false`
+  #   * per-function: `@bond_warn_skipped_invariants false` (next def only)
+  #
+  # The per-function override is tri-state: `nil` (no attribute set) inherits the
+  # module/global setting; `true` or `false` overrides for that single function.
   #
   # Triggers ONLY when ALL of:
   #   - the function is `def` (defp is exempt from invariants by design)
   #   - invariants are attached to this function (i.e. module declares @invariant)
   #   - inv_mode != :purge (user hasn't explicitly opted out)
+  #   - resolved warn flag is true (per-function override > module/global config)
   #   - no clause's head matches a struct parameter
-  #   - the warning isn't suppressed in config
-  defp maybe_warn_unmatched_invariant_subject(
+  defp maybe_warn_skipped_invariants(
          %__MODULE__{kind: :def, invariants: [_ | _]} = annotated_function,
          inv_mode,
          config
        )
        when inv_mode != :purge do
-    if Map.get(config, :warn_unmatched_invariant_subject, true) and
-         not Invariants.any_clause_matches_struct?(annotated_function.clauses) do
+    warn? = resolve_warn_skipped_invariants(annotated_function.clauses, config)
+
+    if warn? and not Invariants.any_clause_matches_struct?(annotated_function.clauses) do
       first_clause = List.first(annotated_function.clauses)
 
       IO.warn(
-        unmatched_invariant_subject_message(annotated_function),
+        skipped_invariants_warning_message(annotated_function),
         first_clause.env
       )
     end
   end
 
-  defp maybe_warn_unmatched_invariant_subject(_annotated_function, _inv_mode, _config), do: :ok
+  defp maybe_warn_skipped_invariants(_annotated_function, _inv_mode, _config), do: :ok
 
-  defp unmatched_invariant_subject_message(%__MODULE__{
+  # Resolves the final warn-or-not decision. Per-function override (first clause
+  # with a non-nil override wins) takes precedence over the module/global config
+  # value. If no clause has an override, fall back to the resolved config.
+  #
+  # Uses an explicit nil check rather than `Enum.find_value/2` because the
+  # override is a tri-state (nil | true | false) and `find_value` treats `false`
+  # the same as nil — which would silently drop legitimate `false` overrides.
+  defp resolve_warn_skipped_invariants(clauses, config) do
+    per_function_override =
+      clauses
+      |> Enum.map(& &1.warn_skipped_invariants_override)
+      |> Enum.find(&(&1 != nil))
+
+    case per_function_override do
+      nil -> Map.get(config, :warn_skipped_invariants, true)
+      bool when is_boolean(bool) -> bool
+    end
+  end
+
+  defp skipped_invariants_warning_message(%__MODULE__{
          module: module,
          fun: fun,
          arity: arity
        }) do
     "public function `#{fun}/#{arity}` in invariant-declaring module " <>
       "`#{inspect(module)}` matched no struct parameter; invariants are not " <>
-      "checked here. If intentional, suppress with `use Bond, " <>
-      "warn_unmatched_invariant_subject: false` (per module) or " <>
-      "`config :bond, warn_unmatched_invariant_subject: false` (globally)."
+      "checked here. If intentional, suppress with " <>
+      "`@bond_warn_skipped_invariants false` (per function), " <>
+      "`use Bond, warn_skipped_invariants: false` (per module), or " <>
+      "`config :bond, warn_skipped_invariants: false` (globally)."
   end
 
   # A kind is effectively purged if either the user purged it OR the function has no

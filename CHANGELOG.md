@@ -15,12 +15,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   invariants silently skipped — documented as a footgun in the README
   and FAQ, but uncatchable without reading every diff. Bond now emits
   a compile-time warning at the function's definition site naming the
-  offender and offering both suppression knobs.
-- **New config key `:warn_unmatched_invariant_subject`** (default
-  `true`, boolean only). Suppressible per-module via `use Bond,
-  warn_unmatched_invariant_subject: false` and globally via
-  `config :bond, warn_unmatched_invariant_subject: false`. Both knobs
-  are part of the public API as of 1.0.
+  offender and offering all three suppression knobs.
+
+- **New `:warn_skipped_invariants` knob, three layers** (all public
+  API as of 1.0; default `true` at every layer):
+  - **Global:** `config :bond, warn_skipped_invariants: false`.
+  - **Per-module:** `use Bond, warn_skipped_invariants: false`.
+  - **Per-function:** `@bond_warn_skipped_invariants false` before
+    the next `def`. Tri-state — omitting the attribute inherits the
+    module/global setting; `false` suppresses for that one def;
+    `true` re-enables the warning even under a module/global `false`
+    (useful for selectively opting back in to verify a specific
+    function under a project-wide suppression).
+
+  Per-function is the right answer most of the time: a struct module
+  with a few utility or constructor functions can suppress just those
+  while leaving the safety net intact for everything else. Module-
+  level suppression silences future regressions in the same module,
+  so reach for it only when the entire module legitimately isn't
+  about the struct (rare; reconsider whether `@invariant` belongs
+  there at all).
 
 ### Changed
 

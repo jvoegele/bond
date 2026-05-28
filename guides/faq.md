@@ -349,9 +349,10 @@ You're seeing something like:
 ```
 public function `update/2` in invariant-declaring module
 `MyApp.BoundedStack` matched no struct parameter; invariants are not
-checked here. If intentional, suppress with `use Bond,
-warn_unmatched_invariant_subject: false` (per module) or `config :bond,
-warn_unmatched_invariant_subject: false` (globally).
+checked here. If intentional, suppress with `@bond_warn_skipped_invariants
+false` (per function), `use Bond, warn_skipped_invariants: false`
+(per module), or `config :bond, warn_skipped_invariants: false`
+(globally).
 ```
 
 Bond emits this at compile time when a public function (`def`, not
@@ -378,22 +379,45 @@ See "When does Bond check invariants?" above for every shape Bond
 detects.
 
 **If the function is genuinely not about the struct** (a utility
-function in the same module, an alternate constructor, etc.), suppress
-the warning explicitly. Per module is the usual choice:
+function, an alternate constructor, a class-name helper), suppress
+the warning at the right scope. From narrowest to broadest:
 
 ```elixir
-use Bond, warn_unmatched_invariant_subject: false
+# Per function — only this def. Other public functions in the same
+# module keep the safety net.
+@bond_warn_skipped_invariants false
+def class_name, do: "Stack"
 ```
 
-If most of your invariant-declaring modules legitimately have mixed
-struct and non-struct public functions, suppress globally instead:
+```elixir
+# Per module — every public function in the module is exempt. Useful
+# when the whole module legitimately doesn't operate on the struct
+# (rare; reconsider whether @invariant belongs here at all).
+use Bond, warn_skipped_invariants: false
+```
 
 ```elixir
+# Global — every module in the project. Use sparingly; you lose the
+# footgun-catcher everywhere.
 # config/config.exs
-config :bond, warn_unmatched_invariant_subject: false
+config :bond, warn_skipped_invariants: false
 ```
 
-The warning is opt-out so the footgun is caught by default; both
+**Per-function is the right answer most of the time.** A typical
+struct module has a few utility or constructor functions mixed in with
+the struct-operating ones, and you want the warning to keep firing on
+the latter if they're later refactored to drop the struct from their
+head. Module-level suppression silences future regressions in the same
+module, so reach for it only when you mean "this entire module isn't
+about the struct."
+
+The per-function override is a tri-state: omitting the attribute
+inherits the module/global setting; `false` suppresses for that one
+def; `true` re-enables the warning even under a module/global `false`
+— useful for selectively opting back in to verify a specific
+function under a project-wide suppression.
+
+The warning is opt-out so the footgun is caught by default; all three
 suppression knobs ship with 1.0 and are part of the public API.
 
 ## How are multi-clause functions handled?

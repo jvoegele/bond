@@ -73,10 +73,10 @@ defmodule Bond do
                                   checks: Application.compile_env(:bond, :checks, true),
                                   invariants: Application.compile_env(:bond, :invariants, true),
                                   overrides: Application.compile_env(:bond, :overrides, []),
-                                  warn_unmatched_invariant_subject:
+                                  warn_skipped_invariants:
                                     Application.compile_env(
                                       :bond,
-                                      :warn_unmatched_invariant_subject,
+                                      :warn_skipped_invariants,
                                       true
                                     )
                                 )

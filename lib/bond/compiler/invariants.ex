@@ -99,7 +99,7 @@ defmodule Bond.Compiler.Invariants do
   Returns `true` when at least one clause in the given list has a detectable struct
   parameter (so invariants will fire for that clause), and `false` when no clause
   matches the struct (so invariants are silently skipped for the entire function —
-  the footgun `:warn_unmatched_invariant_subject` warns about).
+  the footgun `:warn_skipped_invariants` warns about).
 
   Used by `Bond.Compiler.AnnotatedFunction.apply_contract/2` to decide whether to
   emit the warning at the function definition site.

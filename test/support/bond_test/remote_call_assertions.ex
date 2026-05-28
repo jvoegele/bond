@@ -15,7 +15,7 @@ defmodule BondTest.RemoteCallAssertions do
   # other defs (greet/1, squares/1, fetch_id/1, inline_check_example/1) are
   # remote-call-assertion fixtures whose subjects are non-struct values.
   # Suppress the per-function "no struct parameter matched" warning here.
-  use Bond, warn_unmatched_invariant_subject: false
+  use Bond, warn_skipped_invariants: false
 
   defstruct [:items]
 

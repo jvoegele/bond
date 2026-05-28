@@ -55,7 +55,7 @@ defmodule Bond.Compiler do
           postconditions: mode(),
           checks: mode(),
           invariants: mode(),
-          warn_unmatched_invariant_subject: boolean()
+          warn_skipped_invariants: boolean()
         }
 
   @doc """
@@ -87,8 +87,8 @@ defmodule Bond.Compiler do
       postconditions: Keyword.fetch!(global, :postconditions),
       checks: Keyword.fetch!(global, :checks),
       invariants: Keyword.get(global, :invariants, true),
-      warn_unmatched_invariant_subject:
-        Keyword.get(global, :warn_unmatched_invariant_subject, true)
+      warn_skipped_invariants:
+        Keyword.get(global, :warn_skipped_invariants, true)
     }
 
     resolved =
@@ -179,7 +179,7 @@ defmodule Bond.Compiler do
   defp apply_settings(config, settings) do
     config
     |> apply_kind_settings(settings)
-    |> apply_boolean_settings(settings, [:warn_unmatched_invariant_subject])
+    |> apply_boolean_settings(settings, [:warn_skipped_invariants])
   end
 
   defp apply_kind_settings(config, settings) do
@@ -222,7 +222,18 @@ defmodule Bond.Compiler do
   end
 
   def __on_definition__(env, kind, fun, params, guards, body) when kind in [:def, :defp] do
-    function_def = FunctionDefinition.new(env, kind, fun, params, guards, body)
+    # Read and consume the per-function `@bond_warn_skipped_invariants` override
+    # so it scopes to this single def. The override is a tri-state: nil means
+    # "inherit module/global config"; true/false explicitly enables/suppresses
+    # the warning for this function regardless of module/global config.
+    warn_override = Module.get_attribute(env.module, :bond_warn_skipped_invariants)
+    if warn_override != nil, do: Module.delete_attribute(env.module, :bond_warn_skipped_invariants)
+
+    function_def =
+      env
+      |> FunctionDefinition.new(kind, fun, params, guards, body)
+      |> FunctionDefinition.put_warn_skipped_invariants_override(warn_override)
+
     FSM.function_def(fsm(env), function_def)
   end
 

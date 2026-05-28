@@ -24,10 +24,13 @@ defmodule BondTest.InvariantSmoke do
              size_within_capacity: length(subject.items) <= subject.capacity,
              non_negative_size: length(subject.items) >= 0
 
+  # Constructors: take inputs and build the struct, so they don't pattern-match it.
+  @bond_warn_skipped_invariants false
   def new(capacity) when is_integer(capacity) and capacity >= 0 do
     %__MODULE__{items: [], capacity: capacity}
   end
 
+  @bond_warn_skipped_invariants false
   def try_new(capacity) when is_integer(capacity) and capacity >= 0 do
     {:ok, %__MODULE__{items: [], capacity: capacity}}
   end

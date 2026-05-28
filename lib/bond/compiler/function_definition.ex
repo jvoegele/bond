@@ -14,7 +14,8 @@ defmodule Bond.Compiler.FunctionDefinition do
             arity: nil,
             params: nil,
             guards: nil,
-            body: nil
+            body: nil,
+            warn_skipped_invariants_override: nil
 
   @type doc_attribute_value :: String.t() | Keyword.t()
   @type doc_attribute :: {meta :: Keyword.t(), value :: doc_attribute_value()}
@@ -34,7 +35,8 @@ defmodule Bond.Compiler.FunctionDefinition do
           fun: atom(),
           params: list(),
           guards: list(),
-          body: list() | nil
+          body: list() | nil,
+          warn_skipped_invariants_override: nil | boolean()
         }
 
   @spec new(
@@ -63,4 +65,15 @@ defmodule Bond.Compiler.FunctionDefinition do
   end
 
   def mfa(_), do: nil
+
+  @doc """
+  Records the per-function `@bond_warn_skipped_invariants` override captured at
+  `__on_definition__` time. `nil` means no override was set; `true`/`false`
+  overrides the module/global config for this single function.
+  """
+  @spec put_warn_skipped_invariants_override(t(), nil | boolean()) :: t()
+  def put_warn_skipped_invariants_override(%__MODULE__{} = fd, override)
+      when override == nil or is_boolean(override) do
+    %{fd | warn_skipped_invariants_override: override}
+  end
 end
