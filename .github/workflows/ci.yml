@@ -47,7 +47,16 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+          # Key includes lib/ source hash so changes to compiler internals
+          # invalidate the cache. Without this, a stale _build snapshot can
+          # trigger a partial recompile that races: e.g. a doc-chunk-only
+          # change to lib/bond/compiler/compile_state_fsm/server.ex forces
+          # Server.beam to be rewritten in parallel with the test/support
+          # compile, and the user-fixture `use Bond` macro starts the FSM
+          # gen_statem while Server is mid-write, producing
+          # `module Bond.Compiler.CompileStateFSM.Server is not available`.
+          # Cache-busting on lib source avoids that class of failure entirely.
+          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('lib/**/*.ex', '**/mix.lock') }}
           restore-keys: |
             ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-
       - run: mix deps.get
@@ -89,7 +98,9 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-dialyzer-build-${{ hashFiles('**/mix.lock') }}
+          # Source-hash inclusion matches the test job's cache key — see
+          # the rationale comment there.
+          key: ${{ runner.os }}-dialyzer-build-${{ hashFiles('lib/**/*.ex', '**/mix.lock') }}
           restore-keys: |
             ${{ runner.os }}-dialyzer-build-
       - name: Cache PLT
