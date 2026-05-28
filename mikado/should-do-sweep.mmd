@@ -1,0 +1,42 @@
+%% Mikado graph for the Should-do 1.0 sweep — issues #5, #6, #7.
+%%
+%% Cleared first so that #1 (freeze the public API surface) operates on the
+%% final 1.0 surface, not a draft one. Each item has a small but real chance
+%% of touching public API (#5 adds a config knob; #6 would have added a per-
+%% contract toggle if shipped; #7 settles which features are excluded from
+%% 1.0 vs deferred), so they need to land before the API audit.
+%%
+%% Design decisions (user-approved before plan):
+%%   - #5: WARNING ON BY DEFAULT (opt-out). Suppressible via Application config
+%%     and via `use Bond` option. The "intentional util function in an
+%%     invariant module" case is uncommon enough that on-by-default catches the
+%%     footgun without much transition noise.
+%%   - #6: SCOPE OUT OF 1.0. No per-contract disable mechanism ships. Rewrite
+%%     the FAQ entry to present existing workarounds (comment out / disable
+%%     the kind / move to `check/1`) as the supported story; drop the "file an
+%%     issue" framing. Reasoning: Bond already has rich knobs (per-kind
+%%     `:purge|false|true`, `:overrides`, `use Bond` opts); per-contract toggle
+%%     compounds with them; Eiffel descendants don't expose it; the user's
+%%     design philosophy is decisive choices over flexibility-for-its-own-sake.
+%%   - #7: Three locations to fix — compiler.ex:188 (internal comment about
+%%     macros), guides/faq.md:447 (per-clause contracts "may be added"),
+%%     guides/history.md:75-86 (Bond.Spec "may be added"). Each restated as a
+%%     deliberate 1.0 scope boundary with a workaround.
+%%
+%% Arrows point from a goal to its prerequisites. Leaves (green) have no
+%% further prerequisites and are safe to start first. Depth-first per Mikado:
+%% pick a leaf, finish it, keep tests green, commit, repeat.
+
+flowchart TD
+    G(["**Goal**<br/>Issues #5, #6, #7 closed; 1.0 should-do bucket clear.<br/>Public surface settled enough to begin #1's API freeze."])
+
+    G --> S5["5. CHANGELOG entry under Unreleased + close #5/#6/#7 on GitHub +<br/>check off in #11 (Road to 1.0.0).<br/><b>#sweep-wrap</b>"]
+
+    S5 --> S4["4. **#5** — Compile warning for silently-skipped invariants.<br/>Detection: at the function level (across all clauses of a multi-clause<br/>function), if EVERY clause's `Invariants.detect_struct_params/2`<br/>returns empty AND the function is `def` (not `defp`) AND inv_mode<br/>!= :purge AND warning isn't suppressed, emit IO.warn at the<br/>definition site.<br/>Suppression: `config :bond, warn_unmatched_invariant_subject: false`<br/>and `use Bond, warn_unmatched_invariant_subject: false`. Default: on.<br/>Tests: fixture with unmatched public fn (warn fires); fixture with<br/>suppression (no warn); fixture with all matched (no warn); fixture<br/>with `defp` unmatched (no warn — defp exempt).<br/>Docs: FAQ entry.<br/><b>#5-warning</b>"]
+
+    S5 --> S3["3. **#6** — Rewrite FAQ 'How do I disable a single failing contract<br/>while debugging?'<br/>Drop the 'file an issue — there are reasonable designs' framing.<br/>Present the three existing workarounds (comment out + add a TODO,<br/>disable the kind globally, move to `check/1` for finer control) as<br/>the supported, deliberate 1.0 story.<br/><b>#6-faq-rewrite</b>"]
+
+    S5 --> S2["2. **#7** — Reclassify three deferred features as 1.0 scope<br/>boundaries.<br/>(a) lib/bond/compiler/compiler.ex:188 — comment 'Bond does not<br/>    (yet) support contracts on macros' becomes 'Contracts on macros<br/>    are out of scope for 1.0. Wrap the macro body in a regular<br/>    function with contracts and call that from the macro.'<br/>(b) guides/faq.md:447 — 'Per-clause contracts may be added in a<br/>    future release' becomes a deliberate non-feature with the<br/>    workaround (one bodyless head + uniform contracts).<br/>(c) guides/history.md:75-86 — 'Bond may be extended... perhaps with<br/>    a Bond.Spec module' becomes 'Bond does not provide data-spec<br/>    integration; use Norm alongside Bond as described in the FAQ'.<br/><b>#7-reframe</b>"]
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S2,S3,S4 leaf;
