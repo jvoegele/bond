@@ -5,7 +5,90 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0-rc.1] - 2026-05-28
+
+First **release candidate** for Bond 1.0.0. Published to gather
+feedback from the Elixir community before the stability guarantees in
+`guides/stability.md` lock in at 1.0.0 final. Bug reports and design
+feedback are welcome at https://github.com/jvoegele/bond/issues — small
+adjustments to the public surface are still possible between RC and
+final, based on what we hear.
+
+### 1.0 highlights
+
+- **Documented and frozen public API surface.** See
+  [Public API surface](guides/public-api.md) for the exhaustive
+  enumeration of every name covered by the semver contract — module
+  attributes, macros, operators, the `Bond.Predicates` callables,
+  `Bond.Test` and `Bond.PropertyTest` helpers, the telemetry event
+  and metadata shape, the four error structs, the configuration keys,
+  and the public type set. Internal namespaces (`Bond.Compiler.*`,
+  `Bond.Runtime.*`) are explicitly carved out.
+- **A semver-style stability promise.** See
+  [Stability guarantees](guides/stability.md) for what patch / minor /
+  major mean in practice, what's explicitly excluded (compile-error
+  message text, generated-code shape, `Exception.message/1` output),
+  and the deprecation policy (minimum one minor with a deprecation
+  warning before removal in next major).
+- **Published overhead numbers.** See
+  [Overhead](guides/overhead.md) for concrete compile-time and runtime
+  cost figures from a documented reference environment, with
+  `mix run bench/...` recipes for re-running on your hardware.
+  Headlines: a `:purge`d contract is free; an enabled `@pre` adds ~130
+  ns/call; Bond compile-time overhead is ~10 ms per module that uses
+  contracts.
+- **Compatibility verified across Elixir 1.16–1.19 in CI** — the
+  declared `~> 1.16` floor, with parallel-compile races fixed and a
+  Dialyzer baseline established for Bond's own library code.
+- **Known footguns either fixed, documented, or surfaced as
+  compile-time warnings.** New `:warn_skipped_invariants` opt-out
+  warning catches the most common silent-skip case (see Migration
+  below).
+
+### Migrating from 0.18.x
+
+**No breaking API changes.** Code written against 0.18.x continues to
+compile and run identically. There is, however, one new opt-out
+compile warning that may surface in code that previously compiled
+without diagnostics — described next.
+
+**`:warn_skipped_invariants` is the only new behaviour you may see.**
+Bond now emits a compile-time warning when a public function in an
+invariant-declaring module has neither a head that pattern-matches the
+struct nor a body that returns one — those functions silently skip
+invariants entirely (the footgun the warning was designed to catch).
+If your codebase has struct modules with utility or constructor
+functions whose bodies don't return literal `%__MODULE__{...}` or
+`{:ok, %__MODULE__{...}}`, you may see warnings of the form:
+
+```
+public function `MyMod.helper/0` in invariant-declaring module
+`MyMod` has no clause that pattern-matches the struct or returns
+one; invariants are skipped here. If intentional, suppress with
+`@bond_warn_skipped_invariants false` (per function), `use Bond,
+warn_skipped_invariants: false` (per module), or `config :bond,
+warn_skipped_invariants: false` (globally).
+```
+
+The detection is conservative on the post-side: only literal struct
+returns suppress the warning automatically. Helpers like
+`def from_map(m), do: build(m)` still warn; the per-function attribute
+is the workaround.
+
+Three suppression knobs ship; pick the narrowest scope that fits the
+intent:
+
+- **Per function** (recommended for individual utility/constructor
+  functions): `@bond_warn_skipped_invariants false` placed before the
+  `def`. Tri-state — `true` re-enables under a module/global `false`.
+- **Per module** (for modules whose whole purpose isn't the struct —
+  rare; reconsider whether `@invariant` belongs there at all):
+  `use Bond, warn_skipped_invariants: false`.
+- **Global** (use sparingly — you lose the footgun-catcher
+  everywhere): `config :bond, warn_skipped_invariants: false`.
+
+See the FAQ entry "Why is Bond warning about skipped invariants?" for
+the full diagnostic guide.
 
 ### Documentation
 
