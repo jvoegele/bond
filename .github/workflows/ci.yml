@@ -56,9 +56,13 @@ jobs:
           # gen_statem while Server is mid-write, producing
           # `module Bond.Compiler.CompileStateFSM.Server is not available`.
           # Cache-busting on lib source avoids that class of failure entirely.
-          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('lib/**/*.ex', '**/mix.lock') }}
+          # The `-v2-` suffix is a one-time invalidation marker; bump on each
+          # cache-shape change so old prefix-matching cached `_build`
+          # snapshots don't restore-key-fallback into a new build that
+          # expects different invariants.
+          key: ${{ runner.os }}-mix-v2-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('lib/**/*.ex', '**/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-
+            ${{ runner.os }}-mix-v2-${{ matrix.otp }}-${{ matrix.elixir }}-
       - run: mix deps.get
       - run: mix test
 
@@ -100,9 +104,9 @@ jobs:
             _build
           # Source-hash inclusion matches the test job's cache key — see
           # the rationale comment there.
-          key: ${{ runner.os }}-dialyzer-build-${{ hashFiles('lib/**/*.ex', '**/mix.lock') }}
+          key: ${{ runner.os }}-dialyzer-build-v2-${{ hashFiles('lib/**/*.ex', '**/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-dialyzer-build-
+            ${{ runner.os }}-dialyzer-build-v2-
       - name: Cache PLT
         uses: actions/cache@v5
         with:
