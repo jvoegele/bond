@@ -1,5 +1,12 @@
 defmodule Bond.Compiler.CompileStateFSM.Server do
-  @moduledoc false
+  @moduledoc internal: true
+  @moduledoc """
+  `gen_statem` server backing `Bond.Compiler.CompileStateFSM`. Filtered out of
+  hexdocs by the `internal: true` flag — `@moduledoc false` would also hide it,
+  but would still leak as a "documentation references hidden module" warning
+  when referenced by name in CHANGELOG entries or other guides. Consistent
+  with the convention used by the rest of `Bond.Compiler.*`.
+  """
   @behaviour :gen_statem
 
   # `require` (not `alias`) so Mix creates strong compile-time deps on both modules and

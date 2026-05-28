@@ -87,8 +87,7 @@ defmodule Bond.Compiler do
       postconditions: Keyword.fetch!(global, :postconditions),
       checks: Keyword.fetch!(global, :checks),
       invariants: Keyword.get(global, :invariants, true),
-      warn_skipped_invariants:
-        Keyword.get(global, :warn_skipped_invariants, true)
+      warn_skipped_invariants: Keyword.get(global, :warn_skipped_invariants, true)
     }
 
     resolved =
@@ -227,7 +226,9 @@ defmodule Bond.Compiler do
     # "inherit module/global config"; true/false explicitly enables/suppresses
     # the warning for this function regardless of module/global config.
     warn_override = Module.get_attribute(env.module, :bond_warn_skipped_invariants)
-    if warn_override != nil, do: Module.delete_attribute(env.module, :bond_warn_skipped_invariants)
+
+    if warn_override != nil,
+      do: Module.delete_attribute(env.module, :bond_warn_skipped_invariants)
 
     function_def =
       env

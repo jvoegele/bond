@@ -158,8 +158,9 @@ module.
   is_binary(x)` on a function `@spec`-narrowed to `binary()`).
 
 - **Lifted-defp arguments are routed through a type-laundering helper.**
-  `Bond.Predicates.__opaque__/1` (and `__truthy__/1` for the `~>` operator)
-  use `:persistent_term.get/2` to defeat Dialyzer's parameter-type
+  `__opaque__/1` (and `__truthy__/1` for the `~>` operator), both in
+  `Bond.Predicates`, use `:persistent_term.get/2` to defeat Dialyzer's
+  parameter-type
   propagation from the wrapper into the lifted defp. Without this, an
   assertion expression containing `and`/`or`/`case` (which expand to their
   own internal `case`) would still narrow under the wrapper's `@spec`,
@@ -192,9 +193,9 @@ module.
 - **Generated-AST unit tests updated** in
   `test/bond/compiler/{annotated_function,assertion,invariants}_test.exs`
   to assert that wrapper → lifted-defp call sites route every argument
-  through `Bond.Predicates.__opaque__/1` and that the lifted defps
-  delegate the if/throw to `Bond.Runtime.Eval.check_assertion/3` /
-  `check_value/3`.
+  through the `__opaque__/1` laundering helper (in `Bond.Predicates`)
+  and that the lifted defps delegate the if/throw to `check_assertion/3` /
+  `check_value/3` (in `Bond.Runtime.Eval`).
 
 ### Requirements
 

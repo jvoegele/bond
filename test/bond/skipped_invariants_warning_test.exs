@@ -40,9 +40,9 @@ defmodule Bond.SkippedInvariantsWarningTest do
 
     test "defp in an invariant-declaring module does not warn (defp is exempt)" do
       # Module compiles cleanly with no suppression: defp is exempt by design.
-      assert BondTest.SkippedInvariants.SilentDefp.matched(
-               %BondTest.SkippedInvariants.SilentDefp{value: 7}
-             ) == 7
+      assert BondTest.SkippedInvariants.SilentDefp.matched(%BondTest.SkippedInvariants.SilentDefp{
+               value: 7
+             }) == 7
     end
 
     test "multi-clause def where ONE clause matches the struct does not warn" do
