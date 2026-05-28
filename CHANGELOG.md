@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-05-28
+
+Raises the Elixir version floor to 1.16 and aligns optional dependencies
+with their current stable series. No changes to Bond's public API or
+runtime behaviour.
+
+### Changed (breaking)
+
+- **Minimum Elixir version is now `~> 1.16`** (was `~> 1.14`). Elixir
+  1.14 and 1.15 are no longer supported. The floor was raised to resolve
+  formatter drift (the `(-> t)` zero-arity typespec syntax introduced in
+  1.15.0) and to allow CI to run format-checking against the newest Elixir
+  without a version pin.
+
+- **`Bond.PropertyTest` requires `stream_data ~> 1.0`** (was `~> 0.6`).
+  The optional property-based testing integration now targets the stable
+  1.x release series. Users of `Bond.PropertyTest` must upgrade their own
+  `stream_data` dependency to `~> 1.0` (current release: 1.3.0).
+
+### Internal
+
+- CI matrix now spans Elixir 1.16–1.19 / OTP 26–27; the 1.14 row is
+  removed.
+- `lint` job runs on Elixir 1.19.5 (was pinned to 1.14.5 due to formatter
+  drift; pin is no longer needed).
+- New `dialyzer` CI job runs `mix dialyzer` against Bond's own library
+  code on Elixir 1.19.5 / OTP 27.2, establishing a clean Dialyzer
+  baseline for the library itself (previously only the downstream consumer
+  was Dialyzer-checked).
+- GitHub Actions updated to Node.js 24 runtime (`checkout@v6`,
+  `cache@v5`).
+- `credo` updated 1.7.3 → 1.7.18; `stream_data` updated 0.6.0 → 1.3.0.
+
 ## [0.17.5] - 2026-05-28
 
 A patch release eliminating downstream `mix dialyzer` warnings emitted by

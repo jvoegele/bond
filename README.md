@@ -581,8 +581,8 @@ enable PBT:
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.17.5"},
-    {:stream_data, "~> 0.6", only: [:dev, :test]}
+    {:bond, "~> 0.18.0"},
+    {:stream_data, "~> 1.0", only: [:dev, :test]}
   ]
 end
 ```
@@ -599,7 +599,7 @@ end
 ```elixir
 def deps do
   [
-    {:bond, "~> 0.17.5"}
+    {:bond, "~> 0.18.0"}
   ]
 end
 ```
