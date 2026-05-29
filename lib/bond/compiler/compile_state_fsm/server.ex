@@ -55,25 +55,21 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
     {:keep_state, data, {:reply, from, :ok}}
   end
 
-  def handle_event({:call, from}, {:function_def, function_def}, state, data) do
-    try do
-      {state_transition, new_data, result} =
-        if new_function_def?(function_def, data) do
-          handle_new_function_def(function_def, state, data)
-        else
-          handle_function_clause(function_def, state, data)
-        end
-
-      case state_transition do
-        :keep_state ->
-          {:keep_state, new_data, {:reply, from, result}}
-
-        {:next_state, next_state} ->
-          {:next_state, next_state, new_data, {:reply, from, result}}
-      end
-    catch
-      {:error, _reason} = error ->
-        {:next_state, :error, clear_pending_contracts(data), {:reply, from, error}}
+  # An externally-generated override clause (another library made the function overridable and
+  # is redefining it to wrap it — Norm's `@contract`, the `decorator` library, etc.) for a
+  # function Bond has already tracked. Ignore it: it's a wrapper, not a user contract site, and
+  # tracking it would trip the "clauses must be grouped" / parameter-consistency checks. Bond's
+  # own contract wrapper (emitted in `__before_compile__`) still wraps the function as a whole
+  # and composes with the other library's wrapper via `super`. This only fires in a situation
+  # that previously always errored (a non-adjacent re-appearance of an MFA), so it cannot change
+  # the behaviour of code that already compiled.
+  def handle_event({:call, from}, {:function_def, function_def}, state, data)
+      when state not in [:error, :done] do
+    if FunctionDefinition.external_override?(function_def) and
+         MapSet.member?(data.mfa_set, FunctionDefinition.mfa(function_def)) do
+      {:keep_state, data, {:reply, from, :ok}}
+    else
+      handle_tracked_function_def(function_def, state, data, from)
     end
   end
 
@@ -156,6 +152,28 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
   # NOTE: this clause is used only for testing purposes
   def handle_event(:cast, {:set_state, new_state}, _state, data) do
     {:next_state, new_state, data}
+  end
+
+  defp handle_tracked_function_def(function_def, state, data, from) do
+    try do
+      {state_transition, new_data, result} =
+        if new_function_def?(function_def, data) do
+          handle_new_function_def(function_def, state, data)
+        else
+          handle_function_clause(function_def, state, data)
+        end
+
+      case state_transition do
+        :keep_state ->
+          {:keep_state, new_data, {:reply, from, result}}
+
+        {:next_state, next_state} ->
+          {:next_state, next_state, new_data, {:reply, from, result}}
+      end
+    catch
+      {:error, _reason} = error ->
+        {:next_state, :error, clear_pending_contracts(data), {:reply, from, error}}
+    end
   end
 
   defp new_function_def?(function_def, data) do
