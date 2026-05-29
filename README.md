@@ -68,6 +68,11 @@ to the `result` variable (bound to the function's return value) and
 > operators defined there (such as `~>` and `|||`) can be used in
 > assertions. `Bond.Predicates` can be explicitly imported elsewhere if
 > you want the operators outside of contract expressions.
+>
+> To coexist with another library that overrides `Kernel.@/1` (such as
+> Norm's `@contract`), pass `use Bond, at_syntax: false`: Bond then leaves
+> `@` alone and you write contracts as the qualified calls `Bond.pre/1`,
+> `Bond.post/1`, and `Bond.invariant/1`. See the FAQ for details.
 
 ## Assertion syntax
 

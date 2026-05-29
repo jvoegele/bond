@@ -91,10 +91,11 @@ value matches a spec or it doesn't. Bond verifies **function behaviour** —
 a contract asserts something about the relationship between inputs,
 outputs, and (optionally) prior state.
 
-The two libraries are conceptually complementary, but they can't share a
-module: both override `Kernel.@/1`, and Elixir refuses to pick a winner
-(see [the next FAQ entry](#can-i-use-bond-and-norm-in-the-same-module)).
-You can still call Norm's validation helpers from a Bond module as
+The two libraries are conceptually complementary. By default they can't
+share a module — both override `Kernel.@/1` — but Bond's `at_syntax: false`
+escape hatch lets them coexist, including on the same function (see
+[the next FAQ entry](#can-i-use-bond-and-norm-in-the-same-module)).
+You can also call Norm's validation helpers from a Bond module as
 ordinary remote calls:
 
 ```elixir
@@ -113,7 +114,9 @@ defines `input/0` and `output/0` with Norm's `spec/1`.
 
 ## Can I use Bond and Norm in the same module?
 
-**No.** `use Bond` and `use Norm` in the same module fails to compile
+**Yes — pass `at_syntax: false` to `use Bond`.**
+
+By default, `use Bond` and `use Norm` in the same module fail to compile
 with:
 
 ```
@@ -127,14 +130,58 @@ at the same scope level — Elixir does not pick a winner — and the first
 `@`-using line fails. The error is loud and points at the offending
 line; contracts are never silently dropped.
 
-The same applies to any other library that overrides `Kernel.@/1`. In
-practice, very few do — overriding `@/1` is an invasive technique.
-Standard attribute-based libraries (Ecto's `schema/2`, TypedStruct,
-etc.) work fine alongside Bond.
+### The escape hatch: `use Bond, at_syntax: false`
 
-### Recommended workaround: split into separate modules
+`at_syntax: false` tells Bond to leave `Kernel.@/1` untouched in that
+module, so Norm keeps ownership of `@` (and thus `@contract`). Bond's
+compiler hooks are still installed, but you write Bond contracts as
+fully-qualified calls — `Bond.pre/1`, `Bond.post/1`, and `Bond.invariant/1`
+(plus `Bond.pre/2`/`Bond.post/2` for the label forms). `check/1` remains
+available unqualified.
 
-Use each library in its own module and have one call into the other:
+```elixir
+defmodule MyApp.Boundary do
+  use Norm
+  use Bond, at_syntax: false
+
+  def positive_int, do: spec(is_integer() and (&(&1 > 0)))
+
+  # Guarded by Norm's @contract AND Bond's precondition — the two wrappers
+  # compose, each delegating to the next via `super`.
+  @contract scale(n :: positive_int()) :: positive_int()
+  Bond.pre even: rem(n, 2) == 0
+  def scale(n), do: n * 2
+
+  # A Bond-only function in the same module.
+  Bond.pre positive: x > 0
+  Bond.post result == x * 2
+  def double(x), do: x * 2
+end
+```
+
+The bare `pre`/`post`/`invariant` macros are **never** imported — even
+under the default `at_syntax: true` — so they can't collide with common
+function names like `post`. They're reachable only as `Bond.pre`,
+`Bond.post`, and `Bond.invariant`. Note that the formatter writes
+qualified calls with parentheses (`Bond.pre(x > 0)`); this is why the
+`@pre` form remains the recommended, more readable default for modules
+that don't need to coexist with another `@`-overriding library.
+
+### Limitation: at most one `@contract` per module
+
+Norm's `@contract` does two things: it wraps the contracted function
+(via `defoverridable`), and it emits a small `def __contract__/1` helper
+clause — one per `@contract`. Bond [tolerates the override
+clause](#can-i-use-bond-with-decorator-or-other-libraries-that-wrap-functions),
+but two or more `@contract`s produce non-adjacent `__contract__/1` clauses
+that still trip Bond's clause-grouping check. If you need more than one
+Norm contract alongside Bond, split into separate modules (below) or keep
+the extra contracts in a Norm-only module.
+
+### Alternative: split into separate modules
+
+Each library in its own module, one calling the other — always works, and
+sidesteps both the `@` clash and the multiple-`@contract` limit:
 
 ```elixir
 defmodule MyApp.Specs do
@@ -162,7 +209,8 @@ end
 
 If you only need Norm's data-shape helpers (`spec/1`, `conform/2`,
 `valid?/2`) inside a Bond module, call them as ordinary remote calls
-on the `Norm` module — no `use Norm` required:
+on the `Norm` module — no `use Norm` required, so you keep the `@pre`
+syntax:
 
 ```elixir
 defmodule MyApp.Worker do
@@ -177,6 +225,41 @@ end
 
 This keeps Bond's `@/1` interception intact and uses Norm only for
 spec construction and validation.
+
+## Can I use Bond with `decorator` or other libraries that wrap functions?
+
+**Yes.** Libraries that wrap functions — the
+[`decorator`](https://github.com/arjan/decorator) library, Norm's
+`@contract`, and similar — do so by making the function `defoverridable`
+and redefining it to call the original via `super`. That redefinition
+fires Bond's `@on_definition` callback, so Bond used to see the function
+defined twice and reject it ("clauses ... must be grouped together").
+
+Bond now detects these externally-generated override clauses (a clause
+that is `defoverridable` at definition time is a wrapper, not a hand-written
+clause) and ignores them for tracking purposes. Bond still wraps the
+function as a whole with its own contract check, composing with the other
+library's wrapper through `super`:
+
+```elixir
+defmodule MyApp.Job do
+  use MyApp.Telemetry   # a decorator-style library that wraps functions
+
+  use Bond
+
+  @decorate timed()
+  @pre valid: is_map(args)
+  def perform(args), do: run(args)
+end
+```
+
+Here a call to `perform/1` runs Bond's precondition, then the telemetry
+wrapper, then the original body. The only requirement is that contracts
+attach to your hand-written clause — which is the normal case; you don't
+write the wrapper, the other library generates it.
+
+This tolerance only changes a situation that previously always raised a
+compile error, so it can't affect code that already compiled.
 
 ## Why can't I have postconditions on while preconditions are off?
 
