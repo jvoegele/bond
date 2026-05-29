@@ -1,10 +1,10 @@
 flowchart TD
 %% Mikado graph for the 0.15.0 contract-chain partial-order work.
-%%
+
 %% Each numbered node is a commit-sized step. Arrows point from a goal to its
 %% prerequisites — leaves (green) have no further prerequisites and are safe to
 %% start with. Depth-first per Mikado: pick a leaf, finish it, commit, repeat.
-%%
+
 %% Chain: preconditions ≤ postconditions ≤ invariants. `:checks` is orthogonal.
 %% Constraints:
 %%   - Compile-time: `:purge` of a lower kind ⇒ all higher kinds must also be `:purge`.

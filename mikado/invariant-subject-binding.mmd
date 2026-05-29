@@ -2,11 +2,11 @@ flowchart TD
 %% Mikado graph for the 0.16.0 work bundle:
 %%   1. @invariant subject-binding redesign (Move A+B; clean break)
 %%   2. check/2 syntax pruning (bare + kw forms only)
-%%
+
 %% Arrows point from a goal to its prerequisites. Leaves (green) have no
 %% further prerequisites. Depth-first per Mikado: pick a leaf, finish it,
 %% commit, repeat.
-%%
+
 %% Design:
 %%   - `@invariant <expr_or_kw>` — no binding-name argument.
 %%   - `subject` is the implicit binding in invariant expressions.

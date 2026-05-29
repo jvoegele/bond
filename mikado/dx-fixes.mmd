@@ -1,16 +1,16 @@
 flowchart TD
 %% Mikado graph for the 0.16.2 release — a DX patch surfaced by dogfooding
 %% Bond on a real-world umbrella app (Photon, ~200+ modules).
-%%
+
 %% Arrows point from a goal to its prerequisites. Leaves (green) have no
 %% further prerequisites and are safe to start with. Depth-first per Mikado:
 %% pick a leaf, finish it, commit, repeat.
-%%
+
 %% Scope: four small code fixes plus two docs adds, all small and independent,
 %% all unblocking real contract patterns that surfaced in Photon. Coheres
 %% around "make assertion syntax less surprising and consumer-facing surfaces
 %% better documented."
-%%
+
 %% Out of scope (deferred to 0.17.0 or later):
 %%   - #2 wrapper-head shape leak. Real bug, but the right design (shape-
 %%     neutral wrapper + restricted refs vs per-clause wrapper) is uncertain
@@ -19,7 +19,7 @@ flowchart TD
 %%     subsumed by #2's resolution.
 %%   - Uniform `Bond.CompileError` wrapper across all compiler parser errors.
 %%     #6 narrowly targets the most common case; broader cleanup later.
-%%
+
 %% Findings (numbered as in the original dogfood report):
 %%   1. Remote function calls (`String.starts_with?(x, "foo")`) reject the
 %%      `Assertion.is_assertion_expression/1` guard because the AST's head is

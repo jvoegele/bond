@@ -1,10 +1,10 @@
 flowchart TD
 %% Mikado graph for 0.17.0 — multi-clause wrapper redesign (Option B-ii).
-%%
+
 %% Arrows point from a goal to its prerequisites. Leaves (green) have no
 %% further prerequisites and are safe to start with. Depth-first per Mikado:
 %% pick a leaf, finish it, commit, repeat.
-%%
+
 %% Problem (#2 + #3 from Photon dogfood):
 %%   Bond currently emits a single override clause whose head is the first
 %%   body clause's params verbatim. For multi-clause functions with heterogeneous
@@ -12,7 +12,7 @@ flowchart TD
 %%   inside Bond's generated code. The first clause's destructure pattern is
 %%   also duplicated in the wrapper head, leading to "unused variable" warnings
 %%   (10+ in some Photon functions).
-%%
+
 %% Design (Option B-ii — uniform contracts, consistent names required):
 %%   1. Each user clause gets its OWN wrapper clause with the user's pattern
 %%      preserved (so Elixir's natural multi-clause dispatch survives).
@@ -26,7 +26,7 @@ flowchart TD
 %%   4. Each wrapper's pattern is rewritten to underscore-prefix any bound name
 %%      that the wrapper body and the contracts don't reference — silences the
 %%      destructure-in-head unused-variable warnings (#3).
-%%
+
 %% Single-clause / multi-clause asymmetry:
 %%   - Single-clause functions: lifted defp keeps the user's pattern verbatim.
 %%     Contracts can reference destructured names from the head (the
@@ -34,26 +34,26 @@ flowchart TD
 %%   - Multi-clause functions: lifted defp uses canonical top-level names only.
 %%     Contracts can only reference those. Shape-dependent assertions use the
 %%     `~>` implication operator (documented in 0.16.2 S5).
-%%
+
 %% Audit notes (informed scope, not exhaustive):
 %%   - BondTest.InvariantSmoke.try_new/1 has a wildcard second clause —
 %%     `def try_new(_), do: {:error, :invalid_capacity}` — which won't agree
 %%     with clause 1's `capacity` top-level name. S4 renames the wildcard to
 %%     `_capacity`.
 %%   - Other multi-clause fixtures TBD; the audit step grep-verifies.
-%%
+
 %% New module: `Bond.Compiler.Clauses`
 %%   Holds top-level-name extraction, clause-agreement validator, and the
 %%   underscore-prefix AST rewrite. Keeps `AnnotatedFunction` small per the
 %%   compile-order gotcha memory.
-%%
+
 %% New module: `Bond.Compiler.ClauseWrapper`
 %%   Per-clause wrapper builder. S5a extracts the existing single-wrapper
 %%   logic from `AnnotatedFunction` into this module unchanged; S5b switches
 %%   `AnnotatedFunction` to iterate clauses and call `ClauseWrapper.build`
 %%   for each. Separation keeps the FSM's hot path (`AnnotatedFunction.new/1`)
 %%   on a smaller module.
-%%
+
 %% Deferred to a future release (probably 0.18+ if real evidence demands):
 %%   - Per-clause contracts (Option B-iii). Discussed at length; ship B-ii
 %%     first, see if the consistent-naming refactor actually bites in practice.

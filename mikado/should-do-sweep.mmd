@@ -1,12 +1,12 @@
 flowchart TD
 %% Mikado graph for the Should-do 1.0 sweep — issues #5, #6, #7.
-%%
+
 %% Cleared first so that #1 (freeze the public API surface) operates on the
 %% final 1.0 surface, not a draft one. Each item has a small but real chance
 %% of touching public API (#5 adds a config knob; #6 would have added a per-
 %% contract toggle if shipped; #7 settles which features are excluded from
 %% 1.0 vs deferred), so they need to land before the API audit.
-%%
+
 %% Design decisions (user-approved before plan):
 %%   - #5: WARNING ON BY DEFAULT (opt-out). Suppressible via Application config
 %%     and via `use Bond` option. The "intentional util function in an
@@ -23,7 +23,7 @@ flowchart TD
 %%     macros), guides/faq.md:447 (per-clause contracts "may be added"),
 %%     guides/history.md:75-86 (Bond.Spec "may be added"). Each restated as a
 %%     deliberate 1.0 scope boundary with a workaround.
-%%
+
 %% Arrows point from a goal to its prerequisites. Leaves (green) have no
 %% further prerequisites and are safe to start first. Depth-first per Mikado:
 %% pick a leaf, finish it, keep tests green, commit, repeat.

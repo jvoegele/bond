@@ -1,21 +1,21 @@
 flowchart TD
 %% Mikado graph for Issue #4 — Kernel.@/1 override compatibility
-%%
+
 %% Bond's `use Bond` does `import Kernel, except: [@: 1]` then `import Bond`,
 %% placing Bond's @pre/@post/@invariant/@doc clauses and a catch-all
 %% `defmacro @attr` (which forwards to `Kernel.@/1`) in scope.
-%%
+
 %% Two separate concerns under test:
 %%   A. Does the catch-all correctly forward standard Elixir attributes
 %%      (@derive, @enforce_keys, typespecs, accumulating attrs, etc.)?
 %%   B. What happens when another library also overrides @/1?
 %%      (Conflict: last `use` wins; Bond's catch-all routes to Kernel,
 %%       bypassing the other lib's interception. Order matters.)
-%%
+
 %% Arrows point from a goal to its prerequisites. Leaves (green) have no
 %% further prerequisites and are safe to start first. Depth-first per Mikado:
 %% pick a leaf, finish it, keep tests green, commit, repeat.
-%%
+
 %% Cross-library test uses Norm (`only: :test` dep) as the conflict counterpart.
 %% Norm's `Norm.Contract` uses the IDENTICAL technique to Bond — `import Kernel,
 %% except: [@: 1]`, a specific `@{:contract, _, expr}` clause, and a catch-all
@@ -24,7 +24,7 @@ flowchart TD
 %% the exact conflict shape that real users will hit and lets the FAQ name a
 %% concrete library. Norm has no extra runtime deps (only optional stream_data,
 %% which Bond already has).
-%%
+
 %% Empirical finding from Step 2: combining `use Bond` and `use Norm` in the same
 %% module fails to compile with `function @/1 imported from both Bond and
 %% Norm.Contract, call is ambiguous`, REGARDLESS of `use` ordering. Elixir does

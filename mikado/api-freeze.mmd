@@ -1,28 +1,28 @@
 flowchart TD
 %% Mikado graph for #1 — Freeze and audit the public API surface for 1.0.
-%%
+
 %% This is the LAST 1.0 blocker (per #11). The deliverable is a semver
 %% promise: from 1.0 onward, the enumerated surface stops changing in
 %% breaking ways. Everything else (the Should-do bucket #5/#6/#7 and #4)
 %% landed first so that this audit operates on the final surface, not a
 %% draft one.
-%%
+
 %% Inventory of what currently exists (verified via grep):
-%%
+
 %%   Public modules (no `internal: true`):
 %%     - Bond (main)
 %%     - Bond.Test
 %%     - Bond.Predicates
 %%     - Bond.PropertyTest
 %%     - Bond.PreconditionError / PostconditionError / CheckError / InvariantError
-%%
+
 %%   Internal modules (already marked `internal: true` or `false`):
 %%     - Bond.AssertionError
 %%     - Bond.Runtime.Eval
 %%     - Bond.PropertyTest.Sequence
 %%     - All Bond.Compiler.*
 %%     - Bond.Compiler.CompileStateFSM.Server
-%%
+
 %%   Known audit items found during planning:
 %%     - `Bond.Predicates.__opaque__/1` and `__truthy__/1` are `@doc false`
 %%       but referenced from public moduledocs → 3 pre-existing hexdoc
@@ -31,12 +31,12 @@ flowchart TD
 %%       low-level helpers, or move the cross-refs out of public reach.
 %%     - `Bond.Compiler.CompileStateFSM.Server` is referenced from a public
 %%       guide/CHANGELOG → 1 pre-existing hexdoc warning. Same options.
-%%
+
 %% Acceptance from issue #1:
 %%   - A written, reviewed list of the public surface.
 %%   - Stability guarantees documented.
 %%   - No internal modules/types in published API docs.
-%%
+
 %% Arrows point from a goal to its prerequisites. Leaves (green) have no
 %% further prerequisites and are safe to start first. Depth-first per
 %% Mikado: pick a leaf, finish it, keep tests green, commit, repeat.

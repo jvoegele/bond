@@ -6,7 +6,7 @@ flowchart TD
 %% measurement logic are orthogonal — runtime measures :timer.tc per call,
 %% compile-time measures `mix compile --force` wall-clock — so steps 2
 %% and 3 are independent leaves.
-%%
+
 %% Design decisions (user-approved before plan):
 %%   - Reference numbers come from my local Mac with env fully disclosed
 %%     (CPU model, RAM, OS, Elixir/OTP versions). The doc invites readers
@@ -14,7 +14,7 @@ flowchart TD
 %%   - Doc lives at `guides/overhead.md`, registered in mix.exs extras,
 %%     cross-linked from the FAQ ("Will contracts slow down my production
 %%     code?") and the Stability guide.
-%%
+
 %% Existing benchmark coverage that motivates the expansion:
 %%   - `bench/runtime_check_overhead.exs` currently measures only `@pre`
 %%     in three modes (:purge, true, false). Issue #20 wants the full

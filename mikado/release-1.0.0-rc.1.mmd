@@ -1,13 +1,13 @@
 flowchart TD
 %% Mikado plan for the 1.0.0-rc.1 release cut.
-%%
+
 %% This is the final pre-1.0 milestone — a release candidate published to
 %% solicit feedback from Elixir community forums before the actual 1.0.0
 %% goes out. SemVer-canonical pre-release format (`1.0.0-rc.1`, dot-
 %% separated), matching Phoenix / Ecto / Elixir core convention. The RC
 %% gives a window to receive feedback and apply small polish before the
 %% stability guarantees in `guides/stability.md` lock in at 1.0.0 proper.
-%%
+
 %% Release-branch convention (from bond-workflow memory):
 %%   - Created from `main` as `release/1.0.0-rc.1` (already done).
 %%   - All commits below land on this branch.
@@ -16,7 +16,7 @@ flowchart TD
 %%   - Tag `1.0.0-rc.1` (NO `v` prefix; bare-version form per the user's
 %%     existing tags).
 %%   - User runs `mix hex.publish` themselves.
-%%
+
 %% Per the bond-workflow memory, version references to update:
 %%   - `mix.exs` `@version`
 %%   - CHANGELOG (new entry at top)
@@ -24,7 +24,7 @@ flowchart TD
 %%     - inside the moduledoc/PBT section between <!-- README START/END -->
 %%     - in `## Installation` section below <!-- README END -->
 %%   - guides/getting-started.md install snippet
-%%
+
 %% Issue #10 acceptance criteria add:
 %%   - `mix docs` produces no broken links
 %%   - CHANGELOG has 1.0.0 + migration entry (here: 1.0.0-rc.1 + migration)
