@@ -66,14 +66,15 @@ defmodule Bond do
         use Bond, preconditions: :purge, postconditions: :purge
       end
 
-  ### `:at_syntax`
+  ### `:at_annotations`
 
-  By default Bond overrides `Kernel.@/1` in the using module so that `@pre`, `@post`, and
-  `@invariant` read as annotations. Overriding `@` is lexically scoped to this module, so it
-  is invisible to the rest of your project — but it cannot coexist *within a single module*
-  with another library that also overrides `@` (for example Norm's `@contract`).
+  Controls Bond's `@`-prefixed annotation syntax — `@pre`, `@post`, and `@invariant`. By
+  default (`true`) Bond overrides `Kernel.@/1` in the using module so those forms are
+  recognised. Overriding `@` is lexically scoped to this module, so it is invisible to the
+  rest of your project — but it cannot coexist *within a single module* with another library
+  that also overrides `@` (for example Norm's `@contract`).
 
-  Pass `at_syntax: false` to leave `Kernel.@/1` untouched in this module. Bond's compiler
+  Pass `at_annotations: false` to leave `Kernel.@/1` untouched in this module. Bond's compiler
   hooks are still installed, but the `@pre`/`@post`/`@invariant` forms are **not** available;
   instead, write contracts as fully-qualified calls — `Bond.pre/1`, `Bond.post/1`, and
   `Bond.invariant/1` (plus `Bond.pre/2`/`Bond.post/2` for the label forms). `check/1` remains
@@ -81,7 +82,7 @@ defmodule Bond do
 
       defmodule MyApp.Validated do
         use Norm
-        use Bond, at_syntax: false
+        use Bond, at_annotations: false
 
         @contract add(integer(), integer()) :: integer()
         Bond.pre x >= 0 and y >= 0
@@ -92,14 +93,14 @@ defmodule Bond do
   > #### Bare macros are always fully-qualified {: .info}
   >
   > The `pre`/`post`/`invariant` macros are never imported, even with the default
-  > `at_syntax: true`. This keeps them from colliding with common function names (notably
+  > `at_annotations: true`. This keeps them from colliding with common function names (notably
   > `post`) in modules that only ever use the `@` forms. They are reachable only as
   > `Bond.pre`, `Bond.post`, and `Bond.invariant`.
   """
   defmacro __using__(opts) when is_list(opts) do
     Bond.Compiler.init(__CALLER__.module)
 
-    {at_syntax, use_opts} = Keyword.pop(opts, :at_syntax, true)
+    {at_annotations?, use_opts} = Keyword.pop(opts, :at_annotations, true)
 
     config_ast =
       quote do
@@ -128,13 +129,13 @@ defmodule Bond do
                                   )
       end
 
-    # `at_syntax: true` (default): shadow `Kernel.@/1` with Bond's `@/1` and import only the
-    #   `@` macro plus `check`. The bare `pre`/`post`/`invariant` macros are deliberately left
-    #   out of the import list so they never collide with user function names.
-    # `at_syntax: false`: leave `@` alone (so libraries like Norm can own it), import only
+    # `at_annotations: true` (default): shadow `Kernel.@/1` with Bond's `@/1` and import only
+    #   the `@` macro plus `check`. The bare `pre`/`post`/`invariant` macros are deliberately
+    #   left out of the import list so they never collide with user function names.
+    # `at_annotations: false`: leave `@` alone (so libraries like Norm can own it), import only
     #   `check`, and rely on fully-qualified `Bond.pre`/`Bond.post`/`Bond.invariant` calls.
     imports_ast =
-      if at_syntax do
+      if at_annotations? do
         quote do
           import Kernel, except: [@: 1]
           import Bond, only: [@: 1, check: 1, check: 2]
@@ -264,7 +265,7 @@ defmodule Bond do
 
   @doc """
   Register a precondition as a fully-qualified call, for modules that opt out of the
-  `@`-prefixed syntax with `use Bond, at_syntax: false`.
+  `@`-prefixed syntax with `use Bond, at_annotations: false`.
 
   `Bond.pre/1` is the qualified-call equivalent of `@pre`; everything the FSM does with the
   registered assertion is identical. The single-argument form accepts either a bare assertion
@@ -299,7 +300,7 @@ defmodule Bond do
   end
 
   @doc """
-  Register a postcondition as a fully-qualified call. See `Bond.pre/1` and the `:at_syntax`
+  Register a postcondition as a fully-qualified call. See `Bond.pre/1` and the `:at_annotations`
   option of `use Bond` for context; this is the qualified-call equivalent of `@post`.
   """
   defmacro post(expression) do

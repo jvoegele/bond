@@ -29,7 +29,7 @@ and may break on a patch release.
 By default Bond overrides `Kernel.@/1` while `use Bond` is in scope to
 intercept four attribute names; everything else forwards through to
 `Kernel.@/1` unchanged (verified by `test/bond/attr_compat_test.exs`).
-(Under `at_syntax: false` the override is disabled and the qualified
+(Under `at_annotations: false` the override is disabled and the qualified
 `Bond.pre`/`Bond.post`/`Bond.invariant` calls are used instead — see
 "Qualified-call syntax" below.) The accepted forms for the intercepted
 attributes are:
@@ -69,9 +69,9 @@ raises a `CompileError` pointing at the migration.
     sections is documented under `Bond` and is part of the public surface as
     well.
 
-## Qualified-call syntax (`at_syntax: false`)
+## Qualified-call syntax (`at_annotations: false`)
 
-For modules that opt out of the `@` override with `use Bond, at_syntax: false`,
+For modules that opt out of the `@` override with `use Bond, at_annotations: false`,
 contracts are written as fully-qualified macro calls. These register into the
 same compiler machinery as the `@` forms and accept the same arguments:
 
@@ -82,7 +82,7 @@ same compiler machinery as the `@` forms and accept the same arguments:
   * `Bond.invariant/1` — single expression or keyword list of labelled
     invariants; references the implicit `subject` binding.
 
-These macros are **never imported** (even under the default `at_syntax: true`),
+These macros are **never imported** (even under the default `at_annotations: true`),
 so they cannot collide with user function names; they are only ever reached
 through the `Bond.` prefix.
 
@@ -112,7 +112,7 @@ any `:overrides` entry that matches the module:
   * `:postconditions` — mode for the module's `@post` annotations.
   * `:checks` — mode for the module's `check/1` calls.
   * `:invariants` — mode for the module's `@invariant` annotations.
-  * `:at_syntax` — boolean (default `true`). When `false`, Bond does not
+  * `:at_annotations` — boolean (default `true`). When `false`, Bond does not
     override `Kernel.@/1` in the module, so the `@pre`/`@post`/`@invariant`
     forms are unavailable and contracts must be written as the qualified
     `Bond.pre`/`Bond.post`/`Bond.invariant` calls (see below). Use it to

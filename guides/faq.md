@@ -92,7 +92,7 @@ a contract asserts something about the relationship between inputs,
 outputs, and (optionally) prior state.
 
 The two libraries are conceptually complementary. By default they can't
-share a module — both override `Kernel.@/1` — but Bond's `at_syntax: false`
+share a module — both override `Kernel.@/1` — but Bond's `at_annotations: false`
 escape hatch lets them coexist, including on the same function (see
 [the next FAQ entry](#can-i-use-bond-and-norm-in-the-same-module)).
 You can also call Norm's validation helpers from a Bond module as
@@ -114,7 +114,7 @@ defines `input/0` and `output/0` with Norm's `spec/1`.
 
 ## Can I use Bond and Norm in the same module?
 
-**Yes — pass `at_syntax: false` to `use Bond`.**
+**Yes — pass `at_annotations: false` to `use Bond`.**
 
 By default, `use Bond` and `use Norm` in the same module fail to compile
 with:
@@ -130,9 +130,9 @@ at the same scope level — Elixir does not pick a winner — and the first
 `@`-using line fails. The error is loud and points at the offending
 line; contracts are never silently dropped.
 
-### The escape hatch: `use Bond, at_syntax: false`
+### The escape hatch: `use Bond, at_annotations: false`
 
-`at_syntax: false` tells Bond to leave `Kernel.@/1` untouched in that
+`at_annotations: false` tells Bond to leave `Kernel.@/1` untouched in that
 module, so Norm keeps ownership of `@` (and thus `@contract`). Bond's
 compiler hooks are still installed, but you write Bond contracts as
 fully-qualified calls — `Bond.pre/1`, `Bond.post/1`, and `Bond.invariant/1`
@@ -142,7 +142,7 @@ available unqualified.
 ```elixir
 defmodule MyApp.Boundary do
   use Norm
-  use Bond, at_syntax: false
+  use Bond, at_annotations: false
 
   def positive_int, do: spec(is_integer() and (&(&1 > 0)))
 
@@ -160,7 +160,7 @@ end
 ```
 
 The bare `pre`/`post`/`invariant` macros are **never** imported — even
-under the default `at_syntax: true` — so they can't collide with common
+under the default `at_annotations: true` — so they can't collide with common
 function names like `post`. They're reachable only as `Bond.pre`,
 `Bond.post`, and `Bond.invariant`. Note that the formatter writes
 qualified calls with parentheses (`Bond.pre(x > 0)`); this is why the

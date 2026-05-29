@@ -85,5 +85,5 @@ data specification is Norm's job, and contract programming is Bond's. The
 two compose by calling Norm's validators from within Bond assertions; see
 "How does Bond compare to Norm?" in the FAQ for the canonical pattern. The
 two libraries both override `Kernel.@/1`, so sharing a single module needs
-Bond's `at_syntax: false` escape hatch (qualified `Bond.pre`/`Bond.post`
+Bond's `at_annotations: false` escape hatch (qualified `Bond.pre`/`Bond.post`
 calls) — also covered in that FAQ entry.

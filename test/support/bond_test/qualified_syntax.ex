@@ -1,6 +1,6 @@
 defmodule BondTest.QualifiedSyntax do
   @moduledoc """
-  Fixture for the `use Bond, at_syntax: false` escape hatch: contracts written as
+  Fixture for the `use Bond, at_annotations: false` escape hatch: contracts written as
   fully-qualified `Bond.pre` / `Bond.post` / `Bond.invariant` calls, which must behave
   identically to the `@pre` / `@post` / `@invariant` forms.
 
@@ -9,7 +9,7 @@ defmodule BondTest.QualifiedSyntax do
   fixture exercises, not the behaviour under test.
   """
 
-  use Bond, at_syntax: false, warn_skipped_invariants: false
+  use Bond, at_annotations: false, warn_skipped_invariants: false
 
   defstruct [:items, :capacity]
 

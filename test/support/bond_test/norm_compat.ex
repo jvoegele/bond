@@ -31,7 +31,7 @@ defmodule BondTest.NormCompat.BondValidator do
   def double(n), do: n * 2
 end
 
-## Coexistence in a SINGLE module: `at_syntax: false` resolves the `@`-syntax clash, and Bond's
+## Coexistence in a SINGLE module: `at_annotations: false` resolves the `@`-syntax clash, and Bond's
 ## tolerance of externally-generated override clauses (Norm's `@contract` `@before_compile`
 ## injects a `defoverridable` + wrapper clause per contracted function) lets Norm's `@contract`
 ## and Bond's contracts live in the same module — even on the SAME function. Bond ignores
@@ -47,7 +47,7 @@ defmodule BondTest.NormCompat.Combined do
   @moduledoc false
 
   use Norm
-  use Bond, at_syntax: false
+  use Bond, at_annotations: false
 
   def positive_int, do: spec(is_integer() and (&(&1 > 0)))
 

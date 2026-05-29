@@ -44,7 +44,7 @@ defmodule Bond.NormCompatTest do
     end
   end
 
-  describe "combining `use Norm` (incl. @contract) and `use Bond, at_syntax: false`" do
+  describe "combining `use Norm` (incl. @contract) and `use Bond, at_annotations: false`" do
     test "Bond's qualified contracts enforce on a Bond-only function" do
       assert BondTest.NormCompat.Combined.double(3) == 6
       assert_raise Bond.PreconditionError, fn -> BondTest.NormCompat.Combined.double(-1) end
@@ -64,7 +64,7 @@ defmodule Bond.NormCompatTest do
       source = """
       defmodule BondTest.NormCompat.EscapeHatchScratch do
         use Norm
-        use Bond, at_syntax: false
+        use Bond, at_annotations: false
 
         def positive_int, do: spec(is_integer() and (&(&1 > 0)))
 
@@ -106,7 +106,7 @@ defmodule Bond.NormCompatTest do
       source = """
       defmodule BondTest.NormCompat.MultiContractScratch do
         use Norm
-        use Bond, at_syntax: false
+        use Bond, at_annotations: false
 
         def positive_int, do: spec(is_integer() and (&(&1 > 0)))
 

@@ -1,6 +1,6 @@
 defmodule Bond.QualifiedSyntaxTest do
   @moduledoc """
-  Verifies the `use Bond, at_syntax: false` escape hatch: contracts written as
+  Verifies the `use Bond, at_annotations: false` escape hatch: contracts written as
   fully-qualified `Bond.pre` / `Bond.post` / `Bond.invariant` calls enforce identically to
   the `@`-prefixed forms, without Bond overriding `Kernel.@/1` in the using module.
 
