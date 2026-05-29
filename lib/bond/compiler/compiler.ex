@@ -230,10 +230,19 @@ defmodule Bond.Compiler do
     if warn_override != nil,
       do: Module.delete_attribute(env.module, :bond_warn_skipped_invariants)
 
+    # When another library makes a function `defoverridable` and then redefines it to wrap it
+    # (Norm's `@contract`, anything built on the `decorator` library, etc.), the redefining
+    # clause fires `@on_definition` while the function is still marked overridable. Genuine
+    # user clauses are never overridable at this point. We tag the clause so the FSM can ignore
+    # such generated wrappers when they re-appear for a function it has already tracked, rather
+    # than tripping its "clauses must be grouped" / parameter-consistency checks.
+    external_override? = Module.overridable?(env.module, {fun, length(params)})
+
     function_def =
       env
       |> FunctionDefinition.new(kind, fun, params, guards, body)
       |> FunctionDefinition.put_warn_skipped_invariants_override(warn_override)
+      |> FunctionDefinition.put_external_override(external_override?)
 
     FSM.function_def(fsm(env), function_def)
   end

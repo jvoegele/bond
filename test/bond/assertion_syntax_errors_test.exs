@@ -1,9 +1,11 @@
 defmodule Bond.AssertionSyntaxErrorsTest do
   @moduledoc """
   Verifies clear `CompileError`s for assertion-syntax misuses that previously
-  produced unhelpful Kernel-level arity errors. 0.16.2 adds catch-all clauses
-  to `Bond.@/1` for `@pre`/`@post`/`@invariant` calls with 2+ arguments that
-  don't match the existing label-first / label-last / single-arg patterns.
+  produced unhelpful Kernel-level arity errors. `Bond.@/1` has catch-all clauses
+  for `@pre`/`@post`/`@invariant` calls with 2+ arguments that don't match the
+  single-arg (bare or keyword-list) form. (The positional label forms a 2-arg
+  call could once take were removed in 1.0 — those specific shapes raise a
+  migration error; see `migration_errors_test.exs`.)
 
   Each test compiles a small fixture module via `Code.eval_string/1` and
   asserts the expected `CompileError` surfaces with a regex match against
@@ -164,23 +166,11 @@ defmodule Bond.AssertionSyntaxErrorsTest do
       assert {{:module, _, _, _}, _} = Code.eval_string(code)
     end
 
-    test "atom-label-first form compiles" do
+    test "keyword form with a quoted-string label (the migration path for positional string labels) compiles" do
       code = """
-      defmodule Bond.AssertionSyntaxErrorsTest.AtomLabelFirst do
+      defmodule Bond.AssertionSyntaxErrorsTest.QuotedStringLabel do
         use Bond
-        @pre :positive, x > 0
-        def f(x), do: x
-      end
-      """
-
-      assert {{:module, _, _, _}, _} = Code.eval_string(code)
-    end
-
-    test "string-label-last form compiles" do
-      code = """
-      defmodule Bond.AssertionSyntaxErrorsTest.StringLabelLast do
-        use Bond
-        @pre x > 0, "positive"
+        @pre "x must be positive": x > 0
         def f(x), do: x
       end
       """

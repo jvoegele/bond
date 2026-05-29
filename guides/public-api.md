@@ -26,26 +26,30 @@ and may break on a patch release.
 
 ## Module-attribute syntax (in `use Bond` scope)
 
-Bond overrides `Kernel.@/1` while `use Bond` is in scope to intercept four
-attribute names; everything else forwards through to `Kernel.@/1` unchanged
-(verified by `test/bond/attr_compat_test.exs`). The accepted forms for the
-intercepted attributes are:
+By default Bond overrides `Kernel.@/1` while `use Bond` is in scope to
+intercept four attribute names; everything else forwards through to
+`Kernel.@/1` unchanged (verified by `test/bond/attr_compat_test.exs`).
+(Under `at_annotations: false` the override is disabled and the qualified
+`Bond.pre`/`Bond.post`/`Bond.invariant` calls are used instead — see
+"Qualified-call syntax" below.) The accepted forms for the intercepted
+attributes are:
 
 ### `@pre` and `@post`
 
   * `@pre expr` — bare expression. Recognised forms are documented in the
     `Bond.Predicates` moduledoc.
   * `@pre label: expr, other_label: other_expr` — keyword list of
-    `label: expression` pairs.
-  * `@pre label, expr` and `@pre expr, label` — labelled-bare form
-    (label as atom or binary either before or after the expression).
+    `label: expression` pairs. Labels are atoms; quote the key for spaces or
+    punctuation (`@pre "must be positive": x > 0`).
   * `@post` accepts all the same forms. In addition, `result` is bound to the
     function's return value, and `old(...)` (see below) is recognised inside
     a postcondition expression.
 
-Mixing a bare assertion with a labelled assertion in a single annotation
-(e.g. `@pre is_binary(x), positive: x > 0`) raises a `CompileError` with a
-specific diagnostic.
+The keyword-list form is the only labelling syntax. The positional forms
+`@pre label, expr` and `@pre expr, label` were removed in 1.0 and raise a
+`CompileError` pointing at the keyword form. Mixing a bare assertion with a
+labelled assertion in a single annotation (e.g. `@pre is_binary(x), positive:
+x > 0`) likewise raises a `CompileError` with a specific diagnostic.
 
 ### `@invariant`
 
@@ -65,6 +69,22 @@ raises a `CompileError` pointing at the migration.
     behaviour is part of the public surface; the exact rendering of those
     sections is documented under `Bond` and is part of the public surface as
     well.
+
+## Qualified-call syntax (`at_annotations: false`)
+
+For modules that opt out of the `@` override with `use Bond, at_annotations: false`,
+contracts are written as fully-qualified macro calls. These register into the
+same compiler machinery as the `@` forms and accept the same arguments:
+
+  * `Bond.pre/1`, `Bond.post/1` — bare expression or keyword list of
+    `label: expression` pairs (the same single-form labelling as `@pre`/`@post`;
+    quote the key for spaces or punctuation).
+  * `Bond.invariant/1` — single expression or keyword list of labelled
+    invariants; references the implicit `subject` binding.
+
+These macros are **never imported** (even under the default `at_annotations: true`),
+so they cannot collide with user function names; they are only ever reached
+through the `Bond.` prefix.
 
 ## Macros and operators (after `use Bond`)
 
@@ -92,6 +112,13 @@ any `:overrides` entry that matches the module:
   * `:postconditions` — mode for the module's `@post` annotations.
   * `:checks` — mode for the module's `check/1` calls.
   * `:invariants` — mode for the module's `@invariant` annotations.
+  * `:at_annotations` — boolean (default `true`). When `false`, Bond does not
+    override `Kernel.@/1` in the module, so the `@pre`/`@post`/`@invariant`
+    forms are unavailable and contracts must be written as the qualified
+    `Bond.pre`/`Bond.post`/`Bond.invariant` calls (see below). Use it to
+    coexist with another library that overrides `@` (e.g. Norm's
+    `@contract`). See the FAQ entry "Can I use Bond and Norm in the same
+    module?"
   * `:warn_skipped_invariants` — boolean (default `true`). Controls the
     compile-time warning Bond emits when a public function in an
     invariant-declaring module has no clause that pattern-matches the

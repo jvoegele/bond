@@ -83,6 +83,7 @@ for data specification and validation is the aforementioned
 Bond does not provide a data-specification facility of its own, and won't —
 data specification is Norm's job, and contract programming is Bond's. The
 two compose by calling Norm's validators from within Bond assertions; see
-"How does Bond compare to Norm?" in the FAQ for the canonical pattern and
-the per-module caveat (both libraries override `Kernel.@/1`, so they can't
-share a single module).
+"How does Bond compare to Norm?" in the FAQ for the canonical pattern. The
+two libraries both override `Kernel.@/1`, so sharing a single module needs
+Bond's `at_annotations: false` escape hatch (qualified `Bond.pre`/`Bond.post`
+calls) — also covered in that FAQ entry.

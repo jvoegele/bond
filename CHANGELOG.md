@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Lets Bond coexist, in a single module, with other libraries that override
+`Kernel.@/1` or wrap functions, and finishes unifying contract labelling on the
+single keyword-list form.
+
+### Added
+
+- **`use Bond, at_annotations: false`** — an opt-out of Bond's `Kernel.@/1`
+  override for a module. The `@pre`/`@post`/`@invariant` forms are then
+  unavailable; write contracts as the fully-qualified `Bond.pre/1`,
+  `Bond.post/1`, and `Bond.invariant/1` calls instead (`check/1` stays
+  unqualified). This lets Bond share a module with another library that owns
+  `@` — e.g. Norm's `@contract`. The bare `pre`/`post`/`invariant` macros are
+  never imported in either mode, so they cannot collide with user function
+  names. See the FAQ entry "Can I use Bond and Norm in the same module?"
+
+- **Tolerance of externally-generated override clauses.** Libraries that wrap a
+  function via `defoverridable` + redefinition (Norm's `@contract`, the
+  `decorator` library, etc.) inject a clause that Bond's `@on_definition`
+  observes; Bond previously rejected the function as defined twice. Bond now
+  detects and ignores those generated clauses and still wraps the function as a
+  whole, composing with the other library's wrapper via `super`.
+
+### Breaking changes
+
+- **The positional `@pre` / `@post` label forms were removed.** `@pre <label>,
+  <expr>` and `@pre <expr>, <label>` (and the same for `@post`) are gone — they
+  were redundant with the keyword-list form, which already carries a label. This
+  completes the single-labelling-syntax decision made for `check/2` in 0.16.0.
+
+      # Was:
+      @pre :positive, x > 0
+      @post result >= 0, "non-negative result"
+
+      # Now (labels are atoms; quote the key for spaces or punctuation):
+      @pre positive: x > 0
+      @post "non-negative result": result >= 0
+
+  `@pre expr` (bare) and `@pre label: expr` (keyword) are the two remaining
+  forms. The removed positional shapes raise a `CompileError` with the migration
+  message. The qualified `Bond.pre`/`Bond.post` calls are likewise keyword-only.
+
 ## [1.0.0-rc.1] - 2026-05-28
 
 First **release candidate** for Bond 1.0.0. Published to gather

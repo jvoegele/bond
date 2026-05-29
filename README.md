@@ -68,19 +68,27 @@ to the `result` variable (bound to the function's return value) and
 > operators defined there (such as `~>` and `|||`) can be used in
 > assertions. `Bond.Predicates` can be explicitly imported elsewhere if
 > you want the operators outside of contract expressions.
+>
+> To coexist with another library that overrides `Kernel.@/1` (such as
+> Norm's `@contract`), pass `use Bond, at_annotations: false`: Bond then leaves
+> `@` alone and you write contracts as the qualified calls `Bond.pre/1`,
+> `Bond.post/1`, and `Bond.invariant/1`. See the FAQ for details.
 
 ## Assertion syntax
 
 An assertion is a boolean (or truthy) Elixir expression, optionally paired
-with a label. Labels are atoms or strings; they appear in error messages
-and generated documentation.
+with a label. Labels are supplied via the **keyword list** form and are
+atoms — quote the key for spaces or punctuation. They appear in error
+messages and generated documentation.
 
-The recommended form is the **keyword list**, even for a single assertion:
+The keyword list is the recommended (and only) labelling form, even for a
+single assertion:
 
 ```elixir
 @pre positive_x: x > 0
 @post non_decreasing: result >= old(result)
 @pre numeric_x: is_number(x), non_negative_x: x >= 0
+@pre "x must be positive": x > 0
 ```
 
 For a bare assertion where a label adds no information, the **bare form**

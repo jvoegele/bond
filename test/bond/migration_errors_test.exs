@@ -64,4 +64,48 @@ defmodule Bond.MigrationErrorsTest do
       end
     end
   end
+
+  describe "positional @pre / @post label forms removed in 1.0" do
+    test "@pre <label>, <expr> (label-first) raises pointing at the keyword form" do
+      code = """
+      defmodule Bond.MigrationErrorsTest.PreLabelFirst do
+        use Bond
+        @pre :positive, x > 0
+        def f(x), do: x
+      end
+      """
+
+      assert_raise CompileError, ~r/positional\s+label\s+forms.+removed in Bond 1\.0/s, fn ->
+        Code.eval_string(code)
+      end
+    end
+
+    test "@pre <expr>, <label> (label-last, string) raises pointing at the keyword form" do
+      code = """
+      defmodule Bond.MigrationErrorsTest.PreLabelLast do
+        use Bond
+        @pre x > 0, "positive"
+        def f(x), do: x
+      end
+      """
+
+      assert_raise CompileError, ~r/positional\s+label\s+forms.+removed in Bond 1\.0/s, fn ->
+        Code.eval_string(code)
+      end
+    end
+
+    test "@post <expr>, <label> raises the same migration error" do
+      code = """
+      defmodule Bond.MigrationErrorsTest.PostLabelLast do
+        use Bond
+        @post result > 0, :positive_result
+        def f(x), do: x
+      end
+      """
+
+      assert_raise CompileError, ~r/positional\s+label\s+forms.+removed in Bond 1\.0/s, fn ->
+        Code.eval_string(code)
+      end
+    end
+  end
 end
