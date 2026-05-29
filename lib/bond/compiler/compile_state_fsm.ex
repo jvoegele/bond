@@ -58,7 +58,30 @@ defmodule Bond.Compiler.CompileStateFSM do
       &Code.ensure_compiled!/1
     )
 
-    :gen_statem.start_link({:local, server_ref(module)}, FSMServer, module, [])
+    case :gen_statem.start_link({:local, server_ref(module)}, FSMServer, module, []) do
+      {:ok, _pid} = ok ->
+        ok
+
+      {:error, {:already_started, stale_pid}} ->
+        # A previous compile of this module left its FSM registered under the
+        # per-module name. Under one-shot `mix compile` this never happens (the BEAM
+        # exits before it matters), but in a long-lived session — ElixirLS recompiling
+        # on every edit, or IEx — an aborted compile (e.g. a transient syntax error
+        # while typing) can return before `__after_compile__` stops the FSM. The leftover
+        # holds stale state from that aborted compile, so discard it and start fresh
+        # rather than reusing it. The name is unique per module, so an `already_started`
+        # is always such a leftover, never a legitimate concurrent owner.
+        # `stop/1` can raise `:noproc` if the leftover happens to die between
+        # `start_link` reporting it and this call (its linking worker exiting
+        # abnormally); either way the name is then free, so ignore that exit.
+        try do
+          stop(stale_pid)
+        catch
+          :exit, _ -> :ok
+        end
+
+        :gen_statem.start_link({:local, server_ref(module)}, FSMServer, module, [])
+    end
   end
 
   @doc "Stop the FSM process."

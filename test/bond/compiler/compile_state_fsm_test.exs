@@ -19,6 +19,22 @@ defmodule Bond.Compiler.CompileStateFSMTest do
     assert FSM.current_state(fsm) == :no_contracts_pending
   end
 
+  test "start_link tolerates a stale FSM left registered by an aborted compile", %{fsm: fsm} do
+    # Simulate ElixirLS/IEx recompiling a module whose previous compile aborted before
+    # `__after_compile__` could stop the FSM: the name is still registered. A second
+    # start_link must discard the leftover and hand back a fresh, usable FSM rather than
+    # crashing with `{:error, {:already_started, pid}}`.
+    FSM.precondition_def(fsm, precondition_def(:requires))
+    assert FSM.current_state(fsm) == :contracts_pending
+
+    assert {:ok, fresh} = FSM.start_link(__MODULE__)
+    refute Process.alive?(fsm)
+    assert FSM.current_state(fresh) == :no_contracts_pending
+    assert FSM.pending_preconditions(fresh) == []
+
+    on_exit(fn -> if Process.alive?(fresh), do: FSM.stop(fresh) end)
+  end
+
   describe ":no_contracts_pending state" do
     test "function_def event", %{fsm: fsm} do
       FSM.function_def(fsm, function_def(:foo))
