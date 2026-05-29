@@ -38,6 +38,26 @@ defmodule Bond.Compiler.CompileStateFSM do
   """
   @spec start_link(module()) :: {:ok, pid()} | {:error, reason :: term()}
   def start_link(module) when is_atom(module) do
+    # Deterministically defeat the parallel-compile race (Elixir 1.19+): this runs at the
+    # *user* module's compile time (via `Bond.Compiler.init/1` in the `use Bond` expansion),
+    # and the gen_statem callback module plus the structs its callbacks build must already be
+    # compiled to disk. The `require` chain from bond.ex is meant to schedule them first, but
+    # that ordering is not reliably honoured under the parallel compiler — a change to
+    # server.ex alone can flip a previously-working race, surfacing as
+    # `CompileStateFSM.Server.init/1 is undefined` / "module ... is not available". Blocking on
+    # `Code.ensure_compiled!/1` waits for each module's compilation to finish, removing the
+    # race regardless of scheduling. (Safe from deadlock: none of these modules has a
+    # compile-time dependency back on this one or on the user module being compiled.)
+    Enum.each(
+      [
+        Bond.Compiler.CompileStateFSM.Server,
+        Bond.Compiler.AnnotatedFunction,
+        Bond.Compiler.AnnotatedFunction.Clause,
+        Bond.Compiler.FunctionDefinition
+      ],
+      &Code.ensure_compiled!/1
+    )
+
     :gen_statem.start_link({:local, server_ref(module)}, FSMServer, module, [])
   end
 
