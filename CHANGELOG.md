@@ -48,6 +48,16 @@ single keyword-list form.
   forms. The removed positional shapes raise a `CompileError` with the migration
   message. The qualified `Bond.pre`/`Bond.post` calls are likewise keyword-only.
 
+### Fixed
+
+- **`(MatchError) … {:error, {:already_started, #PID<…>}}` when editing a `use
+  Bond` module under ElixirLS or in a long-lived IEx session.** A compile that
+  aborted (e.g. a transient syntax error mid-edit) left Bond's per-module
+  compile-state process registered, so the next compile crashed trying to start
+  it again. Bond now discards the stale process and starts fresh. One-shot `mix
+  compile` was never affected; the bug surfaced only in editors and IEx that
+  keep the BEAM alive across recompiles.
+
 ## [1.0.0-rc.1] - 2026-05-28
 
 First **release candidate** for Bond 1.0.0. Published to gather
