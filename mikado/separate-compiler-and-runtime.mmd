@@ -1,0 +1,54 @@
+flowchart TD
+%% Mikado graph for the 0.11.x compile-time vs run-time subsystem split.
+
+%% Bond's internals were originally one flat namespace. As the library
+%% grew, the distinction between code that runs during compilation (parsing
+%% @pre/@post/@invariant, building Assertion structs, generating wrapped
+%% function bodies) and code that runs at runtime (evaluating assertions,
+%% formatting errors) became important to make explicit — both for
+%% readability and for the eventual `:purge` story where compile-time and
+%% runtime have different lifecycles.
+
+%% Status: all work landed (commits 68a66cd…1bfc107). The current code has
+%% Bond.Compiler.* and Bond.Runtime.* as the two internal namespaces, with
+%% the public surface in the top-level Bond.* namespace. Originally a
+%% Graphviz file (separate-compiler-and-runtime.dot); converted to Mermaid
+%% 2026-05-29.
+
+    GOAL(["**Goal**<br/>Separate Bond internals into distinct<br/>compile-time and run-time subsystems"])
+
+    GOAL --> COMPILE_TIME[/Use only compiler subsystem at compile-time/]
+    GOAL --> RUN_TIME[/Use only runtime subsystem at run-time/]
+    GOAL --> USER_CODE[/Ensure user-facing code is in top-level Bond namespace/]
+
+    COMPILE_TIME --> MOVE_ASSERT["Move Bond.Assertion → Bond.Compiler.Assertion<br/>(add tests)"]
+    COMPILE_TIME --> MOVE_FSM[Move Bond.CompileStateFSM → Bond.Compiler.CompileStateFSM]
+    COMPILE_TIME --> MOVE_CONTRACTS["Move Bond.Contracts → Bond.Compiler<br/>(add tests)"]
+    COMPILE_TIME --> REMOVE_ENV[Remove Bond.Env — replace with Macro.Env]
+    COMPILE_TIME --> MOVE_FWC["Move Bond.FunctionWithContract → Bond.Compiler.AnnotatedFunction<br/>(add tests)"]
+    COMPILE_TIME --> MOVE_OLD[Move Bond.OldExpression → Bond.Compiler.OldExpression]
+    COMPILE_TIME --> MOVE_TYPES[Move type definitions into compiler subsystem]
+
+    MOVE_ASSERT --> COMPILER_SUB[Create internal compiler subsystem]
+    MOVE_FSM --> COMPILER_SUB
+    MOVE_CONTRACTS --> COMPILER_SUB
+    REMOVE_ENV --> COMPILER_SUB
+    MOVE_FWC --> COMPILER_SUB
+    MOVE_OLD --> COMPILER_SUB
+    MOVE_TYPES --> COMPILER_SUB
+
+    COMPILE_TIME --> REMOVE_EVAL_LOGIC[Remove evaluating logic from AnnotatedFunction]
+    REMOVE_EVAL_LOGIC --> ADD_EVAL_LOGIC[Add logic for conditional assertion evaluation into Bond.Runtime.Eval]
+    ADD_EVAL_LOGIC --> MOVE_FWC
+    ADD_EVAL_LOGIC --> ADD_EVAL_FNS["Add evaluation functions to Bond.Runtime.Eval<br/>(evaluate_preconditions, evaluate_postconditions, evaluate_checks)"]
+
+    COMPILE_TIME --> REPLACE_QE[Replace quoted_eval with Bond.Runtime.Eval.evaluate_*]
+    COMPILE_TIME --> HANDLE_OLD[Resolve old expressions at compile-time, not runtime]
+    REPLACE_QE --> ADD_EVAL_FNS
+
+    RUN_TIME --> ADD_EVAL_FNS
+    ADD_EVAL_FNS --> CREATE_EVAL[Create Bond.Runtime.Eval module]
+    CREATE_EVAL --> RUNTIME_SUB[Create internal runtime subsystem]
+
+    classDef done fill:#90EE90,stroke:#2e7d32,stroke-width:2px;
+    class GOAL,COMPILE_TIME,RUN_TIME,USER_CODE,MOVE_ASSERT,MOVE_FSM,MOVE_CONTRACTS,REMOVE_ENV,MOVE_FWC,MOVE_OLD,MOVE_TYPES,COMPILER_SUB,REMOVE_EVAL_LOGIC,ADD_EVAL_LOGIC,ADD_EVAL_FNS,REPLACE_QE,HANDLE_OLD,CREATE_EVAL,RUNTIME_SUB done;

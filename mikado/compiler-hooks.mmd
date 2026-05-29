@@ -1,0 +1,71 @@
+flowchart TD
+%% Mikado graph for the 0.12.0 compiler-hooks refactor — replacing the
+%% def/defp Kernel overrides with @on_definition + @before_compile.
+
+%% This addressed the compatibility concern raised by @Asd in the original
+%% Elixir Forum announcement: overriding def/defp meant any other library
+%% doing the same (e.g. decorators) couldn't co-exist with Bond. The new
+%% design leaves def/defp untouched and wires Bond in via the documented
+%% compiler-hook surface instead.
+
+%% Side-quest of the refactor: AnnotatedFunction grew from one struct per
+%% clause to one struct per function with a list of Clause sub-structs,
+%% which is the right shape for multi-clause contracts.
+
+%% Status: all work landed (commits 68a66cd…6b191a7). Originally a Graphviz
+%% file (compiler-hooks.dot); converted to Mermaid 2026-05-29.
+
+    GOAL(["**Goal**<br/>Use compiler hooks instead of overriding Kernel macros"])
+
+    GOAL --> DEAD[Delete dead code]
+    DEAD --> REPLACE[Replace Kernel overrides with compiler hooks]
+
+    REPLACE --> DEL_DFWC[Delete Bond.Compiler.define_function_with_contract/4]
+    DEL_DFWC --> DEL_OVERRIDES[Delete overridden Kernel macros def and defp]
+
+    REPLACE --> IMPL[Implement @before_compile and @on_definition]
+    IMPL --> OND["@on_definition hook registers<br/>function definition with FSM"]
+    IMPL --> BC["@before_compile hook overrides<br/>functions with contracts"]
+
+    BC --> BC_GEN["@before_compile hook generates<br/>function override (for all clauses) using super/1"]
+    BC_GEN --> OND
+    BC_GEN --> AF_MC
+    BC_GEN --> AF_OVERRIDES[AnnotatedFunction generates function overrides]
+
+    OND --> FSM_MC[FSM adds clause to AnnotatedFunction for each FunctionDefinition]
+    OND --> FSM_C[FSM attaches contracts to AnnotatedFunction by source line]
+    OND --> FSM_D[FSM attaches docs to AnnotatedFunction by source line]
+    OND --> FSM_RET[FSM annotated_functions/1 returns all AnnotatedFunctions for a module]
+
+    FSM_MC --> NEW_FSM[Create new Bond.Compiler.CompileStateFSM]
+    FSM_C --> NEW_FSM
+    FSM_D --> NEW_FSM
+    FSM_RET --> NEW_FSM
+
+    FSM_MC --> AF_MC[AnnotatedFunction represents all clauses of a function]
+    FSM_C --> AF_MC
+    FSM_D --> AF_MC
+    FSM_RET --> AF_MC
+
+    NEW_FSM --> RENAME_FSM[Rename Bond.Compiler.CompileStateFSM to LegacyCompileStateFSM]
+
+    AF_MC --> RENAME_AF[Rename AnnotatedFunction to AnnotatedFunctionClause]
+    AF_MC --> ADD_CL[Add AnnotatedFunction.add_clause/2]
+    AF_MC --> AF_NEW[AnnotatedFunction.new accepts FunctionDefinition]
+    AF_MC --> ADD_PRE[Add :preconditions and add_precondition to AnnotatedFunction]
+    AF_MC --> ADD_POST[Add :postconditions and add_postcondition to AnnotatedFunction]
+    AF_MC --> ADD_DOC[Add :doc_attributes and add_doc_attributes to AnnotatedFunction]
+
+    ADD_PRE --> AF_STRUCT[Define struct for new multi-clause AnnotatedFunction]
+    ADD_POST --> AF_STRUCT
+    ADD_DOC --> AF_STRUCT
+    ADD_CL --> AF_STRUCT
+    ADD_CL --> NEW_CLAUSE[Create AnnotatedFunction.Clause struct]
+
+    AF_STRUCT --> NEW_AF[Create new AnnotatedFunction module]
+    AF_NEW --> FUNDEF[Create Bond.Compiler.FunctionDefinition module and struct]
+    AF_NEW --> NEW_AF
+    NEW_CLAUSE --> NEW_AF
+
+    classDef done fill:#90EE90,stroke:#2e7d32,stroke-width:2px;
+    class GOAL,DEAD,REPLACE,DEL_DFWC,DEL_OVERRIDES,IMPL,OND,BC,BC_GEN,AF_OVERRIDES,FSM_MC,FSM_C,FSM_D,FSM_RET,NEW_FSM,RENAME_FSM,AF_MC,RENAME_AF,ADD_CL,AF_NEW,ADD_PRE,ADD_POST,ADD_DOC,AF_STRUCT,NEW_CLAUSE,NEW_AF,FUNDEF done;

@@ -1,0 +1,23 @@
+flowchart TD
+%% Mikado seedling — never elaborated into concrete steps.
+
+%% This was an early aspirational goal: keep the amount of code Bond
+%% injects into user modules as small as possible, both for hex doc
+%% noise and for clarity when reading the generated source. The
+%% compiler-hooks refactor (see compiler-hooks.mmd) addressed a large
+%% part of the spirit of this goal by moving Bond out of def/defp
+%% overrides and into post-compile wrappers that touch only contracted
+%% functions. The lifted-defp + persistent_term type-laundering design
+%% (see bond-dialyzer-laundering memory) further trimmed what shows up
+%% on the user-module side.
+
+%% Kept as a historical signpost rather than an active plan. Originally a
+%% Graphviz file (minimize-injected-code.dot); converted to Mermaid
+%% 2026-05-29.
+
+    GOAL(["**Goal**<br/>Minimize generated code injected into user modules"])
+
+    GOAL --> ADDRESSED["Partially addressed by:<br/>compiler-hooks refactor (0.12.0)<br/>+ lifted-defp + persistent_term laundering"]
+
+    classDef done fill:#90EE90,stroke:#2e7d32,stroke-width:2px;
+    class GOAL,ADDRESSED done;

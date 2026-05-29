@@ -1,3 +1,0 @@
-digraph {
-    goal [label="Minimize generated code injected into user modules", style=bold, shape=doubleoctagon]
-  }
