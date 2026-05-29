@@ -49,9 +49,10 @@ defmodule Bond do
 
   ## Options
 
-  Each option is one of `true`, `false`, or `:purge`. See the "Conditional compilation"
-  section in the moduledoc for what each value means. Options passed to `use Bond` override
-  both the global `:bond` config and any `:overrides` entry that matches this module.
+  Each of the following options is one of `true`, `false`, or `:purge`. See the "Conditional
+  compilation" section in the moduledoc for what each value means. Options passed to
+  `use Bond` override both the global `:bond` config and any `:overrides` entry that matches
+  this module.
 
     * `:preconditions` — mode for this module's `@pre` annotations.
     * `:postconditions` — mode for this module's `@post` annotations.
@@ -64,41 +65,97 @@ defmodule Bond do
       defmodule MyApp.HotPath do
         use Bond, preconditions: :purge, postconditions: :purge
       end
+
+  ### `:at_syntax`
+
+  By default Bond overrides `Kernel.@/1` in the using module so that `@pre`, `@post`, and
+  `@invariant` read as annotations. Overriding `@` is lexically scoped to this module, so it
+  is invisible to the rest of your project — but it cannot coexist *within a single module*
+  with another library that also overrides `@` (for example Norm's `@contract`).
+
+  Pass `at_syntax: false` to leave `Kernel.@/1` untouched in this module. Bond's compiler
+  hooks are still installed, but the `@pre`/`@post`/`@invariant` forms are **not** available;
+  instead, write contracts as fully-qualified calls — `Bond.pre/1`, `Bond.post/1`, and
+  `Bond.invariant/1` (plus `Bond.pre/2`/`Bond.post/2` for the label forms). `check/1` remains
+  available unqualified.
+
+      defmodule MyApp.Validated do
+        use Norm
+        use Bond, at_syntax: false
+
+        @contract add(integer(), integer()) :: integer()
+        Bond.pre x >= 0 and y >= 0
+        Bond.post result >= 0
+        def add(x, y), do: x + y
+      end
+
+  > #### Bare macros are always fully-qualified {: .info}
+  >
+  > The `pre`/`post`/`invariant` macros are never imported, even with the default
+  > `at_syntax: true`. This keeps them from colliding with common function names (notably
+  > `post`) in modules that only ever use the `@` forms. They are reachable only as
+  > `Bond.pre`, `Bond.post`, and `Bond.invariant`.
   """
   defmacro __using__(opts) when is_list(opts) do
     Bond.Compiler.init(__CALLER__.module)
 
+    {at_syntax, use_opts} = Keyword.pop(opts, :at_syntax, true)
+
+    config_ast =
+      quote do
+        # Read the `:bond` application config in the *user's* module body so
+        # `Application.compile_env/3` works (it cannot be called inside a macro/function body,
+        # only in a module body) and so the compile-env dependency is correctly tracked for
+        # recompilation. `Bond.Compiler.resolve_config/3` merges global config, `:overrides`,
+        # and the `use Bond` opts. `Bond.Compiler.__before_compile__/1` reads the final
+        # `@__bond_contract_config__` attribute when emitting contract overrides.
+        @__bond_contract_config__ Bond.Compiler.resolve_config(
+                                    __MODULE__,
+                                    unquote(use_opts),
+                                    preconditions:
+                                      Application.compile_env(:bond, :preconditions, true),
+                                    postconditions:
+                                      Application.compile_env(:bond, :postconditions, true),
+                                    checks: Application.compile_env(:bond, :checks, true),
+                                    invariants: Application.compile_env(:bond, :invariants, true),
+                                    overrides: Application.compile_env(:bond, :overrides, []),
+                                    warn_skipped_invariants:
+                                      Application.compile_env(
+                                        :bond,
+                                        :warn_skipped_invariants,
+                                        true
+                                      )
+                                  )
+      end
+
+    # `at_syntax: true` (default): shadow `Kernel.@/1` with Bond's `@/1` and import only the
+    #   `@` macro plus `check`. The bare `pre`/`post`/`invariant` macros are deliberately left
+    #   out of the import list so they never collide with user function names.
+    # `at_syntax: false`: leave `@` alone (so libraries like Norm can own it), import only
+    #   `check`, and rely on fully-qualified `Bond.pre`/`Bond.post`/`Bond.invariant` calls.
+    imports_ast =
+      if at_syntax do
+        quote do
+          import Kernel, except: [@: 1]
+          import Bond, only: [@: 1, check: 1, check: 2]
+        end
+      else
+        quote do
+          import Bond, only: [check: 1, check: 2]
+        end
+      end
+
+    hooks_ast =
+      quote do
+        @on_definition Bond.Compiler
+        @before_compile Bond.Compiler
+        @after_compile Bond.Compiler
+      end
+
     quote do
-      # Read the `:bond` application config in the *user's* module body so
-      # `Application.compile_env/3` works (it cannot be called inside a macro/function body,
-      # only in a module body) and so the compile-env dependency is correctly tracked for
-      # recompilation. `Bond.Compiler.resolve_config/3` merges global config, `:overrides`,
-      # and the `use Bond` opts. `Bond.Compiler.__before_compile__/1` reads the final
-      # `@__bond_contract_config__` attribute when emitting contract overrides.
-      @__bond_contract_config__ Bond.Compiler.resolve_config(
-                                  __MODULE__,
-                                  unquote(opts),
-                                  preconditions:
-                                    Application.compile_env(:bond, :preconditions, true),
-                                  postconditions:
-                                    Application.compile_env(:bond, :postconditions, true),
-                                  checks: Application.compile_env(:bond, :checks, true),
-                                  invariants: Application.compile_env(:bond, :invariants, true),
-                                  overrides: Application.compile_env(:bond, :overrides, []),
-                                  warn_skipped_invariants:
-                                    Application.compile_env(
-                                      :bond,
-                                      :warn_skipped_invariants,
-                                      true
-                                    )
-                                )
-
-      import Kernel, except: [@: 1]
-      import Bond
-
-      @on_definition Bond.Compiler
-      @before_compile Bond.Compiler
-      @after_compile Bond.Compiler
+      unquote(config_ast)
+      unquote(imports_ast)
+      unquote(hooks_ast)
     end
   end
 
@@ -113,15 +170,7 @@ defmodule Bond do
   # attached to them, or keyword lists where the keys are labels and the values are the
   # assertions.
   defmacro @{pre_or_post, meta, [expression]} when pre_or_post in [:pre, :post] do
-    if Keyword.keyword?(expression) do
-      for {label, expression} <- expression do
-        Bond.Compiler.register_assertion(pre_or_post, expression, label, __CALLER__, meta)
-      end
-    else
-      Bond.Compiler.register_assertion(pre_or_post, expression, nil, __CALLER__, meta)
-    end
-
-    :ok
+    register_pre_or_post(pre_or_post, expression, __CALLER__, meta)
   end
 
   # This clause handles @pre or @post assertions that have a label preceding them.
@@ -164,15 +213,7 @@ defmodule Bond do
   # every check site to whichever struct parameter the function head exposes (detected
   # via `Bond.Compiler.Invariants.detect_struct_params/2`).
   defmacro @{:invariant, meta, [expression_or_kw_list]} do
-    if Keyword.keyword?(expression_or_kw_list) do
-      for {label, expression} <- expression_or_kw_list do
-        Bond.Compiler.register_invariant(expression, label, __CALLER__, meta)
-      end
-    else
-      Bond.Compiler.register_invariant(expression_or_kw_list, nil, __CALLER__, meta)
-    end
-
-    :ok
+    register_invariant(expression_or_kw_list, __CALLER__, meta)
   end
 
   # @invariant <name>, <expression-or-keyword-list>
@@ -219,6 +260,74 @@ defmodule Bond do
     quote do
       Kernel.@(unquote(attr))
     end
+  end
+
+  @doc """
+  Register a precondition as a fully-qualified call, for modules that opt out of the
+  `@`-prefixed syntax with `use Bond, at_syntax: false`.
+
+  `Bond.pre/1` is the qualified-call equivalent of `@pre`; everything the FSM does with the
+  registered assertion is identical. The single-argument form accepts either a bare assertion
+  expression or a keyword list of `label: assertion` pairs:
+
+      Bond.pre x > 0
+      Bond.pre positive: x > 0, bounded: x < 100
+
+  See `Bond.pre/2` for the label-first / label-last forms.
+  """
+  defmacro pre(expression) do
+    register_pre_or_post(:pre, expression, __CALLER__, line: __CALLER__.line)
+  end
+
+  @doc """
+  Register a labelled precondition as a fully-qualified call.
+
+  The label may precede or follow the assertion, mirroring `@pre <label>, <expr>` and
+  `@pre <expr>, <label>`:
+
+      Bond.pre :positive, x > 0
+      Bond.pre x > 0, "x must be positive"
+  """
+  defmacro pre(label, {_, _, _} = expression) when is_atom(label) or is_binary(label) do
+    Bond.Compiler.register_assertion(:pre, expression, label, __CALLER__, line: __CALLER__.line)
+    :ok
+  end
+
+  defmacro pre({_, _, _} = expression, label) when is_atom(label) or is_binary(label) do
+    Bond.Compiler.register_assertion(:pre, expression, label, __CALLER__, line: __CALLER__.line)
+    :ok
+  end
+
+  @doc """
+  Register a postcondition as a fully-qualified call. See `Bond.pre/1` and the `:at_syntax`
+  option of `use Bond` for context; this is the qualified-call equivalent of `@post`.
+  """
+  defmacro post(expression) do
+    register_pre_or_post(:post, expression, __CALLER__, line: __CALLER__.line)
+  end
+
+  @doc """
+  Register a labelled postcondition as a fully-qualified call. See `Bond.pre/2`.
+  """
+  defmacro post(label, {_, _, _} = expression) when is_atom(label) or is_binary(label) do
+    Bond.Compiler.register_assertion(:post, expression, label, __CALLER__, line: __CALLER__.line)
+    :ok
+  end
+
+  defmacro post({_, _, _} = expression, label) when is_atom(label) or is_binary(label) do
+    Bond.Compiler.register_assertion(:post, expression, label, __CALLER__, line: __CALLER__.line)
+    :ok
+  end
+
+  @doc """
+  Register an invariant as a fully-qualified call, the qualified-call equivalent of
+  `@invariant`. Accepts a bare expression or a keyword list of `label: expression` pairs;
+  expressions reference the implicit `subject` binding exactly as in the `@invariant` form.
+
+      Bond.invariant subject.size >= 0
+  """
+  defmacro invariant(expression_or_kw_list) do
+    register_invariant(expression_or_kw_list, __CALLER__, line: __CALLER__.line)
   end
 
   @doc """
@@ -279,6 +388,36 @@ defmodule Bond do
         "check/2 was removed in Bond 0.16.0. Use `check expr` or `check label: expr` " <>
           "instead. The string-label forms `check \"label\", expr` and " <>
           "`check expr, \"label\"` are no longer supported."
+  end
+
+  # Shared by the `@pre`/`@post` single-argument clause and the qualified `Bond.pre/1` /
+  # `Bond.post/1` macros. Registers either a bare assertion or each entry of a keyword list of
+  # `label: assertion` pairs into the per-module FSM. Returns `:ok` so the calling macro
+  # expands to a harmless no-op expression.
+  defp register_pre_or_post(pre_or_post, expression, caller, meta) do
+    if Keyword.keyword?(expression) do
+      for {label, expr} <- expression do
+        Bond.Compiler.register_assertion(pre_or_post, expr, label, caller, meta)
+      end
+    else
+      Bond.Compiler.register_assertion(pre_or_post, expression, nil, caller, meta)
+    end
+
+    :ok
+  end
+
+  # Shared by the `@invariant` single-argument clause and the qualified `Bond.invariant/1`
+  # macro. Same bare-or-keyword-list dispatch as `register_pre_or_post/4`.
+  defp register_invariant(expression_or_kw_list, caller, meta) do
+    if Keyword.keyword?(expression_or_kw_list) do
+      for {label, expr} <- expression_or_kw_list do
+        Bond.Compiler.register_invariant(expr, label, caller, meta)
+      end
+    else
+      Bond.Compiler.register_invariant(expression_or_kw_list, nil, caller, meta)
+    end
+
+    :ok
   end
 
   # Build the AST for a `check` call honouring the per-module `:checks` config:
