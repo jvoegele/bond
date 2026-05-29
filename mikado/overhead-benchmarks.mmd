@@ -1,3 +1,4 @@
+flowchart TD
 %% Mikado graph for the runtime + compile-time overhead benchmarks
 %% (issues #20 and #9). Doing them together because the publishing surface
 %% is shared (`guides/overhead.md` with two top-level sections) and the
@@ -23,7 +24,6 @@
 %%     with many `use Bond` modules and a parallel baseline, measured
 %%     end-to-end with `mix compile`.
 
-flowchart TD
     G(["**Goal**<br/>#9 and #20 closed; `guides/overhead.md` publishes concrete<br/>compile-time and runtime overhead numbers from a documented env.<br/>The polish bucket shrinks from 4 to 2 (only #8 and #10 remain)."])
 
     G --> S5["5. **Wrap-up**: CHANGELOG entry under Documentation; update FAQ entry<br/>'Will contracts slow down my production code?' to cross-link the new<br/>guide and surface the headline numbers; close #9 + #20 on GitHub;<br/>check off in #11 (Road to 1.0.0).<br/><b>#overhead-wrap</b>"]

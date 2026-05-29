@@ -1,3 +1,4 @@
+flowchart TD
 %% Mikado graph for the 0.15.0 contract-chain partial-order work.
 %%
 %% Each numbered node is a commit-sized step. Arrows point from a goal to its
@@ -9,7 +10,6 @@
 %%   - Compile-time: `:purge` of a lower kind ⇒ all higher kinds must also be `:purge`.
 %%   - Runtime: `false` for a lower kind ⇒ all higher kinds are skipped.
 
-flowchart TD
     G(["**Goal**<br/>0.15.0 enforces partial order between contract kinds"])
 
     G --> S1[1. Compile-time chain validator in resolve_config/3]

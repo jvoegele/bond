@@ -1,3 +1,4 @@
+flowchart TD
 %% Mikado graph for #1 — Freeze and audit the public API surface for 1.0.
 %%
 %% This is the LAST 1.0 blocker (per #11). The deliverable is a semver
@@ -40,7 +41,6 @@
 %% further prerequisites and are safe to start first. Depth-first per
 %% Mikado: pick a leaf, finish it, keep tests green, commit, repeat.
 
-flowchart TD
     G(["**Goal**<br/>#1 closed: public surface enumerated and locked;<br/>stability guarantees published; zero internal leaks in hexdocs.<br/>Last 1.0 blocker — this clears the path for the 1.0.0 release."])
 
     G --> S5["5. CHANGELOG entry under Unreleased + close #1 on GitHub +<br/>check off in #11 (Road to 1.0.0). After this, only the Polish<br/>bucket (#8/#9/#10) remains before 1.0.0.<br/><b>#1-wrap</b>"]

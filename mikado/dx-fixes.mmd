@@ -1,3 +1,4 @@
+flowchart TD
 %% Mikado graph for the 0.16.2 release — a DX patch surfaced by dogfooding
 %% Bond on a real-world umbrella app (Photon, ~200+ modules).
 %%
@@ -41,7 +42,6 @@
 %%      forget when wiring handlers. Concrete metadata-map example in the
 %%      Telemetry section so consumers don't have to read source.
 
-flowchart TD
     G(["**Goal**<br/>0.16.2 — assertion ergonomics + DX patch (Photon-feedback)"])
 
     G --> S1[1. #1: relax is_assertion_expression for remote calls]

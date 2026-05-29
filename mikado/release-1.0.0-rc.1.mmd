@@ -1,3 +1,4 @@
+flowchart TD
 %% Mikado plan for the 1.0.0-rc.1 release cut.
 %%
 %% This is the final pre-1.0 milestone — a release candidate published to
@@ -29,7 +30,6 @@
 %%   - CHANGELOG has 1.0.0 + migration entry (here: 1.0.0-rc.1 + migration)
 %%   - Package metadata in mix.exs verified for hex publish
 
-flowchart TD
     G(["**Goal**<br/>1.0.0-rc.1 release branch merge-ready and handed off to user<br/>for tag + mix hex.publish. The final 1.0.0 release will be a smaller<br/>follow-up cut after any RC feedback is folded in."])
 
     G --> S6["6. **Wrap-up**: close #10 on GitHub, check off in #11 (Road to<br/>1.0.0.0), update bond-project-state memory with the RC status.<br/>The bond-workflow memory's 'tags use bare X.Y.Z form' rule applies<br/>here (1.0.0-rc.1, not v1.0.0-rc.1). Document the hand-off steps the<br/>user needs to run.<br/><b>#10-wrap</b>"]

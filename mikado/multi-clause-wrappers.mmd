@@ -1,3 +1,4 @@
+flowchart TD
 %% Mikado graph for 0.17.0 — multi-clause wrapper redesign (Option B-ii).
 %%
 %% Arrows point from a goal to its prerequisites. Leaves (green) have no
@@ -57,7 +58,6 @@
 %%   - Per-clause contracts (Option B-iii). Discussed at length; ship B-ii
 %%     first, see if the consistent-naming refactor actually bites in practice.
 
-flowchart TD
     G(["**Goal**<br/>0.17.0 — multi-clause wrappers + consistent-naming rule"])
 
     G --> S1[1. Bond.Compiler.Clauses: top-level-name extraction]

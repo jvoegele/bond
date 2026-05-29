@@ -1,3 +1,4 @@
+flowchart TD
 %% Mikado graph for the Should-do 1.0 sweep — issues #5, #6, #7.
 %%
 %% Cleared first so that #1 (freeze the public API surface) operates on the
@@ -27,7 +28,6 @@
 %% further prerequisites and are safe to start first. Depth-first per Mikado:
 %% pick a leaf, finish it, keep tests green, commit, repeat.
 
-flowchart TD
     G(["**Goal**<br/>Issues #5, #6, #7 closed; 1.0 should-do bucket clear.<br/>Public surface settled enough to begin #1's API freeze."])
 
     G --> S5["5. CHANGELOG entry under Unreleased + close #5/#6/#7 on GitHub +<br/>check off in #11 (Road to 1.0.0).<br/><b>#sweep-wrap</b>"]

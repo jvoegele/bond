@@ -1,10 +1,10 @@
+flowchart TD
 %% Mikado graph for the 0.13.0 `@invariant` work.
 %%
 %% Each numbered node is a commit-sized step. Arrows point from a goal to its
 %% prerequisites — leaves (green) have no further prerequisites and are safe to
 %% start with. Depth-first per Mikado: pick a leaf, finish it, commit, repeat.
 
-flowchart TD
     G(["**Goal**<br/>@invariant ships in 0.13.0"])
 
     G --> S5[5. @ macro clauses + register_invariant/5]

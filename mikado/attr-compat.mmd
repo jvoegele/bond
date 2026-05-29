@@ -1,3 +1,4 @@
+flowchart TD
 %% Mikado graph for Issue #4 — Kernel.@/1 override compatibility
 %%
 %% Bond's `use Bond` does `import Kernel, except: [@: 1]` then `import Bond`,
@@ -32,7 +33,6 @@
 %% error pointing at the first `@`-using line), not silent. Recommended workaround:
 %% split into separate modules, one per contract library.
 
-flowchart TD
     G(["**Goal**<br/>Issue #4 closed: @/1 override compatibility verified;<br/>attribute forwarding + cross-library interaction tested;<br/>compatibility note documented in FAQ"])
 
     G --> S4["4. Add 'Compatibility with @/1-overriding libraries' section to guides/faq.md.<br/>Document the empirical finding: combining `use Bond` with another @/1-<br/>overriding lib (e.g. Norm) in one module fails at compile time with a<br/>clear 'ambiguous import' error, regardless of ordering. Recommend the<br/>split-modules workaround, with a concrete code example.<br/><b>#4-compat-guide</b>"]

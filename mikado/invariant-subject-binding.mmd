@@ -1,3 +1,4 @@
+flowchart TD
 %% Mikado graph for the 0.16.0 work bundle:
 %%   1. @invariant subject-binding redesign (Move A+B; clean break)
 %%   2. check/2 syntax pruning (bare + kw forms only)
@@ -21,7 +22,6 @@
 %%   - check/2 keeps `check expr` and `check label: expr`; drops the
 %%     `check "str", expr` / `check expr, "str"` forms.
 
-flowchart TD
     G(["**Goal**<br/>0.16.0 — @invariant subject-binding + check/2 pruning"])
 
     G --> S1[1. Detection helpers in Bond.Compiler.Invariants]
