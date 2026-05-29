@@ -37,15 +37,10 @@ defmodule Bond.QualifiedSyntaxTest do
     end
   end
 
-  describe "Bond.pre/2 (label-first and label-last)" do
-    test "label-first form enforces" do
-      assert Q.label_first(5) == 5
-      assert_raise Bond.PreconditionError, fn -> Q.label_first(0) end
-    end
-
-    test "label-last form enforces" do
-      assert Q.label_last(5) == 5
-      assert_raise Bond.PreconditionError, fn -> Q.label_last(0) end
+  describe "Bond.pre/1 keyword label with a quoted-string key" do
+    test "enforces just like an atom-key label" do
+      assert Q.string_labelled(5) == 5
+      assert_raise Bond.PreconditionError, fn -> Q.string_labelled(0) end
     end
   end
 

@@ -39,16 +39,17 @@ attributes are:
   * `@pre expr` — bare expression. Recognised forms are documented in the
     `Bond.Predicates` moduledoc.
   * `@pre label: expr, other_label: other_expr` — keyword list of
-    `label: expression` pairs.
-  * `@pre label, expr` and `@pre expr, label` — labelled-bare form
-    (label as atom or binary either before or after the expression).
+    `label: expression` pairs. Labels are atoms; quote the key for spaces or
+    punctuation (`@pre "must be positive": x > 0`).
   * `@post` accepts all the same forms. In addition, `result` is bound to the
     function's return value, and `old(...)` (see below) is recognised inside
     a postcondition expression.
 
-Mixing a bare assertion with a labelled assertion in a single annotation
-(e.g. `@pre is_binary(x), positive: x > 0`) raises a `CompileError` with a
-specific diagnostic.
+The keyword-list form is the only labelling syntax. The positional forms
+`@pre label, expr` and `@pre expr, label` were removed in 1.0 and raise a
+`CompileError` pointing at the keyword form. Mixing a bare assertion with a
+labelled assertion in a single annotation (e.g. `@pre is_binary(x), positive:
+x > 0`) likewise raises a `CompileError` with a specific diagnostic.
 
 ### `@invariant`
 
@@ -76,9 +77,8 @@ contracts are written as fully-qualified macro calls. These register into the
 same compiler machinery as the `@` forms and accept the same arguments:
 
   * `Bond.pre/1`, `Bond.post/1` — bare expression or keyword list of
-    `label: expression` pairs.
-  * `Bond.pre/2`, `Bond.post/2` — labelled-bare form (label as atom or binary,
-    before or after the expression).
+    `label: expression` pairs (the same single-form labelling as `@pre`/`@post`;
+    quote the key for spaces or punctuation).
   * `Bond.invariant/1` — single expression or keyword list of labelled
     invariants; references the implicit `subject` binding.
 

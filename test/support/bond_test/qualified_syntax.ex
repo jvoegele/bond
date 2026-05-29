@@ -29,17 +29,14 @@ defmodule BondTest.QualifiedSyntax do
   Bond.post(result > 0)
   def passthrough(n), do: n
 
-  # Keyword-list (labelled) precondition.
+  # Keyword-list (labelled) precondition with atom-key labels.
   Bond.pre(positive: x > 0, bounded: x < 100)
   def bounded(x), do: x
 
-  # `Bond.pre/2` label-first form.
-  Bond.pre(:positive, y > 0)
-  def label_first(y), do: y
-
-  # `Bond.pre/2` label-last form.
-  Bond.pre(z > 0, "z must be positive")
-  def label_last(z), do: z
+  # Keyword-list label with a quoted-string key — the migration path for the old positional
+  # string-label form (`Bond.pre z > 0, "z must be positive"`, removed in 1.0).
+  Bond.pre("z must be positive": z > 0)
+  def string_labelled(z), do: z
 
   def new(capacity) when is_integer(capacity) and capacity >= 0 do
     %__MODULE__{items: [], capacity: capacity}

@@ -77,15 +77,18 @@ to the `result` variable (bound to the function's return value) and
 ## Assertion syntax
 
 An assertion is a boolean (or truthy) Elixir expression, optionally paired
-with a label. Labels are atoms or strings; they appear in error messages
-and generated documentation.
+with a label. Labels are supplied via the **keyword list** form and are
+atoms — quote the key for spaces or punctuation. They appear in error
+messages and generated documentation.
 
-The recommended form is the **keyword list**, even for a single assertion:
+The keyword list is the recommended (and only) labelling form, even for a
+single assertion:
 
 ```elixir
 @pre positive_x: x > 0
 @post non_decreasing: result >= old(result)
 @pre numeric_x: is_number(x), non_negative_x: x >= 0
+@pre "x must be positive": x > 0
 ```
 
 For a bare assertion where a label adds no information, the **bare form**

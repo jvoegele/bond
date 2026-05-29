@@ -135,9 +135,8 @@ line; contracts are never silently dropped.
 `at_annotations: false` tells Bond to leave `Kernel.@/1` untouched in that
 module, so Norm keeps ownership of `@` (and thus `@contract`). Bond's
 compiler hooks are still installed, but you write Bond contracts as
-fully-qualified calls — `Bond.pre/1`, `Bond.post/1`, and `Bond.invariant/1`
-(plus `Bond.pre/2`/`Bond.post/2` for the label forms). `check/1` remains
-available unqualified.
+fully-qualified calls — `Bond.pre/1`, `Bond.post/1`, and `Bond.invariant/1`.
+`check/1` remains available unqualified.
 
 ```elixir
 defmodule MyApp.Boundary do

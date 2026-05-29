@@ -77,8 +77,7 @@ defmodule Bond do
   Pass `at_annotations: false` to leave `Kernel.@/1` untouched in this module. Bond's compiler
   hooks are still installed, but the `@pre`/`@post`/`@invariant` forms are **not** available;
   instead, write contracts as fully-qualified calls — `Bond.pre/1`, `Bond.post/1`, and
-  `Bond.invariant/1` (plus `Bond.pre/2`/`Bond.post/2` for the label forms). `check/1` remains
-  available unqualified.
+  `Bond.invariant/1`. `check/1` remains available unqualified.
 
       defmodule MyApp.Validated do
         use Norm
@@ -174,26 +173,32 @@ defmodule Bond do
     register_pre_or_post(pre_or_post, expression, __CALLER__, meta)
   end
 
-  # This clause handles @pre or @post assertions that have a label preceding them.
-  defmacro @{pre_or_post, meta, [label, {_, _, _} = expression]}
-           when (pre_or_post in [:pre, :post] and is_atom(label)) or is_binary(label) do
-    Bond.Compiler.register_assertion(pre_or_post, expression, label, __CALLER__, meta)
-    :ok
+  # The positional label forms `@pre <label>, <expr>` and `@pre <expr>, <label>` were removed
+  # in Bond 1.0 in favour of the single keyword-list form, matching the `check/1`-only labelling
+  # decided in 0.16.0. These two clauses match the exact removed shapes (atom/binary label before
+  # or after a quoted expression) and raise a migration CompileError, rather than letting them
+  # fall through to the generic arity catch-all below (whose message is about a different mistake).
+  defmacro @{pre_or_post, _meta, [label, {_, _, _}]}
+           when pre_or_post in [:pre, :post] and (is_atom(label) or is_binary(label)) do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description: positional_label_removed_message(pre_or_post)
   end
 
-  # This clause handles @pre or @post assertions that have a label following them.
-  defmacro @{pre_or_post, meta, [{_, _, _} = expression, label]}
-           when (pre_or_post in [:pre, :post] and is_atom(label)) or is_binary(label) do
-    Bond.Compiler.register_assertion(pre_or_post, expression, label, __CALLER__, meta)
-    :ok
+  defmacro @{pre_or_post, _meta, [{_, _, _}, label]}
+           when pre_or_post in [:pre, :post] and (is_atom(label) or is_binary(label)) do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description: positional_label_removed_message(pre_or_post)
   end
 
-  # Catch-all for `@pre`/`@post` with 2+ args that don't match the label-first,
-  # label-last, or single-arg patterns above. The common trip is mixing a bare
-  # assertion with a labelled one (`@pre is_binary(x), positive: x > 0`) —
-  # Elixir parses that as two args, neither valid for the existing clauses, so
-  # it would otherwise fall through to Kernel's `@/1` and die with an unhelpful
-  # arity error. Raise a clearer diagnostic here.
+  # Catch-all for `@pre`/`@post` with 2+ args that don't match the single-arg form or the
+  # removed-positional-label shapes above. The common trip is mixing a bare assertion with a
+  # labelled one (`@pre is_binary(x), positive: x > 0`) — Elixir parses that as two args,
+  # neither valid for the existing clauses, so it would otherwise fall through to Kernel's
+  # `@/1` and die with an unhelpful arity error. Raise a clearer diagnostic here.
   defmacro @{pre_or_post, _meta, [_, _ | _] = args}
            when pre_or_post in [:pre, :post] do
     raise CompileError,
@@ -268,35 +273,15 @@ defmodule Bond do
   `@`-prefixed syntax with `use Bond, at_annotations: false`.
 
   `Bond.pre/1` is the qualified-call equivalent of `@pre`; everything the FSM does with the
-  registered assertion is identical. The single-argument form accepts either a bare assertion
-  expression or a keyword list of `label: assertion` pairs:
+  registered assertion is identical. It accepts either a bare assertion expression or a keyword
+  list of `label: assertion` pairs. Labels are atoms — quote for spaces or punctuation:
 
       Bond.pre x > 0
       Bond.pre positive: x > 0, bounded: x < 100
-
-  See `Bond.pre/2` for the label-first / label-last forms.
+      Bond.pre "x must be positive": x > 0
   """
   defmacro pre(expression) do
     register_pre_or_post(:pre, expression, __CALLER__, line: __CALLER__.line)
-  end
-
-  @doc """
-  Register a labelled precondition as a fully-qualified call.
-
-  The label may precede or follow the assertion, mirroring `@pre <label>, <expr>` and
-  `@pre <expr>, <label>`:
-
-      Bond.pre :positive, x > 0
-      Bond.pre x > 0, "x must be positive"
-  """
-  defmacro pre(label, {_, _, _} = expression) when is_atom(label) or is_binary(label) do
-    Bond.Compiler.register_assertion(:pre, expression, label, __CALLER__, line: __CALLER__.line)
-    :ok
-  end
-
-  defmacro pre({_, _, _} = expression, label) when is_atom(label) or is_binary(label) do
-    Bond.Compiler.register_assertion(:pre, expression, label, __CALLER__, line: __CALLER__.line)
-    :ok
   end
 
   @doc """
@@ -305,19 +290,6 @@ defmodule Bond do
   """
   defmacro post(expression) do
     register_pre_or_post(:post, expression, __CALLER__, line: __CALLER__.line)
-  end
-
-  @doc """
-  Register a labelled postcondition as a fully-qualified call. See `Bond.pre/2`.
-  """
-  defmacro post(label, {_, _, _} = expression) when is_atom(label) or is_binary(label) do
-    Bond.Compiler.register_assertion(:post, expression, label, __CALLER__, line: __CALLER__.line)
-    :ok
-  end
-
-  defmacro post({_, _, _} = expression, label) when is_atom(label) or is_binary(label) do
-    Bond.Compiler.register_assertion(:post, expression, label, __CALLER__, line: __CALLER__.line)
-    :ok
   end
 
   @doc """
@@ -405,6 +377,14 @@ defmodule Bond do
     end
 
     :ok
+  end
+
+  # Migration diagnostic for the positional `@pre`/`@post` label forms removed in Bond 1.0.
+  defp positional_label_removed_message(pre_or_post) do
+    "@#{pre_or_post} <label>, <expr> and @#{pre_or_post} <expr>, <label> (the positional " <>
+      "label forms) were removed in Bond 1.0. Use the keyword-list form instead: " <>
+      "`@#{pre_or_post} <label>: <expr>`. Labels are atoms — quote for spaces or " <>
+      "punctuation, e.g. `@#{pre_or_post} \"must be positive\": x > 0`."
   end
 
   # Shared by the `@invariant` single-argument clause and the qualified `Bond.invariant/1`
