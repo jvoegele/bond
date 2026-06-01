@@ -1,0 +1,58 @@
+flowchart TD
+%% Mikado graph for 1.0.0-rc.4 — fix the multi-clause pre-invariant gap (#22)
+%% and the 1.18 type-checker noise (#23).
+
+%% Arrows point from a goal to its prerequisites. Leaves (green) have no
+%% further prerequisites and are safe to start with. Depth-first per Mikado:
+%% pick a leaf, finish it, commit, repeat. Every commit stays green.
+
+%% Root cause (confirmed by reproduction, 2026-06-01):
+%%   Bond emits one wrapper clause per user clause (0.17.0), then ONE shared set
+%%   of lifted pre/post/invariant defps. Two bugs make a struct clause's
+%%   pre-invariant silently not fire on heterogeneous multi-clause functions:
+%%
+%%   Bug 1 — `Invariants.classify_param` only matched a single-level `=` with a
+%%     struct on one side. When clauses disagree on a position's name (and no
+%%     contract references it — invariants reference `subject`), the canonical
+%%     rewrite wraps the struct head as a NESTED match
+%%     `bond_arg_0 = (%__MODULE__{} = _ctx)`, which classify_param read as :none
+%%     → no struct detected → no pre-invariant. Fixes the struct-FIRST ordering.
+%%
+%%   Bug 2 — `ClauseWrapper.build_wrapper` drops the user clause's `when` guards
+%%     (the emitted quote has no `when`; clause.guards is used only for struct
+%%     detection). A guarded bare-var clause becomes a catch-all
+%%     `def f(bond_arg_0 = _key)` that matches anything, shadowing a following
+%%     struct clause: it runs no pre-invariant, then `super` re-dispatches to the
+%%     correct original clause — right result, silently skipped invariant. Fix:
+%%     emit `when <guards>`; protect guard-referenced names from the underscore
+%%     pass (else "underscored var used in guard"). Fixes the struct-SECOND case.
+%%
+%%   The cited `params_split/3` + `struct_params_for_clause/2` are DEAD code
+%%   (no callers); they caused the original misdiagnosis. Remove them.
+%%
+%%   #23 is expected to fall out of Bug 2: restoring per-clause guards/patterns
+%%   un-collapses the wrapper heads so 1.18 types each clause independently.
+
+    G(["**Goal**<br/>1.0.0-rc.4 — multi-clause pre-invariant fires; #22 + #23 closed"])
+
+    G --> S1[1. Bug 1: classify_param sees through nested '='; struct_pattern? helper; detection unit tests + struct-first behavioural test]
+    G --> S2[2. Bug 2: ClauseWrapper emits 'when' guards; Clauses.referenced_var_names; protect guard vars from underscoring; wrapper-AST + struct-second behavioural tests]
+    G --> S3[3. Remove dead params_split/3 + struct_params_for_clause/2]
+    G --> S4[4. #23: reproduce on 1.19.5; regression test or FAQ note]
+    G --> S5[5. CHANGELOG + FAQ/doc adjustments]
+    G --> S6[6. Release prep: version bump + install snippets]
+
+    S4 --> S2
+    S5 --> S1
+    S5 --> S2
+    S5 --> S3
+    S5 --> S4
+    S6 --> S5
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S1,S2,S3 leaf;
+
+    style G fill:#90EE90
+    style S1 fill:#90EE90
+    style S2 fill:#90EE90
+    style S3 fill:#90EE90
