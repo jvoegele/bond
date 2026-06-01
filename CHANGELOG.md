@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Fixes a soundness gap in multi-clause `@invariant` enforcement (GitHub #22).
+
+### Fixed
+
+- **A struct clause's `@invariant` pre-check is no longer silently skipped on
+  heterogeneous multi-clause functions.** When a function had a clause binding a
+  `%__MODULE__{}` struct alongside a sibling clause binding a non-struct value,
+  two bugs combined to skip the struct clause's pre-invariant:
+
+    1. The canonical-name rewrite wraps such a struct head as a nested match
+       (`bond_arg_0 = (%__MODULE__{} = ctx)`), which the struct detector didn't
+       recognise.
+    2. Per-clause wrappers dropped the user clause's `when` guards, so a guarded
+       bare-variable clause became a catch-all that shadowed a following struct
+       clause — `super` re-dispatched to the correct clause (so results were
+       right) but the pre-invariant never fired.
+
+  Both are fixed: struct detection sees through the nested match, and wrapper
+  clauses now reproduce the user's guards.
+
+### Changed
+
+- **A contracted multi-clause function called with an argument that matches no
+  clause now raises `FunctionClauseError`** (as an uncontracted function would),
+  rather than a precondition violation. The previous behaviour — a precondition
+  firing for an input that entered no clause — was a side effect of the
+  guard-dropping bug above. Preconditions apply per matched clause.
+
 ## [1.0.0-rc.3] - 2026-06-01
 
 Splits the overloaded `Bond.PropertyTest.contract_holds/2` macro into two
