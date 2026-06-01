@@ -126,8 +126,9 @@ defmodule Bond.PropertyTest.Sequence do
   defp unwrap_struct!(other, module, fun, args) do
     raise ArgumentError,
           "Bond.PropertyTest: #{inspect(module)}.#{fun}/#{length(args)} returned " <>
-            "an unsupported shape: #{inspect(other)}. Form 2 supports bare struct or " <>
-            "`{:ok, struct}` returns. `{:error, _}` terminates the sequence cleanly. " <>
-            "Wrap your function if it returns anything else, or test it with Form 1."
+            "an unsupported shape: #{inspect(other)}. invariants_hold supports bare " <>
+            "struct or `{:ok, struct}` returns. `{:error, _}` terminates the sequence " <>
+            "cleanly. Wrap your function if it returns anything else, or test it with " <>
+            "contract_holds."
   end
 end
