@@ -167,9 +167,11 @@ keyword shape is documented in the `Bond.Test` moduledoc.
 
 Brought into ExUnit modules via `use Bond.PropertyTest`. Provides:
 
-  * `contract_holds/2` — runs StreamData-generated input through a
-    function (or every contract-bearing function in a module) and asserts
-    every call satisfies its contracts.
+  * `contract_holds/2` — runs StreamData-generated input through a single
+    function and asserts every call satisfies its contracts.
+  * `invariants_hold/2` — runs random sequences of operations over a
+    struct module and asserts the module's `@invariant`s (and any
+    per-function contracts) hold across every reachable state.
 
 Requires the optional `:stream_data` dependency in the consumer's `mix.exs`.
 

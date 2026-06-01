@@ -1,11 +1,11 @@
-defmodule Bond.PropertyTest.Form2Test do
+defmodule Bond.PropertyTest.InvariantsHoldTest do
   @moduledoc """
-  Tests for `Bond.PropertyTest.contract_holds/2` in its module-sequence (Form 2) shape.
+  Tests for `Bond.PropertyTest.invariants_hold/2`, the stateful module-sequence shape.
 
-  Same three-angle structure as the Form 1 tests:
+  Same three-angle structure as the `contract_holds/2` tests:
 
     1. **Passing-property tests** — drive `BondTest.InvariantSmoke` through
-       `contract_holds` with constructors/transformers/observers that respect its
+       `invariants_hold` with constructors/transformers/observers that respect its
        invariants. These run as real properties.
 
     2. **Underlying-mechanism tests** — confirm that a hand-built sequence containing a
@@ -23,14 +23,14 @@ defmodule Bond.PropertyTest.Form2Test do
   alias Bond.PropertyTest.Sequence
   alias BondTest.InvariantSmoke
 
-  describe "contract_holds Module (passing properties)" do
-    contract_holds(InvariantSmoke,
+  describe "invariants_hold Module (passing properties)" do
+    invariants_hold(InvariantSmoke,
       constructors: [{:new, [StreamData.integer(0..50)]}],
       transformers: [{:push, [StreamData.term()]}],
       observers: [{:capacity, []}]
     )
 
-    contract_holds(InvariantSmoke,
+    invariants_hold(InvariantSmoke,
       constructors: [
         {:new, [StreamData.integer(0..50)]},
         {:try_new, [StreamData.integer(0..50)]}
@@ -59,7 +59,7 @@ defmodule Bond.PropertyTest.Form2Test do
     test "expands to a property block invoking Sequence.generator + Sequence.run" do
       ast =
         quote do
-          contract_holds(InvariantSmoke,
+          invariants_hold(InvariantSmoke,
             constructors: [{:new, [StreamData.integer(0..50)]}],
             transformers: [{:push, [StreamData.term()]}]
           )
@@ -79,7 +79,7 @@ defmodule Bond.PropertyTest.Form2Test do
         Code.eval_quoted(
           quote do
             require Bond.PropertyTest
-            Bond.PropertyTest.contract_holds(InvariantSmoke, transformers: [])
+            Bond.PropertyTest.invariants_hold(InvariantSmoke, transformers: [])
           end
         )
       end
@@ -90,7 +90,23 @@ defmodule Bond.PropertyTest.Form2Test do
         Code.eval_quoted(
           quote do
             require Bond.PropertyTest
-            Bond.PropertyTest.contract_holds(InvariantSmoke, constructors: [])
+            Bond.PropertyTest.invariants_hold(InvariantSmoke, constructors: [])
+          end
+        )
+      end
+    end
+  end
+
+  describe "clean break (the old overloaded contract_holds Module form)" do
+    test "contract_holds with a module raises a CompileError pointing at invariants_hold" do
+      assert_raise CompileError, ~r/invariants_hold/, fn ->
+        Code.eval_quoted(
+          quote do
+            require Bond.PropertyTest
+
+            Bond.PropertyTest.contract_holds(InvariantSmoke,
+              constructors: [{:new, [StreamData.integer(0..50)]}]
+            )
           end
         )
       end

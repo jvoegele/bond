@@ -377,17 +377,17 @@ default-arg form into explicit clauses.
 
 Contracts and property-based testing are natural partners: PBT's hard
 part is usually writing the oracle that says whether an output is right
-or wrong, and contracts *are* that oracle. `Bond.PropertyTest.contract_holds/2`
-exposes this directly with two shapes:
+or wrong, and contracts *are* that oracle. `Bond.PropertyTest` exposes
+this directly with two macros:
 
 ```elixir
 use Bond.PropertyTest
 
-# Form 1: random inputs into a single function
+# contract_holds/2: random inputs into a single function
 contract_holds &Math.sqrt/1, args: [StreamData.float(min: 0.0)]
 
-# Form 2: random sequences over a struct's @invariant
-contract_holds BoundedStack,
+# invariants_hold/2: random sequences over a struct's @invariant
+invariants_hold BoundedStack,
   constructors: [{:new, [StreamData.integer(1..100)]}],
   transformers: [{:push, [StreamData.term()]}, {:pop, []}]
 ```

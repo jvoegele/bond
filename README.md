@@ -556,9 +556,9 @@ an oracle that distinguishes right answers from wrong ones; Bond's
 contracts already supply the oracle at every call site. PBT then just
 feeds random inputs through already-instrumented code.
 
-`Bond.PropertyTest.contract_holds/2` ships in two forms.
+`Bond.PropertyTest` provides two macros, one per testing shape.
 
-### Single function
+### Single function — `contract_holds/2`
 
 ```elixir
 defmodule MathTest do
@@ -574,14 +574,14 @@ non-negative floats. Any precondition, postcondition, or `check`
 violation fails the property; StreamData shrinks to the minimal failing
 input.
 
-### Module sequence (invariant-driven)
+### Stateful module sequence — `invariants_hold/2`
 
 ```elixir
 defmodule BoundedStackTest do
   use ExUnit.Case
   use Bond.PropertyTest
 
-  contract_holds BoundedStack,
+  invariants_hold BoundedStack,
     constructors: [{:new, [StreamData.integer(1..100)]}],
     transformers: [{:push, [StreamData.term()]}, {:pop, []}],
     observers:    [{:size, []}, {:peek, []}]
@@ -595,11 +595,11 @@ observers take the struct but don't advance state. The module's
 `@invariant`s fire on every operation entry and exit, so any violation
 in any operation shrinks back to the minimal failing sequence.
 
-Form 2 supports `%Mod{}` and `{:ok, %Mod{}}` return shapes from
-constructors and transformers. `{:error, _}` terminates the sequence
-cleanly (an operation refusing isn't a contract violation). Other
-return shapes raise an `ArgumentError` — wrap your function or test it
-with Form 1.
+`invariants_hold` supports `%Mod{}` and `{:ok, %Mod{}}` return shapes
+from constructors and transformers. `{:error, _}` terminates the
+sequence cleanly (an operation refusing isn't a contract violation).
+Other return shapes raise an `ArgumentError` — wrap your function or
+test it with `contract_holds/2`.
 
 ### Setup
 
@@ -609,7 +609,7 @@ enable PBT:
 ```elixir
 def deps do
   [
-    {:bond, "~> 1.0.0-rc.2"},
+    {:bond, "~> 1.0.0-rc.3"},
     {:stream_data, "~> 1.0", only: [:dev, :test]}
   ]
 end
@@ -640,7 +640,7 @@ on is safe across upgrades, those two guides are the source of truth.
 ```elixir
 def deps do
   [
-    {:bond, "~> 1.0.0-rc.2"}
+    {:bond, "~> 1.0.0-rc.3"}
   ]
 end
 ```
