@@ -144,6 +144,26 @@ defmodule Bond.Compiler.CompileStateFSM do
   end
 
   @doc """
+  Registers contracts inherited from behaviours (via `use Bond, behaviours: […]`).
+
+  `contracts` is a map keyed by `{name, arity}`; it is merged into any contracts already
+  registered. Like invariants, these are module-scoped: they are queried at
+  `__before_compile__` time and merged into the matching `AnnotatedFunction`s.
+  """
+  @spec inherited_contracts_def(server_ref(), map()) :: :ok
+  def inherited_contracts_def(fsm, contracts) when is_map(contracts) do
+    :gen_statem.cast(fsm, {:inherited_contracts, contracts})
+  end
+
+  @doc """
+  Returns the map of contracts inherited from behaviours, keyed by `{name, arity}`.
+  """
+  @spec inherited_contracts(server_ref()) :: map()
+  def inherited_contracts(fsm) do
+    :gen_statem.call(fsm, :inherited_contracts)
+  end
+
+  @doc """
   Sends a `doc_attributes_applied` event to the FSM.
   """
   def doc_attributes_applied(fsm) do
