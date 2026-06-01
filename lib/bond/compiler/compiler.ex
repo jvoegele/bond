@@ -41,6 +41,85 @@ defmodule Bond.Compiler do
     :ok
   end
 
+  @doc """
+  Reads the `__bond_contracts__/0` reflection of each behaviour and registers the combined
+  contracts with `module`'s FSM, keyed by `{name, arity}`.
+
+  Called from the `use Bond, behaviours: […]` expansion (the modules are already alias-resolved).
+  Each behaviour must `use Bond.Behaviour` — a behaviour without `__bond_contracts__/0` raises,
+  catching typos and accidental use of a plain behaviour. When two behaviours declare contracts
+  for the same `{name, arity}`, the contracts must be structurally identical (conjoining is
+  unsound; picking one is arbitrary), otherwise a `CompileError` is raised.
+  """
+  @spec register_behaviours(module(), [module()]) :: :ok
+  def register_behaviours(_module, []), do: :ok
+
+  def register_behaviours(module, behaviours) when is_list(behaviours) do
+    combined =
+      behaviours
+      |> Enum.map(fn behaviour ->
+        Code.ensure_compiled!(behaviour)
+
+        unless function_exported?(behaviour, :__bond_contracts__, 0) do
+          raise CompileError, description: not_a_bond_behaviour_message(behaviour)
+        end
+
+        {behaviour, behaviour.__bond_contracts__()}
+      end)
+      |> combine_behaviour_contracts()
+
+    FSM.inherited_contracts_def(FSM.server_ref(module), combined)
+    :ok
+  end
+
+  # Fold each behaviour's contracts into a single `{name, arity} => entry` map. A clash on the
+  # same key across behaviours is allowed only when the two entries are structurally identical.
+  defp combine_behaviour_contracts(per_behaviour) do
+    Enum.reduce(per_behaviour, %{}, fn {behaviour, contracts}, acc ->
+      Enum.reduce(contracts, acc, fn {key, entry}, acc ->
+        case Map.fetch(acc, key) do
+          :error ->
+            Map.put(acc, key, entry)
+
+          {:ok, existing} ->
+            if same_contract?(existing, entry) do
+              acc
+            else
+              raise CompileError,
+                description: conflicting_behaviours_message(key, behaviour, existing, entry)
+            end
+        end
+      end)
+    end)
+  end
+
+  # Two inherited contract entries are interchangeable when they agree on the canonical
+  # argument names and on each assertion's kind/label/source-form, position by position.
+  defp same_contract?(a, b) do
+    a.arg_names == b.arg_names and
+      assertion_shapes(a.preconditions) == assertion_shapes(b.preconditions) and
+      assertion_shapes(a.postconditions) == assertion_shapes(b.postconditions)
+  end
+
+  defp assertion_shapes(assertions) do
+    Enum.map(assertions, &{&1.kind, &1.label, &1.code})
+  end
+
+  defp not_a_bond_behaviour_message(behaviour) do
+    "Bond: `#{inspect(behaviour)}` was given to `use Bond, behaviours: […]` but does not " <>
+      "use `Bond.Behaviour` (no contracts to inherit). If it is a plain behaviour, declare it " <>
+      "with `@behaviour #{inspect(behaviour)}` instead; if it should carry contracts, add " <>
+      "`use Bond.Behaviour` to it."
+  end
+
+  defp conflicting_behaviours_message({fun, arity}, behaviour, _existing, _entry) do
+    "Bond: conflicting inherited contracts for `#{fun}/#{arity}`. More than one behaviour in " <>
+      "`behaviours: […]` (including `#{inspect(behaviour)}`) declares contracts for it, and " <>
+      "they are not identical. Inherited contracts are immutable in v1, so Bond cannot combine " <>
+      "them — make the declarations identical, or have only one behaviour constrain " <>
+      "`#{fun}/#{arity}`."
+  end
+
   @typedoc """
   Per-kind compilation mode. See `Bond.Compiler.AnnotatedFunction.mode/0`.
   """
@@ -256,6 +335,7 @@ defmodule Bond.Compiler do
         %{preconditions: true, postconditions: true, invariants: true}
 
     invariants = FSM.invariants(fsm(env))
+    inherited = FSM.inherited_contracts(fsm(env))
 
     moduledoc_invariants_ast =
       build_moduledoc_invariants_ast(invariants, env.module, config[:invariants] || true)
@@ -263,6 +343,7 @@ defmodule Bond.Compiler do
     contract_overrides =
       fsm(env)
       |> FSM.annotated_functions()
+      |> Enum.map(&merge_inherited_contract(&1, inherited))
       |> Enum.map(&AnnotatedFunction.put_invariants(&1, invariants))
       |> Enum.filter(&AnnotatedFunction.override?/1)
       |> Enum.map(&AnnotatedFunction.apply_contract(&1, config))
@@ -272,6 +353,51 @@ defmodule Bond.Compiler do
       nil -> contract_overrides
       ast -> [ast | contract_overrides]
     end
+  end
+
+  # Attaches a behaviour's inherited contracts to the matching implementation function. The
+  # match is purely on `{name, arity}` — independent of whether the impl wrote `@impl true`,
+  # and triggered only for callbacks the module actually implements (so optional callbacks the
+  # impl skips contribute nothing). Enforces the immutable-v1 bright line: an impl that attaches
+  # its own `@pre`/`@post` to an inherited operation is a compile error, because adding to an
+  # inherited precondition would strengthen it (breaking Liskov substitutability) and adding to
+  # a postcondition is refinement by the back door. Use `check/1` in the body for impl-specific
+  # assertions.
+  defp merge_inherited_contract(%AnnotatedFunction{} = annotated_function, inherited) do
+    key = {annotated_function.fun, annotated_function.arity}
+
+    case Map.fetch(inherited, key) do
+      :error ->
+        annotated_function
+
+      {:ok, %{arg_names: names, preconditions: pre, postconditions: post}} ->
+        if AnnotatedFunction.has_preconditions?(annotated_function) or
+             AnnotatedFunction.has_postconditions?(annotated_function) do
+          raise CompileError,
+            file: inherited_violation_file(annotated_function),
+            line: inherited_violation_line(annotated_function),
+            description: immutable_contract_message(annotated_function)
+        end
+
+        annotated_function
+        |> AnnotatedFunction.put_preconditions(pre)
+        |> AnnotatedFunction.put_postconditions(post)
+        |> AnnotatedFunction.put_canonical_override(names)
+    end
+  end
+
+  defp inherited_violation_file(%AnnotatedFunction{clauses: [clause | _]}), do: clause.env.file
+  defp inherited_violation_file(_), do: nil
+
+  defp inherited_violation_line(%AnnotatedFunction{clauses: [clause | _]}), do: clause.env.line
+  defp inherited_violation_line(_), do: nil
+
+  defp immutable_contract_message(%AnnotatedFunction{fun: fun, arity: arity}) do
+    "Bond: `#{fun}/#{arity}` inherits a contract from a behaviour, so it may not declare its " <>
+      "own `@pre`/`@post`. Inherited contracts are immutable in v1 — adding an impl-level " <>
+      "precondition would strengthen the inherited one (violating Liskov substitutability), " <>
+      "and an impl-level postcondition is refinement by the back door. For an " <>
+      "implementation-specific assertion, use `check/1` in the function body instead."
   end
 
   # Builds the AST that augments the user's `@moduledoc` with a generated

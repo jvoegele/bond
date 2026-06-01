@@ -436,6 +436,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
             [],
             annotated_function.preconditions,
             function_info,
+            struct_module,
             first_clause.env,
             pre_mode
           ),
@@ -445,6 +446,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
             postcondition_extra_params(old_pairs),
             postconditions,
             function_info,
+            struct_module,
             first_clause.env,
             post_mode
           ),
@@ -493,8 +495,17 @@ defmodule Bond.Compiler.AnnotatedFunction do
     [result_param | old_params]
   end
 
-  defp maybe_build_assertion_defp(_name, _params, _extra, _assertions, _info, _env, :purge),
-    do: nil
+  defp maybe_build_assertion_defp(
+         _name,
+         _params,
+         _extra,
+         _assertions,
+         _info,
+         _module,
+         _env,
+         :purge
+       ),
+       do: nil
 
   defp maybe_build_assertion_defp(
          name,
@@ -502,10 +513,11 @@ defmodule Bond.Compiler.AnnotatedFunction do
          extra_params,
          assertions,
          function_info,
+         function_module,
          env,
          _mode
        ) do
-    body = Assertion.assertions_body(assertions, function_info)
+    body = Assertion.assertions_body(assertions, function_info, function_module)
     params = call_params ++ extra_params
     arity = length(params)
 

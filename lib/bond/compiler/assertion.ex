@@ -136,8 +136,8 @@ defmodule Bond.Compiler.Assertion do
   `Bond.Compiler.AnnotatedFunction` (one per kind per function) — see that module for the
   call-site shape that invokes the generated defp through `Bond.Runtime.Eval`.
   """
-  @spec assertions_body([t()], function_info()) :: Macro.t()
-  def assertions_body(assertions, function_info)
+  @spec assertions_body([t()], function_info(), module() | nil) :: Macro.t()
+  def assertions_body(assertions, function_info, function_module \\ nil)
       when is_list(assertions) and is_tuple(function_info) do
     assertions_eval =
       for %Assertion{expression: expression, definition_env: assertion_env} = assertion <-
@@ -149,7 +149,11 @@ defmodule Bond.Compiler.Assertion do
           expression: assertion.code,
           file: assertion_env.file,
           line: assertion_env.line,
-          module: assertion_env.module,
+          # The MFA module is the module the function is *compiled into* (the implementer for
+          # inherited contracts), not where the assertion text was written. They coincide for
+          # contracts declared directly on the function, so `function_module` is only passed
+          # explicitly for inherited contracts; otherwise fall back to the assertion's env.
+          module: function_module || assertion_env.module,
           function: function_info,
           source_behaviour: assertion.source_behaviour
         }

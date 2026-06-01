@@ -99,7 +99,27 @@ defmodule Bond do
   defmacro __using__(opts) when is_list(opts) do
     Bond.Compiler.init(__CALLER__.module)
 
-    {at_annotations?, use_opts} = Keyword.pop(opts, :at_annotations, true)
+    {at_annotations?, opts_without_at} = Keyword.pop(opts, :at_annotations, true)
+
+    # Resolve the `:behaviours` option's module references in the caller's context (they arrive
+    # as unresolved `__aliases__` AST) and register their inherited contracts with this module's
+    # FSM. The call to each behaviour's `__bond_contracts__/0` establishes the compile-time
+    # dependency that forces the behaviour to be compiled first.
+    {behaviours_opt, use_opts} = Keyword.pop(opts_without_at, :behaviours, [])
+
+    behaviour_mods =
+      behaviours_opt
+      |> List.wrap()
+      |> Enum.map(&Macro.expand(&1, __CALLER__))
+
+    Bond.Compiler.register_behaviours(__CALLER__.module, behaviour_mods)
+
+    behaviours_ast =
+      for behaviour <- behaviour_mods do
+        quote do
+          @behaviour unquote(behaviour)
+        end
+      end
 
     config_ast =
       quote do
@@ -155,6 +175,7 @@ defmodule Bond do
     quote do
       unquote(config_ast)
       unquote(imports_ast)
+      unquote_splicing(behaviours_ast)
       unquote(hooks_ast)
     end
   end
