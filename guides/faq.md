@@ -462,6 +462,22 @@ Functions that build the struct via a helper call (`def from_map(m),
 do: build(m)`) still warn, because Bond can't tell statically that the
 helper returns a struct — use per-function suppression there.
 
+A **build-style constructor** that assembles the struct in a variable
+and returns it wrapped trips this too:
+
+```elixir
+def build(opts) do
+  state = %__MODULE__{count: opts[:count]}
+  {:ok, state}   # Bond sees `{:ok, <variable>}`, not a literal struct
+end
+```
+
+The runtime post-check still fires on the returned value, so the
+invariant *is* enforced — the warning only means Bond couldn't prove it
+statically. This is the common shape for an `invariants_hold/2` target's
+constructor, so expect the warning there and suppress it per function
+with `@bond_warn_skipped_invariants false`.
+
 **If the function is supposed to operate on the struct**, the fix is
 usually a missing pattern or guard on the head:
 
