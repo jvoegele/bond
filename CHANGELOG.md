@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Splits the overloaded `Bond.PropertyTest.contract_holds/2` macro into two
+clearly-named macros so the testing shape is named at the call site rather than
+inferred from the first argument's form.
+
+### Added
+
+- **`Bond.PropertyTest.invariants_hold/2`** — the stateful, sequence-based
+  property-testing macro. It runs random sequences of constructor / transformer
+  / observer operations over a struct module and uses the module's
+  `@invariant`s (plus any per-function `@pre`/`@post`/`check` contracts) as the
+  oracle across every reachable state. This is the form that previously lived
+  under `contract_holds Module, ...`. The name echoes the `@invariant`
+  annotation that is the form's whole point. `contract_holds/2` and
+  `invariants_hold/2` now cross-link each other in their docs.
+
+### Breaking changes
+
+- **`contract_holds/2` no longer accepts a module.** The stateful
+  module-sequence form moved to `invariants_hold/2`; `contract_holds/2` is now
+  exclusively the single-function form (`contract_holds &Mod.fun/n, args:
+  [...]`). Passing a module alias to `contract_holds/2` raises a `CompileError`
+  with a migration message rather than dispatching silently.
+
+      # Was:
+      contract_holds BoundedStack, constructors: [...], transformers: [...]
+
+      # Now:
+      invariants_hold BoundedStack, constructors: [...], transformers: [...]
+
+  The module form shipped only in `1.0.0-rc.2`, so there is no deprecation shim.
+
 ## [1.0.0-rc.2] - 2026-06-01
 
 Lets Bond coexist, in a single module, with other libraries that override
