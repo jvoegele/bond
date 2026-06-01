@@ -1,0 +1,49 @@
+flowchart TD
+%% Mikado graph for 1.0.0-rc.3 — split the overloaded `contract_holds/2` macro.
+
+%% Arrows point from a goal to its prerequisites. Leaves (green) have no
+%% further prerequisites and are safe to start with. Depth-first per Mikado:
+%% pick a leaf, finish it, commit, repeat.
+
+%% Problem (Photon dogfood, rc.2):
+%%   `Bond.PropertyTest.contract_holds/2` overloads two unrelated semantics on
+%%   one name, dispatching on the *AST shape* of arg 1 (`&fun/n` vs `Module`).
+%%   For a 1.0 public API that is brittle (excludes captured-fn variables,
+%%   macro-produced module names) and forces readers to inspect arg 1's shape
+%%   to know which contract is being tested.
+
+%% Decision (confirmed with user 2026-06-01):
+%%   - Keep `contract_holds/2` for the single-function form (Form 1) only.
+%%   - Move the module-sequence form (Form 2) to a new macro `invariants_hold/2`.
+%%     Name echoes the `@invariant` annotation that is the form's whole point
+%%     and the free oracle that makes stateful PBT cheap in Bond.
+%%   - Clean break: `contract_holds Module, ...` raises a CompileError with a
+%%     migration message (matches the 0.16.0 @invariant clean-break idiom).
+%%     User is the only real consumer through the RC, so no deprecation shim.
+%%   - Each macro's @doc cross-links the other.
+
+%% Out of scope here (separately tracked, rc.3 inclusion TBD):
+%%   - Finding A: pre-invariant detects struct params off the first clause's
+%%     head only (`struct_params_for_clause(inv_mode, first_clause)`), so a
+%%     struct-binding non-first clause gets no pre-check. Ties into the 0.16.0
+%%     "no struct in head: silent" rule and the 0.17.0 per-clause wrappers.
+%%   - Finding B: Elixir 1.18 set-theoretic checker flags head map-destructure
+%%     once Bond wraps a multi-clause fn (sibling clause narrows the param).
+
+    G(["**Goal**<br/>1.0.0-rc.3 — contract_holds split into contract_holds/2 + invariants_hold/2"])
+
+    G --> S1[1. Split macro: contract_holds = Form 1; add invariants_hold/2; clean-break clause + cross-linked docs + migrate Form 2 tests]
+    G --> S2[2. Docs: README + FAQ + public-api guide use invariants_hold for the sequence form]
+    G --> S3[3. CHANGELOG rc.3 entry: Added invariants_hold/2; Breaking: contract_holds drops the module form]
+
+    S2 --> S1
+    S3 --> S1
+    S3 --> S2
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S1 leaf;
+
+    style G fill:#90EE90
+    style S1 fill:#90EE90
+    style S2 fill:#90EE90
+    style S3 fill:#90EE90
