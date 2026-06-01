@@ -77,7 +77,13 @@ defmodule Bond.Compiler.ClauseWrapper do
   def build_wrapper(clause, canonical_names, %{} = context)
       when is_list(canonical_names) do
     clean_params = strip_default_args(clause.params)
-    head_params = Clauses.rewrite_clause_params(clean_params, canonical_names)
+    guards = clause.guards || []
+
+    # Guard-referenced names must survive into the wrapper head unchanged, so
+    # exclude them from the underscore-prefixing pass — the emitted `when`
+    # guard (below) references them.
+    guard_vars = Clauses.guard_var_names(guards)
+    head_params = Clauses.rewrite_clause_params(clean_params, canonical_names, guard_vars)
     super_args = Enum.map(canonical_names, &Macro.var(&1, nil))
 
     # Invariant struct detection runs on the rewritten head — so destructure-
@@ -125,8 +131,22 @@ defmodule Bond.Compiler.ClauseWrapper do
     kind = context.kind
     fun = context.fun
 
+    # Reproduce the user clause's `when` guards on the wrapper head so multi-
+    # clause dispatch survives. Without this a guarded bare-variable clause
+    # collapses to a catch-all (`def f(bond_arg_0 = _key)`) that matches any
+    # argument and shadows a following struct clause, silently skipping its
+    # pre-invariant. `guards` is a list (the `head when g1 when g2` form);
+    # `[]` means no guard.
+    head_call = quote(do: unquote(fun)(unquote_splicing(head_params)))
+
+    guarded_head =
+      case guards do
+        [] -> head_call
+        gs -> {:when, [], [head_call | gs]}
+      end
+
     quote do
-      unquote(kind)(unquote(fun)(unquote_splicing(head_params))) do
+      unquote(kind)(unquote(guarded_head)) do
         (unquote_splicing(body_stmts))
       end
     end

@@ -21,6 +21,25 @@ defmodule Bond.Compiler.InvariantsTest do
       assert Invariants.detect_struct_params(params, []) == [{:bound, :stack, 0}]
     end
 
+    test "detects the nested `canonical = (%__MODULE__{} = inner)` rewrite shape" do
+      # This is exactly what Clauses.rewrite_clause_params/3 emits for a struct
+      # clause when the canonical name at that position is generated (multi-clause
+      # functions whose clauses disagree on the position's name). Binds the OUTER
+      # (canonical) variable.
+      params = quote(do: [bond_arg_0 = %__MODULE__{} = _ctx])
+      assert Invariants.detect_struct_params(params, []) == [{:bound, :bond_arg_0, 0}]
+    end
+
+    test "detects the nested rewrite over a destructuring inner pattern" do
+      params = quote(do: [bond_arg_0 = %__MODULE__{field: x} = _ctx])
+      assert Invariants.detect_struct_params(params, []) == [{:bound, :bond_arg_0, 0}]
+    end
+
+    test "returns [] for a nested match wrapping an unrelated struct" do
+      params = quote(do: [bond_arg_0 = %OtherMod{} = _ctx])
+      assert Invariants.detect_struct_params(params, []) == []
+    end
+
     test "detects struct at a non-zero parameter position" do
       params = quote(do: [item, %__MODULE__{} = stack])
       assert Invariants.detect_struct_params(params, []) == [{:bound, :stack, 1}]

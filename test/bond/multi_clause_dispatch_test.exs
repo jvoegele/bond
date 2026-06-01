@@ -76,8 +76,15 @@ defmodule Bond.MultiClauseDispatchTest do
       assert :unknown = Fix.parse([])
     end
 
-    test "non-list raises PreconditionError from the universal @pre" do
-      assert_precondition_violation(Fix.parse(42), expression: ~r/is_list/)
+    test "non-list (matches no clause) raises FunctionClauseError" do
+      # 42 satisfies neither clause guard (`first in [...]` / `is_list`), so no
+      # clause matches and the call raises FunctionClauseError — same as the
+      # `lookup(:conn, 42)` case above. Preconditions apply per matched clause;
+      # an input that enters no clause isn't precondition-checked. (Before the
+      # guard-preservation fix this raised a PreconditionError, but only because
+      # the guardless catch-all wrapper matched everything — the same bug that
+      # silently skipped pre-invariants on struct clauses, GitHub #22.)
+      assert_raise FunctionClauseError, fn -> Fix.parse(42) end
     end
   end
 

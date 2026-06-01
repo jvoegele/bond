@@ -180,11 +180,18 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       wrappers = override_def_clauses(ast)
 
       # 0.17.0 emits one override clause per user clause to preserve Elixir's
-      # multi-clause dispatch. Both bind the canonical name `input`.
+      # multi-clause dispatch. Both bind the canonical name `input`. Each user
+      # clause's `when` guard is reproduced on the wrapper head (rc.4, GitHub
+      # #22) so dispatch survives — here the two clauses guard on `is_list` and
+      # `is_map`.
       assert length(wrappers) == 2
 
       Enum.each(wrappers, fn wrapper ->
-        assert {:def, _, [{:new, _, [{:input, _, _}]}, [do: do_block]]} = wrapper
+        assert {:def, _, [{:when, _, [{:new, _, [{:input, _, _}]}, guard]}, [do: do_block]]} =
+                 wrapper
+
+        guard_code = Macro.to_string(guard)
+        assert guard_code =~ ~r/is_list\(input\)|is_map\(input\)/
 
         code = Macro.to_string(do_block)
         assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:preconditions,\s*true"
