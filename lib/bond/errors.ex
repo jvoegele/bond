@@ -10,11 +10,15 @@ defmodule Bond.AssertionError do
         :line,
         :module,
         :function,
-        :binding
+        :binding,
+        :source_behaviour
       ]
 
       @typedoc """
       The `#{inspect(__MODULE__)}` exception type.
+
+      `:source_behaviour` is the behaviour module an inherited contract came from (see
+      `Bond.Behaviour`), or `nil` for a contract declared directly on the function.
       """
       @type t :: %__MODULE__{
               label: Bond.assertion_label(),
@@ -23,7 +27,8 @@ defmodule Bond.AssertionError do
               line: integer(),
               module: module(),
               function: {String.t(), non_neg_integer()},
-              binding: keyword()
+              binding: keyword(),
+              source_behaviour: module() | nil
             }
 
       @impl Exception
@@ -44,11 +49,20 @@ defmodule Bond.AssertionError do
           line: assertion_env.line,
           module: assertion_env.module,
           function: function_env.function,
-          binding: binding
+          binding: binding,
+          source_behaviour: Map.get(assertion, :source_behaviour)
         }
       end
     end
   end
+
+  @doc """
+  Returns a parenthetical attribution like `" (inherited from Ledger)"` when `source_behaviour`
+  is a module, or `""` when it is `nil`. Used by the precondition/postcondition messages to
+  name the behaviour an inherited contract came from.
+  """
+  def attribution(nil), do: ""
+  def attribution(source_behaviour), do: " (inherited from #{inspect(source_behaviour)})"
 
   def message(error, headline) do
     location =
@@ -87,7 +101,8 @@ defmodule Bond.PreconditionError do
   def message(%{module: module, function: {function, arity}} = error) do
     Bond.AssertionError.message(
       error,
-      "precondition failed for call to #{inspect(module)}.#{function}/#{arity}"
+      "precondition#{Bond.AssertionError.attribution(error.source_behaviour)} failed " <>
+        "for call to #{inspect(module)}.#{function}/#{arity}"
     )
   end
 end
@@ -103,7 +118,8 @@ defmodule Bond.PostconditionError do
   def message(%{module: module, function: {function, arity}} = error) do
     Bond.AssertionError.message(
       error,
-      "postcondition failed in #{inspect(module)}.#{function}/#{arity}"
+      "postcondition#{Bond.AssertionError.attribution(error.source_behaviour)} failed " <>
+        "in #{inspect(module)}.#{function}/#{arity}"
     )
   end
 end

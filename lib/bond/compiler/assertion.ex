@@ -19,7 +19,12 @@ defmodule Bond.Compiler.Assertion do
     :code,
     :kind,
     :definition_env,
-    :meta
+    :meta,
+    # The behaviour module an inherited contract originated from, or `nil` for a contract
+    # declared directly on the function. Set by `Bond.Behaviour` when capturing callback
+    # contracts; flows through to the assertion-failure metadata and error structs so a
+    # violation can be attributed to the source behaviour.
+    :source_behaviour
   ]
 
   @type t :: t(Bond.assertion_kind())
@@ -31,7 +36,8 @@ defmodule Bond.Compiler.Assertion do
           code: String.t(),
           kind: kind,
           definition_env: Macro.Env.t(),
-          meta: list()
+          meta: list(),
+          source_behaviour: module() | nil
         }
 
   @type function_info :: {atom(), non_neg_integer()}
@@ -144,7 +150,8 @@ defmodule Bond.Compiler.Assertion do
           file: assertion_env.file,
           line: assertion_env.line,
           module: assertion_env.module,
-          function: function_info
+          function: function_info,
+          source_behaviour: assertion.source_behaviour
         }
 
         # Delegate the truthiness check and throw-on-failure to

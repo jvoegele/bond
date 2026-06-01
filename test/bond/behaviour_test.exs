@@ -51,6 +51,44 @@ defmodule Bond.BehaviourTest do
       assert pre.definition_env.module == Ledger
       assert pre.definition_env.lexical_tracker == nil
     end
+
+    test "captured assertions record the source behaviour for attribution" do
+      %{preconditions: [pre], postconditions: [post]} =
+        Ledger.__bond_contracts__()[{:withdraw, 2}]
+
+      assert pre.source_behaviour == Ledger
+      assert post.source_behaviour == Ledger
+    end
+  end
+
+  describe "error attribution" do
+    test "precondition message names the source behaviour when inherited" do
+      error = %Bond.PreconditionError{
+        label: :positive_amount,
+        expression: "amount > 0",
+        module: BankAccount,
+        function: {:withdraw, 2},
+        binding: [amount: -1],
+        source_behaviour: Ledger
+      }
+
+      message = Exception.message(error)
+      assert message =~ "precondition (inherited from Bond.BehaviourTest.Ledger) failed"
+      assert message =~ "BankAccount.withdraw/2"
+    end
+
+    test "precondition message omits attribution for a direct contract" do
+      error = %Bond.PreconditionError{
+        label: nil,
+        expression: "x > 0",
+        module: Foo,
+        function: {:bar, 1},
+        binding: [x: -1],
+        source_behaviour: nil
+      }
+
+      refute Exception.message(error) =~ "inherited from"
+    end
   end
 
   test "the module is still a proper behaviour" do

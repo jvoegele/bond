@@ -133,7 +133,12 @@ defmodule Bond.Behaviour do
 
   defp stash_assertion(kind, expression, label, env, meta) do
     Assertion.validate_expression!(expression, env)
-    assertion = Assertion.new(kind, label, expression, env, meta)
+    # `env.module` is the behaviour module itself — the origin of this inherited contract.
+    assertion = %{
+      Assertion.new(kind, label, expression, env, meta)
+      | source_behaviour: env.module
+    }
+
     attr = pending_attr(kind)
     current = Module.get_attribute(env.module, attr) || []
     Module.put_attribute(env.module, attr, [assertion | current])
