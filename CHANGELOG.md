@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Contract inheritance for behaviours (GitHub #13).** A behaviour can declare
+  `@pre`/`@post` contracts on its `@callback`s with the new `Bond.Behaviour`,
+  and any module that inherits them with `use Bond, behaviours: [TheBehaviour]`
+  enforces those contracts on its own clauses — Design by Contract meeting the
+  Liskov Substitution Principle.
+
+    - Contracts reference the callback's argument names and bind by position,
+      so an implementation may name its parameters freely; the rebind applies
+      uniformly across every clause of a multi-clause implementation.
+    - `use Bond, behaviours: […]` emits `@behaviour` for each module, so
+      `@impl` and Elixir's callback checks apply without a separate declaration.
+    - Violations are attributed to their origin: the message reads
+      `precondition (inherited from Ledger) failed for call to
+      BankAccount.withdraw/2`, and a `:source_behaviour` field is added to the
+      precondition/postcondition error structs and to the
+      `[:bond, :assertion, :failure]` telemetry metadata.
+    - Inheritance is **immutable** in v1: an implementation may not modify or
+      add to an inherited contract. Attaching `@pre`/`@post` to an inherited
+      operation is a compile error (use `check/1` for implementation-specific
+      assertions); two behaviours constraining the same operation must be
+      structurally identical; and a non-`Bond.Behaviour` module passed to
+      `behaviours:` is a compile error.
+
+  See the [Contract Inheritance for Behaviours](guides/contract-inheritance.md)
+  guide.
+
 ## [1.1.0] - 2026-06-05
 
 Adds a supported runtime-configuration API (`Bond.Config`), makes the per-call
