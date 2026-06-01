@@ -1,6 +1,6 @@
-defmodule Bond.PropertyTest.Form1Test do
+defmodule Bond.PropertyTest.ContractHoldsTest do
   @moduledoc """
-  Tests for `Bond.PropertyTest.contract_holds/2` in its single-function (Form 1) shape.
+  Tests for `Bond.PropertyTest.contract_holds/2`, the single-function shape.
 
   Property-test libraries are awkward to test from the outside because a failing property
   fails the surrounding test. So this file uses two strategies:

@@ -8,19 +8,21 @@ defmodule Bond.PropertyTest do
   outputs. With Bond, the oracle is *already there at every call site*; PBT just feeds
   random inputs in and lets the existing instrumentation raise on any violation.
 
-  `Bond.PropertyTest` adds a single macro, `contract_holds/2`, with two forms:
+  `Bond.PropertyTest` adds two macros, one per testing shape:
 
-    * **Single function.** Pass a function reference and a list of generators (one per
-      argument). The macro calls the function with random inputs; any contract violation
-      fails the property and StreamData shrinks to a minimal counterexample.
+    * **`contract_holds/2` — single function.** Pass a function reference and a list of
+      generators (one per argument). The macro calls the function with random inputs; any
+      contract violation fails the property and StreamData shrinks to a minimal
+      counterexample.
 
           contract_holds &Math.sqrt/1, args: [StreamData.float(min: 0.0)]
 
-    * **Module sequence.** Pass a struct module plus constructor / transformer / observer
-      specs. The macro generates random sequences of operations over the struct and runs
-      them; the module's `@invariant`s (plus any per-function contracts) are the oracle.
+    * **`invariants_hold/2` — stateful module sequence.** Pass a struct module plus
+      constructor / transformer / observer specs. The macro generates random sequences of
+      operations over the struct and runs them; the module's `@invariant`s (plus any
+      per-function contracts) are the oracle across every reachable state.
 
-          contract_holds BoundedStack,
+          invariants_hold BoundedStack,
             constructors: [{:new, [StreamData.integer(1..100)]}],
             transformers: [{:push, [StreamData.term()]}, {:pop, []}],
             observers:    [{:size, []}, {:peek, []}]
@@ -39,7 +41,7 @@ defmodule Bond.PropertyTest do
         use ExUnit.Case
         use Bond.PropertyTest
 
-        # contract_holds ...
+        # contract_holds ... / invariants_hold ...
       end
 
   If `stream_data` is not available at compile time, `use Bond.PropertyTest` raises a
@@ -64,7 +66,7 @@ defmodule Bond.PropertyTest do
   @doc """
   When `use`d in an ExUnit test module, brings in `ExUnitProperties` (for the underlying
   `property/2` and `check all` macros) and imports `Bond.PropertyTest` so `contract_holds`
-  is available.
+  and `invariants_hold` are available.
 
   Raises a `CompileError` at the `use` site if `stream_data` isn't available — see the
   module docs.
@@ -81,13 +83,9 @@ defmodule Bond.PropertyTest do
   end
 
   @doc """
-  Generates an ExUnit property that calls the given function with random arguments and
+  Generates an ExUnit property that calls a single function with random arguments and
   verifies that Bond's contracts (preconditions, postconditions, `check`s, invariants)
   are all satisfied.
-
-  Two forms are supported, dispatched by the first argument:
-
-  ## Single function (Form 1)
 
   Pass a function reference and a list of generators, one per argument:
 
@@ -101,14 +99,68 @@ defmodule Bond.PropertyTest do
   Useful for catching edge cases your example-based tests didn't cover. The function's
   contracts are the oracle — no separate assertion is needed.
 
-  ## Module sequence (Form 2)
+  For stateful testing over a struct module — random sequences of operations checked
+  against the module's `@invariant`s — see `invariants_hold/2`.
+
+  ## Options
+
+    * `:args` (required) — list of `StreamData` generators, one per function argument.
+    * `:name` (optional) — a string used as the property's description. Defaults to
+      `"contract_holds <source>"`.
+  """
+  defmacro contract_holds(fun, opts)
+
+  defmacro contract_holds({:&, _, _} = fun_ast, opts) do
+    args_gens =
+      Keyword.get(opts, :args) ||
+        raise ArgumentError,
+              "contract_holds for a single function requires an `:args` keyword " <>
+                "with a list of generators (one per function argument)"
+
+    name = Keyword.get(opts, :name, "contract_holds #{Macro.to_string(fun_ast)}")
+
+    quote do
+      property unquote(name) do
+        check all args <- StreamData.fixed_list(unquote(args_gens)) do
+          apply(unquote(fun_ast), args)
+        end
+      end
+    end
+  end
+
+  # Clean break (1.0.0-rc.3): the module-sequence form moved to `invariants_hold/2`.
+  defmacro contract_holds({:__aliases__, _, _} = module_ast, _opts) do
+    mod = Macro.to_string(module_ast)
+
+    raise CompileError,
+      description: """
+      contract_holds/2 no longer accepts a module — the stateful module-sequence form \
+      moved to invariants_hold/2 in Bond 1.0.0-rc.3.
+
+      Replace:
+
+          contract_holds #{mod}, constructors: [...], transformers: [...], observers: [...]
+
+      with:
+
+          invariants_hold #{mod}, constructors: [...], transformers: [...], observers: [...]
+      """
+  end
+
+  @doc """
+  Generates an ExUnit property that runs random sequences of operations over a struct
+  module and verifies that the module's `@invariant`s (plus any per-function contracts)
+  hold across every reachable state.
+
+  This is Bond's stateful, sequence-based property testing. The invariants are a *free
+  oracle* — they hold at every entry and exit, so there's no need to write an explicit
+  per-operation model of expected behaviour, which is what makes stateful PBT cheap here.
 
   Pass a struct module plus *constructor*, *transformer*, and *observer* specs. The macro
   generates random sequences of operations over the struct, threads state through them,
-  and runs them. The module's `@invariant`s (plus any per-function contracts) are the
-  oracle.
+  and runs them.
 
-      contract_holds BoundedStack,
+      invariants_hold BoundedStack,
         constructors: [{:new, [StreamData.integer(1..100)]}],
         transformers: [{:push, [StreamData.term()]}, {:pop, []}],
         observers:    [{:size, []}, {:peek, []}]
@@ -127,68 +179,42 @@ defmodule Bond.PropertyTest do
     * `{:ok, %Mod{}}` — same; the wrapper is stripped.
     * `{:error, _}` — terminates the sequence cleanly (the property *passes*; an operation
       that refuses is not a contract violation).
-    * Anything else raises an `ArgumentError`; wrap your function or test it with Form 1.
+    * Anything else raises an `ArgumentError`; wrap your function or test it with
+      `contract_holds/2`.
+
+  > #### The oracle is invariants *and* per-function contracts {: .info}
+  >
+  > The runner also checks each operation's own `@pre`/`@post`/`check` contracts as it
+  > goes, so a struct module with per-function contracts but no `@invariant` is still
+  > meaningfully exercised. Invariants are the headline because they're what make the
+  > sequence form pull its weight — a module with no invariants buys little over testing
+  > each function with `contract_holds/2`.
 
   ## Options
-
-  For Form 1 (function reference):
-
-    * `:args` (required) — list of `StreamData` generators, one per function argument.
-
-  For Form 2 (module alias):
 
     * `:constructors` (required, non-empty) — list of `{fun_name, [arg_generators]}`.
     * `:transformers` (optional, default `[]`) — same shape; state threaded in as the
       first argument.
     * `:observers` (optional, default `[]`) — same shape; state passed but not advanced.
-
-  Common to both:
-
     * `:name` (optional) — a string used as the property's description. Defaults to
-      `"contract_holds <source>"`.
+      `"invariants_hold <module>"`.
   """
-  defmacro contract_holds(fun_or_module, opts)
+  defmacro invariants_hold(module, opts)
 
-  defmacro contract_holds({:&, _, _} = fun_ast, opts) do
-    contract_holds_for_function(fun_ast, opts)
-  end
-
-  defmacro contract_holds({:__aliases__, _, _} = module_ast, opts) do
-    contract_holds_for_module(module_ast, opts)
-  end
-
-  defp contract_holds_for_function(fun_ast, opts) do
-    args_gens =
-      Keyword.get(opts, :args) ||
-        raise ArgumentError,
-              "contract_holds for a single function requires an `:args` keyword " <>
-                "with a list of generators (one per function argument)"
-
-    name = Keyword.get(opts, :name, "contract_holds #{Macro.to_string(fun_ast)}")
-
-    quote do
-      property unquote(name) do
-        check all args <- StreamData.fixed_list(unquote(args_gens)) do
-          apply(unquote(fun_ast), args)
-        end
-      end
-    end
-  end
-
-  defp contract_holds_for_module(module_ast, opts) do
+  defmacro invariants_hold({:__aliases__, _, _} = module_ast, opts) do
     constructors = Keyword.get(opts, :constructors, [])
     transformers = Keyword.get(opts, :transformers, [])
     observers = Keyword.get(opts, :observers, [])
 
     if constructors == [] do
       raise ArgumentError,
-            "contract_holds for a module requires a non-empty `:constructors` keyword " <>
+            "invariants_hold requires a non-empty `:constructors` keyword " <>
               "(a list of {fun_name, [arg_generators]} tuples). " <>
               "Constructors are how the sequence starts — there's no way to test " <>
               "invariants on a struct module without a way to produce instances."
     end
 
-    name = Keyword.get(opts, :name, "contract_holds #{Macro.to_string(module_ast)}")
+    name = Keyword.get(opts, :name, "invariants_hold #{Macro.to_string(module_ast)}")
 
     quote do
       property unquote(name) do

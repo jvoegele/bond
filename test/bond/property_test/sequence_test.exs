@@ -1,7 +1,8 @@
 defmodule Bond.PropertyTest.SequenceTest do
   @moduledoc """
   Direct unit tests for the `Bond.PropertyTest.Sequence` helper. Integration through the
-  Form 2 `contract_holds` macro is covered separately by `property_test_form2_test.exs`.
+  `invariants_hold/2` macro is covered separately by
+  `property_test_invariants_hold_test.exs`.
   """
 
   use ExUnit.Case

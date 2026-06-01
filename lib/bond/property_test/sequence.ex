@@ -1,8 +1,8 @@
 defmodule Bond.PropertyTest.Sequence do
   @moduledoc internal: true
   @moduledoc """
-  Sequence generator and runner used by `Bond.PropertyTest.contract_holds/2`'s Form 2
-  (module-sequence shape).
+  Sequence generator and runner used by `Bond.PropertyTest.invariants_hold/2`
+  (the stateful module-sequence shape).
 
   A *sequence* is a tuple `{constructor_op, [step_op, ...]}` where:
 
