@@ -358,13 +358,22 @@ defmodule Bond.Compiler.Invariants do
 
   defp classify_param(param, guard_vars) do
     case param do
-      {:=, _, [{:%, _, [{:__MODULE__, _, _}, _]}, {var, _, ctx}]}
-      when is_atom(var) and is_atom(ctx) ->
-        {:bound, var}
+      # A match (`=`) with a top-level variable on one side and a struct match
+      # (possibly nested) on the other. Binds the variable to the struct.
+      #
+      # The nested case matters because Bond's own per-clause wrapper rewrite
+      # (`Clauses.rewrite_clause_params/3`) wraps a struct-binding head as
+      # `canonical = (%__MODULE__{} = user_var)` whenever the canonical name at
+      # that position is generated — which happens for multi-clause functions
+      # whose clauses disagree on the position's name (e.g. a struct clause
+      # alongside a binary clause). We bind the *outer* variable: it's the
+      # canonical name the wrapper body references, while the inner one has been
+      # underscore-prefixed as intentionally-unused.
+      {:=, _, [{var, _, ctx}, rhs]} when is_atom(var) and is_atom(ctx) ->
+        if struct_pattern?(rhs), do: {:bound, var}, else: :none
 
-      {:=, _, [{var, _, ctx}, {:%, _, [{:__MODULE__, _, _}, _]}]}
-      when is_atom(var) and is_atom(ctx) ->
-        {:bound, var}
+      {:=, _, [lhs, {var, _, ctx}]} when is_atom(var) and is_atom(ctx) ->
+        if struct_pattern?(lhs), do: {:bound, var}, else: :none
 
       {var, _, ctx} when is_atom(var) and is_atom(ctx) ->
         if MapSet.member?(guard_vars, var), do: {:bound, var}, else: :none
@@ -376,6 +385,13 @@ defmodule Bond.Compiler.Invariants do
         :none
     end
   end
+
+  # Does this pattern match a `%__MODULE__{}` struct, directly or along a chain
+  # of `=` matches? `%__MODULE__{}`, `%__MODULE__{} = x`, and
+  # `a = (%__MODULE__{} = b)` all qualify; an unrelated `%OtherMod{}` does not.
+  defp struct_pattern?({:%, _, [{:__MODULE__, _, _}, _]}), do: true
+  defp struct_pattern?({:=, _, [lhs, rhs]}), do: struct_pattern?(lhs) or struct_pattern?(rhs)
+  defp struct_pattern?(_), do: false
 
   defp collect_guard_struct_vars(guards) do
     guards
