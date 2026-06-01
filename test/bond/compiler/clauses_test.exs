@@ -545,6 +545,37 @@ defmodule Bond.Compiler.ClausesTest do
     end
   end
 
+  describe "guard_var_names/1" do
+    test "returns [] for no guards" do
+      assert Clauses.guard_var_names([]) == MapSet.new()
+    end
+
+    test "collects the variable in a simple guard" do
+      guards = quote(do: [is_binary(key)])
+      assert Clauses.guard_var_names(guards) == MapSet.new([:key])
+    end
+
+    test "collects names across a compound guard" do
+      guards = quote(do: [is_integer(capacity) and capacity >= 0])
+      assert Clauses.guard_var_names(guards) == MapSet.new([:capacity])
+    end
+
+    test "collects a destructured field name referenced by the guard" do
+      guards = quote(do: [n > 10])
+      assert Clauses.guard_var_names(guards) == MapSet.new([:n])
+    end
+
+    test "collects across multiple `when ... when ...` guards" do
+      guards = quote(do: [is_atom(x), is_struct(y, Foo)])
+      assert Clauses.guard_var_names(guards) == MapSet.new([:x, :y])
+    end
+
+    test "does not collect remote-call heads or function names as variables" do
+      guards = quote(do: [String.length(resource) > 0])
+      assert Clauses.guard_var_names(guards) == MapSet.new([:resource])
+    end
+  end
+
   describe "underscore_prefix_unused/2" do
     test "leaves a bare variable alone when it's in the used set" do
       pattern = quote(do: x)

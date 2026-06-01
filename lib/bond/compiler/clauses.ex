@@ -250,6 +250,24 @@ defmodule Bond.Compiler.Clauses do
     end
   end
 
+  @doc """
+  Returns the set of bare-variable names referenced anywhere in `guards` — a
+  clause's list of guard expression ASTs (as stored on
+  `Bond.Compiler.AnnotatedFunction.Clause`; `[]` means no guard).
+
+  `Bond.Compiler.ClauseWrapper` passes this as the `used` set to
+  `rewrite_clause_params/3` so guard-referenced names are kept out of the
+  underscore-prefixing pass: a wrapper head that underscored `key` while its
+  `when is_binary(key)` guard still referenced `key` would fail to compile (or
+  warn about an underscored variable used in a guard).
+  """
+  @spec guard_var_names([Macro.t()]) :: MapSet.t(atom())
+  def guard_var_names(guards) when is_list(guards) do
+    Enum.reduce(guards, MapSet.new(), fn guard, acc ->
+      MapSet.union(acc, collect_var_names(guard))
+    end)
+  end
+
   # Walks an AST collecting every bare-variable reference. A bare variable in
   # Elixir AST is `{name, _meta, ctx}` where both `name` and `ctx` are atoms
   # (call AST has a list args at elem 2 instead of an atom context, so it's

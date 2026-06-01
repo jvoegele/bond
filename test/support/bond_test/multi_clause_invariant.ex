@@ -23,4 +23,16 @@ defmodule BondTest.MultiClauseInvariant do
   # Struct clause FIRST, guarded non-struct clause second.
   def first_struct(%__MODULE__{} = ctx), do: ctx.n
   def first_struct(key) when is_binary(key), do: {:binary, key}
+
+  # Guarded non-struct clause FIRST, struct clause second — the shadowing case.
+  # Before the guard-preservation fix, clause 1's wrapper collapsed to a
+  # guardless catch-all that swallowed the struct call and skipped the
+  # pre-invariant.
+  def second_struct(key) when is_binary(key), do: {:binary, key}
+  def second_struct(%__MODULE__{} = ctx), do: ctx.n
+
+  # A clause whose `when` guard references a destructured field name (`n`). The
+  # wrapper head must keep `n` un-underscored or the emitted guard won't compile.
+  def categorize(%__MODULE__{n: n}) when n > 10, do: :big
+  def categorize(%__MODULE__{}), do: :small
 end
