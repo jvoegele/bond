@@ -157,28 +157,12 @@ defmodule Bond.Compiler.Invariants do
   defp expression_returns_struct?(_expr, _struct_module), do: false
 
   @doc """
-  Detects every struct-bearing parameter in a function clause, or returns `[]` when
-  invariants are purged for the function.
-
-  Wrapper around `detect_struct_params/2` that respects the resolved invariant `mode`.
-  Kept in this module to keep `Bond.Compiler.AnnotatedFunction` small (see the compile-
-  order gotcha note in the moduledoc).
-  """
-  @spec struct_params_for_clause(Bond.Compiler.AnnotatedFunction.mode(), term()) ::
-          [struct_param()]
-  def struct_params_for_clause(:purge, _clause), do: []
-
-  def struct_params_for_clause(_mode, clause) do
-    detect_struct_params(clause.params || [], clause.guards || [])
-  end
-
-  @doc """
   Emits one pre-invariant statement per detected struct parameter, in left-to-right
   order. Each statement calls the lifted invariants defp with the appropriate variable:
 
     * `{:bound, var, _}` — the bound variable from the function head.
-    * `{:destructure, idx}` — `__bond_subject_<idx>__`, which the override clause head
-      binds via `Invariants.rewrite_call_params/2`.
+    * `{:destructure, idx}` — `__bond_subject_<idx>__`, the captured-struct variable
+      for a destructure-only position.
 
   The defp rebinds `subject` to that value and runs every `@invariant` assertion
   against it. Returns `[]` when the kind is purged or when no struct parameters were
@@ -219,68 +203,8 @@ defmodule Bond.Compiler.Invariants do
     end
   end
 
-  @doc """
-  Rewrites a function's parameter list to capture every `{:destructure, idx}` struct
-  parameter under a generated variable name (`__bond_subject_<idx>__`), so the override
-  clause's head, lifted defps, and `super`/eval call sites can refer to the captured
-  value rather than re-evaluating the destructure pattern.
-
-  Returns `{head_params, call_args}`:
-
-    * `head_params` — patterns intended for use in `def`/`defp` heads. For destructure
-      positions, the pattern is wrapped as `<original_pattern> = __bond_subject_<idx>__`
-      so it still pattern-matches the same shape but also binds the whole struct.
-    * `call_args` — values intended for use in `super(...)` / lifted-defp call sites.
-      For destructure positions, the value is the captured variable. For all other
-      positions, both lists contain the original parameter.
-
-  Without this rewrite, `super(<destructure_pattern>)` is broken: an expression like
-  `super(%__MODULE__{items: [h | _]})` tries to *construct* a new struct from the
-  destructure pattern's AST, which fails at compile time on `_` and silently produces
-  the wrong struct in benign cases. The capturing rewrite passes the original input
-  through unchanged.
-  """
-  @spec rewrite_call_params([Macro.t()], [struct_param()]) ::
-          {head_params :: [Macro.t()], call_args :: [Macro.t()]}
-  def rewrite_call_params(params, struct_params) do
-    destructure_indices = MapSet.new(for {:destructure, idx} <- struct_params, do: idx)
-
-    params
-    |> Enum.with_index()
-    |> Enum.map(fn {param, idx} ->
-      if MapSet.member?(destructure_indices, idx) do
-        capture = Macro.var(:"__bond_subject_#{idx}__", nil)
-        {quote(do: unquote(param) = unquote(capture)), capture}
-      else
-        {param, param}
-      end
-    end)
-    |> Enum.unzip()
-  end
-
   defp subject_var({:bound, var, _idx}), do: Macro.var(var, nil)
   defp subject_var({:destructure, idx}), do: Macro.var(:"__bond_subject_#{idx}__", nil)
-
-  @doc """
-  Convenience wrapper that produces every parameter-derived value
-  `Bond.Compiler.AnnotatedFunction.build_contract_override/4` needs in a single call:
-
-    * `struct_params` — `[t:struct_param/0]` for the clause, or `[]` when purged.
-    * `head_params` — patterns for `def`/`defp` heads (destructure positions augmented
-      with capturing bindings).
-    * `super_args` — values for `super(...)` and lifted-defp call sites (captured
-      variables at destructure positions, original parameters elsewhere).
-
-  Lives here so `AnnotatedFunction` stays small (see the compile-order gotcha note in
-  the moduledoc).
-  """
-  @spec params_split([Macro.t()], term(), Bond.Compiler.AnnotatedFunction.mode()) ::
-          {[struct_param()], [Macro.t()], [Macro.t()]}
-  def params_split(clean_params, first_clause, inv_mode) do
-    struct_params = struct_params_for_clause(inv_mode, first_clause)
-    {head_params, super_args} = rewrite_call_params(clean_params, struct_params)
-    {struct_params, head_params, super_args}
-  end
 
   @doc """
   Emits the post-invariant case-extraction statements that go *after* the postconditions
