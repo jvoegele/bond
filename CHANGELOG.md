@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-06-02
+
+First stable release. 1.0.0 promotes 1.0.0-rc.4 unchanged; the Semantic
+Versioning guarantees in `guides/stability.md` are now in force over the
+enumerated public API surface.
+
+The release-candidate cycle delivered:
+
+- **rc.1** — documented and frozen public API; the semver stability promise;
+  published compile-time and runtime overhead numbers; Elixir 1.16–1.19 CI.
+- **rc.2** — library coexistence (`use Bond, at_annotations: false`,
+  tolerance of externally-generated override clauses); keyword-only contract
+  labelling.
+- **rc.3** — split the overloaded `contract_holds/2` into `contract_holds/2`
+  (single-function form) and `invariants_hold/2` (stateful module-sequence
+  form).
+- **rc.4** — multi-clause `@invariant` soundness fix (GitHub #22).
+
+See the entries below for the detailed changes made in each candidate.
+
+### Known issues
+
+- **GitHub #23** — Elixir 1.18+'s set-theoretic type checker may flag a head
+  destructure on some Bond-wrapped multi-clause functions. This is diagnostic
+  noise only; the contracts and the wrapped functions behave correctly. It
+  could not be reproduced from reconstructed shapes and may already be resolved
+  by the rc.4 guard-preservation fix; it remains open under investigation.
+
 ## [1.0.0-rc.4] - 2026-06-01
 
 Fixes a soundness gap in multi-clause `@invariant` enforcement (GitHub #22).
