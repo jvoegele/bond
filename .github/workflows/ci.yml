@@ -24,10 +24,10 @@ jobs:
       # The Elixir axis is what drives the built-in type checker, so every supported
       # minor runs `mix test` (and thus the type-checker regression guard in
       # test/bond/type_checker_regression_test.exs, which is active from 1.18+).
-      # OTP is pinned to 27.2 across the newer legs for a stable, cached dimension —
-      # each pairing is within the minor's supported OTP range (1.18: 25–27, 1.19:
-      # 26–28, 1.20: 27–29). 1.20 was also verified locally on OTP 29. Bumping the
-      # newer legs to OTP 28/29 is a worthwhile follow-up (no OTP-28/29 leg yet).
+      # Each pairing is within the minor's supported OTP range (1.18: 25–27, 1.19:
+      # 26–28, 1.20: 27–29). 1.16–1.19 pin OTP 27.2 (stable, cached); the 1.20 leg
+      # runs OTP 29.0.1 — the toolchain verified locally and the matrix's first
+      # OTP-28/29-era coverage.
       matrix:
         include:
           - elixir: "1.16.3"
@@ -39,7 +39,7 @@ jobs:
           - elixir: "1.19.5"
             otp: "27.2"
           - elixir: "1.20.0"
-            otp: "27.2"
+            otp: "29.0.1"
     env:
       MIX_ENV: test
     steps:
