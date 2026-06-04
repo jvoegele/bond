@@ -168,10 +168,10 @@ defmodule Bond.Compiler.InvariantsTest do
       code = Macro.to_string(ast)
       assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:invariants,\s*true"
       assert code =~ ~r"Bond\.Runtime\.Eval\.evaluate_invariants"
-      # The bound subject is routed through `Bond.Predicates.__opaque__/1` so the lifted
-      # defp's parameter type isn't propagated from the wrapper's narrowed type —
-      # otherwise Dialyzer flags tautological invariant branches as unreachable.
-      assert code =~ ~r"my_inv_fn\(Bond\.Predicates\.__opaque__\(stack\)\)"
+      # The bound subject flows into the lifted defp unwrapped; the defp's
+      # `@dialyzer {:nowarn_function, ...}` (emitted by build_lifted_defp/5) suppresses the
+      # narrowed-type warnings that `Bond.Predicates.__opaque__/1` previously laundered.
+      assert code =~ ~r"my_inv_fn\(stack\)"
     end
 
     test "emits separate statements for multi-struct heads, in parameter order" do
@@ -186,8 +186,8 @@ defmodule Bond.Compiler.InvariantsTest do
 
       assert length(stmts) == 2
       [first, second] = stmts
-      assert Macro.to_string(first) =~ ~r"my_inv_fn\(Bond\.Predicates\.__opaque__\(a\)\)"
-      assert Macro.to_string(second) =~ ~r"my_inv_fn\(Bond\.Predicates\.__opaque__\(b\)\)"
+      assert Macro.to_string(first) =~ ~r"my_inv_fn\(a\)"
+      assert Macro.to_string(second) =~ ~r"my_inv_fn\(b\)"
     end
 
     test "uses __bond_subject_<idx>__ for destructure entries" do
@@ -201,7 +201,7 @@ defmodule Bond.Compiler.InvariantsTest do
         )
 
       assert Macro.to_string(ast) =~
-               ~r"my_inv_fn\(Bond\.Predicates\.__opaque__\(__bond_subject_0__\)\)"
+               ~r"my_inv_fn\(__bond_subject_0__\)"
     end
   end
 
@@ -216,7 +216,7 @@ defmodule Bond.Compiler.InvariantsTest do
       assert code =~ ~r"Bond\.Runtime\.Eval\.check_struct_invariant"
       assert code =~ ~r"var!\(result\)"
       assert code =~ ~r"BoundedStack"
-      assert code =~ ~r"my_inv_fn\(Bond\.Predicates\.__opaque__\(__bond_post_value__\)\)"
+      assert code =~ ~r"my_inv_fn\(__bond_post_value__\)"
       assert code =~ ~r"should_evaluate\?\(:invariants"
       # The %Mod{} / {:ok, %Mod{}} match no longer lives in the using module — it moved
       # into Bond.Runtime.Eval so Elixir's type checker can't flag the speculative struct
