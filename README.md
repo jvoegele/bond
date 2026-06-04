@@ -1,5 +1,7 @@
 # Bond
 
+[![CI](https://github.com/jvoegele/bond/actions/workflows/ci.yml/badge.svg)](https://github.com/jvoegele/bond/actions/workflows/ci.yml)
+
 <!-- README START -->
 
 Design By Contract for Elixir.
