@@ -55,6 +55,21 @@ defmodule Bond.InvariantTest do
     end
   end
 
+  describe "exit order (ECMA-367 §8.23.26)" do
+    test "post-invariant is evaluated before the postcondition" do
+      # overflowing_post violates BOTH its `@post must_shrink` postcondition and
+      # the `size_within_capacity` invariant on return. ECMA-367 evaluates the
+      # invariant (step 12) before the postcondition (step 13), so the invariant
+      # error must be the one raised. If the order regressed, a
+      # Bond.PostconditionError would surface instead.
+      stack = InvariantSmoke.new(2)
+
+      assert_raise Bond.InvariantError, fn ->
+        InvariantSmoke.overflowing_post(stack, :a)
+      end
+    end
+  end
+
   describe "{:ok, struct} return extraction" do
     test "passes when the wrapped struct satisfies all invariants" do
       assert {:ok, %InvariantSmoke{capacity: 3}} = InvariantSmoke.try_new(3)

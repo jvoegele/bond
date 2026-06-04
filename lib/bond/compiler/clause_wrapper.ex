@@ -9,9 +9,14 @@ defmodule Bond.Compiler.ClauseWrapper do
     2. Pre-eval call to the lifted precondition defp (if any).
     3. `old(...)` assignments at function entry.
     4. `super(...)` delegating to the user's original clause.
-    5. Post-eval call to the lifted postcondition defp (if any).
-    6. Post-invariant check on the captured result (if any).
+    5. Post-invariant check on the captured result (if any).
+    6. Post-eval call to the lifted postcondition defp (if any).
     7. Return the captured result.
+
+  Steps 1–2 and 5–6 follow the ECMA-367 §8.23.26 call-semantics order: the
+  invariant is evaluated before the precondition on entry and before the
+  postcondition on exit, so it brackets the call and is checked first at both
+  boundaries.
 
   Bond emits ONE set of lifted assertion defps per function (since contract
   semantics are uniform across clauses), and ONE wrapper clause per user clause
@@ -184,10 +189,17 @@ defmodule Bond.Compiler.ClauseWrapper do
     post_stmts = post_eval_stmts(call_params, post_fn_name, old_pairs, post_mode, pre_mode)
     return_stmt = quote(do: var!(result))
 
+    # Exit order follows ECMA-367 §8.23.26 "General Call Semantics": the class
+    # invariant (step 12) is evaluated BEFORE the postcondition (step 13). This
+    # mirrors the entry order, where the pre-invariant precedes the precondition
+    # (steps 6 then 7), so the invariant brackets the call and is checked first
+    # at both boundaries. Order doesn't affect correctness — the invariant is
+    # conjoined with the postcondition and `and` is commutative — but it fixes
+    # which violation surfaces first when both fail, matching Eiffel.
     pre_invariant_stmts ++
       pre_stmts ++
       old_assignments ++
-      [super_call] ++ post_stmts ++ post_invariant_stmts ++ [return_stmt]
+      [super_call] ++ post_invariant_stmts ++ post_stmts ++ [return_stmt]
   end
 
   defp pre_eval_stmts(_call_params, _name, :purge), do: []

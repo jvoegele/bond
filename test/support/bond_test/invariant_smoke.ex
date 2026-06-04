@@ -47,6 +47,17 @@ defmodule BondTest.InvariantSmoke do
     %{stack | items: [item, item, item, item | stack.items]}
   end
 
+  # Exit-order probe: on return BOTH the postcondition and the post-invariant
+  # are violated. The postcondition `must_shrink` is false (we add items, so the
+  # result is larger), and the result overflows `capacity`, violating the
+  # `size_within_capacity` invariant. Per ECMA-367 §8.23.26 the invariant (step
+  # 12) is evaluated before the postcondition (step 13), so the invariant error
+  # must surface. The exit-order test asserts that to lock in the ordering.
+  @post must_shrink: length(result.items) < length(stack.items)
+  def overflowing_post(%__MODULE__{} = stack, item) do
+    %{stack | items: [item, item, item, item | stack.items]}
+  end
+
   def bypass_invariants_via_defp(%__MODULE__{} = stack, item) do
     do_overflow(stack, item)
   end
