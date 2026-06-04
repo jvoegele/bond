@@ -90,7 +90,13 @@ defmodule Bond.NormCompatTest do
 
       assert result == :ok, "expected clean compile; got #{inspect(result)}"
 
-      refute Enum.any?(diagnostics, &String.contains?(&1.message, "call is ambiguous")),
+      # Reject both the <= 1.19 ("call is ambiguous") and 1.20+ ("conflicting ... import")
+      # wordings so a future regression surfaces on either Elixir.
+      refute Enum.any?(
+               diagnostics,
+               &(String.contains?(&1.message, "call is ambiguous") or
+                   String.contains?(&1.message, "conflicting"))
+             ),
              "expected no ambiguous-`@` diagnostic; got #{inspect(diagnostics)}"
     after
       :code.purge(BondTest.NormCompat.EscapeHatchScratch)
@@ -172,11 +178,20 @@ defmodule Bond.NormCompatTest do
     assert result == :compile_error,
            "expected Code.compile_string/1 to raise CompileError; got #{inspect(result)}"
 
-    assert Enum.any?(diagnostics, fn d ->
-             d.severity == :error and
-               String.contains?(d.message, "function @/1 imported from both") and
-               String.contains?(d.message, "call is ambiguous")
-           end),
-           "expected an ambiguous-import diagnostic for @/1; got #{inspect(diagnostics)}"
+    assert Enum.any?(diagnostics, &ambiguous_at_import?/1),
+           "expected an ambiguous/conflicting-import diagnostic for @/1; got #{inspect(diagnostics)}"
   end
+
+  # Whether `d` is the import-conflict error for `@/1`. Elixir reworded this
+  # diagnostic in 1.20: <= 1.19 says "function @/1 imported from both ... call is
+  # ambiguous"; 1.20+ says "conflicting @/1 import from modules ...". Accept either
+  # so the test spans the supported range.
+  defp ambiguous_at_import?(%{severity: :error, message: message}) do
+    String.contains?(message, "@/1") and
+      ((String.contains?(message, "imported from both") and
+          String.contains?(message, "call is ambiguous")) or
+         String.contains?(message, "conflicting"))
+  end
+
+  defp ambiguous_at_import?(_), do: false
 end

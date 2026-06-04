@@ -20,9 +20,14 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
-      # Spans the declared floor (1.16) through the current latest stable (1.19),
-      # pairing each minor with the highest OTP it supports. 1.19 supports OTP
-      # 26–28; we test against OTP 27 here — OTP 28 coverage is a future addition.
+      # Spans the declared floor (1.16) through the current latest stable (1.20).
+      # The Elixir axis is what drives the built-in type checker, so every supported
+      # minor runs `mix test` (and thus the type-checker regression guard in
+      # test/bond/type_checker_regression_test.exs, which is active from 1.18+).
+      # OTP is pinned to 27.2 across the newer legs for a stable, cached dimension —
+      # each pairing is within the minor's supported OTP range (1.18: 25–27, 1.19:
+      # 26–28, 1.20: 27–29). 1.20 was also verified locally on OTP 29. Bumping the
+      # newer legs to OTP 28/29 is a worthwhile follow-up (no OTP-28/29 leg yet).
       matrix:
         include:
           - elixir: "1.16.3"
@@ -32,6 +37,8 @@ jobs:
           - elixir: "1.18.3"
             otp: "27.2"
           - elixir: "1.19.5"
+            otp: "27.2"
+          - elixir: "1.20.0"
             otp: "27.2"
     env:
       MIX_ENV: test

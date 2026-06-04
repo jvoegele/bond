@@ -17,7 +17,27 @@ defmodule Bond.TypeCheckerRegressionTest do
   The test is self-validating: a deliberately-broken control module must produce a
   diagnostic, so the guard can't pass vacuously if `Code.with_diagnostics/1` or the
   checker ever stop surfacing warnings through this path.
+
+  Bond supports `~> 1.16`, but the set-theoretic checker only arrived in 1.17 and
+  only began emitting struct-field warnings in 1.18. Below that the control
+  produces no warning, so the module is skipped on a version floor. (A compile-time
+  empirical probe was tried but is unreliable: diagnostics from a nested
+  `Code.compile_string` aren't captured by `Code.with_diagnostics/1` during the
+  outer module compile — only at runtime, which is where the actual tests run.) The
+  `mix test` CI matrix runs this on every supported Elixir >= 1.18, so the guard
+  exercises each checker version where it is active, and the runtime self-check
+  below still proves non-vacuity per version.
   """
+
+  # The struct-field "unknown key" warning the self-check relies on landed in
+  # Elixir 1.18; gate the module there to avoid false failures on 1.16/1.17.
+  @checker_active Version.match?(System.version(), ">= 1.18.0")
+
+  unless @checker_active do
+    @moduletag skip:
+                 "built-in type-checker struct-field warnings require Elixir >= 1.18; " <>
+                   "running #{System.version()}"
+  end
 
   # Compiles `source` in isolation and returns the list of `:warning` diagnostics
   # the compiler (including the type checker) emits.
@@ -106,6 +126,8 @@ defmodule Bond.TypeCheckerRegressionTest do
   defp unique_mod(prefix), do: "#{prefix}#{System.unique_integer([:positive])}"
 
   test "the diagnostic capture actually catches type-checker warnings (self-check)" do
+    # Reached only when @checker_active (module is skipped otherwise), so the control
+    # must warn — proving the capture path is live and the main guard is non-vacuous.
     control = """
     defmodule #{unique_mod("BondTypeCheckControl")} do
       def bad(%URI{} = u), do: u.no_such_field
