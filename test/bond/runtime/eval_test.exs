@@ -1,8 +1,10 @@
 defmodule Bond.Runtime.EvalTest do
   @moduledoc false
 
-  use ExUnit.Case
+  # async: false — the runtime modes live in a process-global :persistent_term entry.
+  use ExUnit.Case, async: false
 
+  alias Bond.Config
   alias Bond.Runtime.Eval
 
   @info %{
@@ -16,28 +18,40 @@ defmodule Bond.Runtime.EvalTest do
     binding: [x: -1]
   }
 
+  # Each test starts from a clean slate: no `:bond` app-env keys (so a lazy seed yields
+  # `:unset` for every kind) and no leftover `:persistent_term` overrides.
+  setup do
+    reset_runtime_modes()
+    on_exit(&reset_runtime_modes/0)
+    :ok
+  end
+
+  defp reset_runtime_modes do
+    for kind <- [:preconditions, :postconditions, :invariants, :checks] do
+      Application.delete_env(:bond, kind)
+    end
+
+    Bond.Config.reset()
+  end
+
   describe "should_evaluate?/2" do
-    test "returns true when runtime config is unset and compile_default is true" do
-      Application.delete_env(:bond, :preconditions)
+    test "returns true when runtime mode is unset and compile_default is true" do
       assert Eval.should_evaluate?(:preconditions, true)
     end
 
-    test "returns false when runtime config is unset and compile_default is false" do
-      Application.delete_env(:bond, :preconditions)
+    test "returns false when runtime mode is unset and compile_default is false" do
       refute Eval.should_evaluate?(:preconditions, false)
     end
 
-    test "returns false when runtime config is false regardless of compile_default" do
-      Application.put_env(:bond, :preconditions, false)
-      on_exit(fn -> Application.delete_env(:bond, :preconditions) end)
+    test "returns false when runtime mode is false regardless of compile_default" do
+      Config.disable(:preconditions)
 
       refute Eval.should_evaluate?(:preconditions, true)
       refute Eval.should_evaluate?(:preconditions, false)
     end
 
-    test "returns true when runtime config is true regardless of compile_default" do
-      Application.put_env(:bond, :postconditions, true)
-      on_exit(fn -> Application.delete_env(:bond, :postconditions) end)
+    test "returns true when runtime mode is true regardless of compile_default" do
+      Config.enable(:postconditions)
 
       assert Eval.should_evaluate?(:postconditions, false)
       assert Eval.should_evaluate?(:postconditions, true)
@@ -45,23 +59,13 @@ defmodule Bond.Runtime.EvalTest do
   end
 
   describe "should_evaluate?/3 chain propagation" do
-    setup do
-      on_exit(fn ->
-        Application.delete_env(:bond, :preconditions)
-        Application.delete_env(:bond, :postconditions)
-        Application.delete_env(:bond, :invariants)
-      end)
-
-      :ok
-    end
-
     test "postconditions skipped when preconditions are runtime-off" do
-      Application.put_env(:bond, :preconditions, false)
+      Config.disable(:preconditions)
       refute Eval.should_evaluate?(:postconditions, true, %{preconditions: true})
     end
 
     test "invariants skipped when preconditions are runtime-off" do
-      Application.put_env(:bond, :preconditions, false)
+      Config.disable(:preconditions)
 
       refute Eval.should_evaluate?(:invariants, true, %{
                preconditions: true,
@@ -70,7 +74,7 @@ defmodule Bond.Runtime.EvalTest do
     end
 
     test "invariants skipped when postconditions are runtime-off" do
-      Application.put_env(:bond, :postconditions, false)
+      Config.disable(:postconditions)
 
       refute Eval.should_evaluate?(:invariants, true, %{
                preconditions: true,
@@ -79,8 +83,8 @@ defmodule Bond.Runtime.EvalTest do
     end
 
     test "higher kind runs when all lower kinds are runtime-on" do
-      Application.put_env(:bond, :preconditions, true)
-      Application.put_env(:bond, :postconditions, true)
+      Config.enable(:preconditions)
+      Config.enable(:postconditions)
 
       assert Eval.should_evaluate?(:invariants, true, %{
                preconditions: true,
@@ -90,23 +94,21 @@ defmodule Bond.Runtime.EvalTest do
 
     test "kind itself off short-circuits before chain propagation" do
       # When postconditions itself is off, the answer is false regardless of preconditions.
-      Application.put_env(:bond, :postconditions, false)
-      Application.put_env(:bond, :preconditions, true)
+      Config.disable(:postconditions)
+      Config.enable(:preconditions)
       refute Eval.should_evaluate?(:postconditions, true, %{preconditions: true})
     end
 
     test "checks are unaffected by chain settings" do
       # checks pass {} as chain_defaults, so disabling preconditions/postconditions has no effect.
-      Application.put_env(:bond, :preconditions, false)
-      Application.put_env(:bond, :postconditions, false)
+      Config.disable(:preconditions)
+      Config.disable(:postconditions)
       assert Eval.should_evaluate?(:checks, true, %{})
     end
 
     test "chain_defaults compile-time defaults are honoured" do
-      # No put_env at all; postconditions defaults to its compile-time mode, preconditions
-      # too. If we pass preconditions compile-default false, postconditions should be
-      # skipped — even though preconditions has no put_env.
-      Application.delete_env(:bond, :preconditions)
+      # No runtime override; preconditions is `:unset`, so its chain compile-default applies.
+      # Passing a preconditions compile-default of false should skip postconditions.
       refute Eval.should_evaluate?(:postconditions, true, %{preconditions: false})
     end
   end
@@ -114,18 +116,8 @@ defmodule Bond.Runtime.EvalTest do
   describe "should_evaluate?/3 propagation log" do
     import ExUnit.CaptureLog
 
-    setup do
-      on_exit(fn ->
-        Application.delete_env(:bond, :preconditions)
-        Application.delete_env(:bond, :postconditions)
-        Application.delete_env(:bond, :invariants)
-      end)
-
-      :ok
-    end
-
     test "logs once when propagation causes a higher kind to be skipped" do
-      Application.put_env(:bond, :preconditions, false)
+      Config.disable(:preconditions)
 
       # Run in a fresh process so the Process-dict dedup marker starts clean.
       task =
@@ -153,7 +145,7 @@ defmodule Bond.Runtime.EvalTest do
     end
 
     test "does not log when the kind itself is just off (no propagation)" do
-      Application.put_env(:bond, :postconditions, false)
+      Config.disable(:postconditions)
 
       task =
         Task.async(fn ->
@@ -166,9 +158,9 @@ defmodule Bond.Runtime.EvalTest do
     end
 
     test "different (higher, lower) pairs each get their own one-time log" do
-      # Only preconditions is off; the higher kinds themselves are on (no put_env), so
-      # propagation through to preconditions fires for both pairs.
-      Application.put_env(:bond, :preconditions, false)
+      # Only preconditions is off; the higher kinds themselves are on (unset -> compile
+      # default), so propagation through to preconditions fires for both pairs.
+      Config.disable(:preconditions)
 
       task =
         Task.async(fn ->

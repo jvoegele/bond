@@ -250,7 +250,9 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       # call boundary, each lifted defp carries a nowarn attribute so a `@pre`/`@post`
       # duplicating a typespec-implied guard doesn't surface a pattern_match warning.
       nowarns = nowarn_function_entries(ast)
-      defp_arities = lifted_defp_clauses(ast) |> Enum.map(fn {name, params, _} -> {name, length(params)} end)
+
+      defp_arities =
+        lifted_defp_clauses(ast) |> Enum.map(fn {name, params, _} -> {name, length(params)} end)
 
       # Exactly one nowarn per lifted defp, matching name and arity.
       assert Enum.sort(nowarns) == Enum.sort(defp_arities)
@@ -360,8 +362,8 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       code = Macro.to_string(elem(override, 2) |> List.last() |> Keyword.get(:do))
 
       # Override gates the evaluate call with should_evaluate?, passing the compile-time
-      # default of `false`. Eval's should_evaluate? feeds that into
-      # `Application.get_env(:bond, :preconditions, false)` internally.
+      # default of `false`. Eval's should_evaluate? uses that default when the kind's
+      # runtime mode is `:unset` (see Bond.Runtime.Eval and Bond.Config).
       assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:preconditions,\s*false"
 
       assert code =~

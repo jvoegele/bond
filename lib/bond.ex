@@ -320,15 +320,18 @@ defmodule Bond do
 
   > #### Conditional compilation {: .info}
   >
-  > `check` honours the `:bond, :checks` application config:
+  > `check` honours the `:bond, :checks` configuration:
   >
   > - `:purge` — `check` calls in modules that `use Bond` expand to `:ok` at compile time and
   >   the wrapped expression is **not evaluated** at all. Don't rely on side effects in checks.
   > - `true` (default) — `check` calls expand to a runtime-guarded evaluation; the guard reads
-  >   `Application.get_env(:bond, :checks, true)` on every call and evaluates unless the value
-  >   is `false`.
+  >   the runtime mode for `:checks` on every call and evaluates unless it is `false`.
   > - `false` — same shape as `true`, but the runtime default flips to `false` (off unless
-  >   `Application.put_env/3` is called to turn it on).
+  >   re-enabled).
+  >
+  > Compile-time defaults come from `config :bond, checks: …` (and `use Bond` opts). To toggle
+  > at runtime, use `Bond.Config.enable(:checks)` / `Bond.Config.disable(:checks)` —
+  > `Application.put_env/3` after the first contracted call is not picked up. See `Bond.Config`.
   """
   @spec check(assertion_expression()) :: as_boolean(any())
   @spec check(Keyword.t(assertion_expression())) :: list(as_boolean(any()))
