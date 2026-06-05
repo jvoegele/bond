@@ -630,7 +630,7 @@ enable PBT:
 ```elixir
 def deps do
   [
-    {:bond, "~> 1.0"},
+    {:bond, "~> 1.1"},
     {:stream_data, "~> 1.0", only: [:dev, :test]}
   ]
 end
@@ -661,7 +661,7 @@ on is safe across upgrades, those two guides are the source of truth.
 ```elixir
 def deps do
   [
-    {:bond, "~> 1.0"}
+    {:bond, "~> 1.1"}
   ]
 end
 ```
