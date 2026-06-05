@@ -146,15 +146,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-downstream-build-
       # PLT cache is keyed on Bond source so it rebuilds when the library API changes,
-      # not just when mix.lock changes.
+      # not just when mix.lock changes. No `restore-keys`: a partial restore would bring
+      # back a PLT built against a previous Bond, and dialyxir does NOT re-hash
+      # `plt_add_apps` modules (Bond) to detect that — it would report "PLT is up to date"
+      # and analyse the consumer against stale Bond specs. On a Bond source change we want
+      # a key miss to mean "build a fresh PLT", not "reuse the newest stale one".
       - name: Cache consumer PLT
         uses: actions/cache@v5
         with:
           path: integration/consumer/priv/plts
           key: ${{ runner.os }}-downstream-plt-${{ hashFiles('lib/**/*.ex', 'integration/consumer/mix.lock', 'mix.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-downstream-plt-
       - run: mix deps.get
+      # Bond is a PATH dependency, so a change to its source does not bump mix.lock and the
+      # restored `_build` cache keeps a stale Bond beam. Force-recompile it so the consumer
+      # (and the freshly-built PLT) are analysed against the current Bond.
+      - run: mix deps.compile bond --force
       # The core of issue #2: prove the code Bond generates into a using module
       # is warning-free and Dialyzer-clean in a real consumer.
       - run: mix compile --warnings-as-errors
