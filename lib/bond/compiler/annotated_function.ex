@@ -418,6 +418,14 @@ defmodule Bond.Compiler.AnnotatedFunction do
         ],
         &is_nil/1
       )
+      # Each lifted-defp builder emits a `@dialyzer {:nowarn_function, ...}` attribute
+      # immediately followed by the `defp` — a two-statement `__block__`. Flatten those
+      # into individual top-level statements so the module body holds the attribute and
+      # the defp as siblings (rather than nested blocks).
+      |> Enum.flat_map(fn
+        {:__block__, _, stmts} -> stmts
+        other -> [other]
+      end)
 
     quote file: first_clause.env.file, line: first_clause.env.line do
       defoverridable([{unquote(fun), unquote(arity)}])
@@ -459,8 +467,17 @@ defmodule Bond.Compiler.AnnotatedFunction do
        ) do
     body = Assertion.assertions_body(assertions, function_info)
     params = call_params ++ extra_params
+    arity = length(params)
 
     quote file: env.file, line: env.line do
+      # Suppress Dialyzer warnings for this generated assertion defp rather than widening
+      # the wrapper's argument types through `Bond.Predicates.__opaque__/1` at the call
+      # boundary. A `@pre`/`@post` that duplicates a typespec-implied guard (e.g.
+      # `is_binary(x)` on a `binary()` argument) makes the `false ->` branch of the
+      # assertion's `and/2` expansion appear dead; nowarn silences that pattern_match
+      # warning at zero runtime cost. Because the assertion result is `term()`-checked in
+      # `Bond.Runtime.Eval.check_assertion/3`, little real Dialyzer coverage is lost.
+      @dialyzer {:nowarn_function, [{unquote(name), unquote(arity)}]}
       defp unquote(name)(unquote_splicing(params)) do
         unquote(body)
       end

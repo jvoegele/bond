@@ -20,9 +20,14 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
-      # Spans the declared floor (1.16) through the current latest stable (1.19),
-      # pairing each minor with the highest OTP it supports. 1.19 supports OTP
-      # 26–28; we test against OTP 27 here — OTP 28 coverage is a future addition.
+      # Spans the declared floor (1.16) through the current latest stable (1.20).
+      # The Elixir axis is what drives the built-in type checker, so every supported
+      # minor runs `mix test` (and thus the type-checker regression guard in
+      # test/bond/type_checker_regression_test.exs, which is active from 1.18+).
+      # Each pairing is within the minor's supported OTP range (1.18: 25–27, 1.19:
+      # 26–28, 1.20: 27–29). 1.16–1.19 pin OTP 27.2 (stable, cached); the 1.20 leg
+      # runs OTP 29.0.1 — the toolchain verified locally and the matrix's first
+      # OTP-28/29-era coverage.
       matrix:
         include:
           - elixir: "1.16.3"
@@ -33,6 +38,8 @@ jobs:
             otp: "27.2"
           - elixir: "1.19.5"
             otp: "27.2"
+          - elixir: "1.20.0"
+            otp: "29.0.1"
     env:
       MIX_ENV: test
     steps:
@@ -139,15 +146,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-downstream-build-
       # PLT cache is keyed on Bond source so it rebuilds when the library API changes,
-      # not just when mix.lock changes.
+      # not just when mix.lock changes. No `restore-keys`: a partial restore would bring
+      # back a PLT built against a previous Bond, and dialyxir does NOT re-hash
+      # `plt_add_apps` modules (Bond) to detect that — it would report "PLT is up to date"
+      # and analyse the consumer against stale Bond specs. On a Bond source change we want
+      # a key miss to mean "build a fresh PLT", not "reuse the newest stale one".
       - name: Cache consumer PLT
         uses: actions/cache@v5
         with:
           path: integration/consumer/priv/plts
           key: ${{ runner.os }}-downstream-plt-${{ hashFiles('lib/**/*.ex', 'integration/consumer/mix.lock', 'mix.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-downstream-plt-
       - run: mix deps.get
+      # Bond is a PATH dependency, so a change to its source does not bump mix.lock and the
+      # restored `_build` cache keeps a stale Bond beam. Force-recompile it so the consumer
+      # (and the freshly-built PLT) are analysed against the current Bond.
+      - run: mix deps.compile bond --force
       # The core of issue #2: prove the code Bond generates into a using module
       # is warning-free and Dialyzer-clean in a real consumer.
       - run: mix compile --warnings-as-errors

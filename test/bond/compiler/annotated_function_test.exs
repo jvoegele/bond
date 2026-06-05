@@ -196,17 +196,17 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
         code = Macro.to_string(do_block)
         assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:preconditions,\s*true"
 
-        # Lifted-defp arguments are routed through `Bond.Predicates.__opaque__/1` so the
-        # wrapper's narrowed parameter type doesn't propagate into the lifted defp —
-        # otherwise Dialyzer can prove user-assertion sub-branches dead.
+        # Lifted-defp arguments flow in unwrapped; the lifted defps carry
+        # `@dialyzer {:nowarn_function, ...}` to suppress narrowed-type warnings instead of
+        # laundering each argument through `Bond.Predicates.__opaque__/1`.
         assert code =~
-                 ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__new__1\(Bond\.Predicates\.__opaque__\(input\)\)\s+end\)/s
+                 ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__new__1\(input\)\s+end\)/s
 
         assert code =~ ~r"var!\(result\) = super\(input\)"
         assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:postconditions,\s*true"
 
         assert code =~
-                 ~r/Bond\.Runtime\.Eval\.evaluate_postconditions\(fn ->\s+__bond_postconditions__new__1\(\s*Bond\.Predicates\.__opaque__\(input\),\s*Bond\.Predicates\.__opaque__\(var!\(result\)\)\s*\)\s+end\)/s
+                 ~r/Bond\.Runtime\.Eval\.evaluate_postconditions\(fn ->\s+__bond_postconditions__new__1\(\s*input,\s*var!\(result\)\s*\)\s+end\)/s
 
         assert code =~ ~r"var!\(result\)$"
       end)
@@ -240,6 +240,24 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       post_code = Macro.to_string(post_body)
       assert post_code =~ ~r"import Bond\.Predicates"
       assert post_code =~ ~r"Bond\.Runtime\.Eval\.check_assertion\(\s*result < x,"
+    end
+
+    test "emits a @dialyzer nowarn_function attribute for each lifted defp",
+         %{two_clause_annotated_function: annotated_function} do
+      ast = AnnotatedFunction.apply_contract(annotated_function)
+
+      # Instead of laundering argument types through `Bond.Predicates.__opaque__/1` at the
+      # call boundary, each lifted defp carries a nowarn attribute so a `@pre`/`@post`
+      # duplicating a typespec-implied guard doesn't surface a pattern_match warning.
+      nowarns = nowarn_function_entries(ast)
+
+      defp_arities =
+        lifted_defp_clauses(ast) |> Enum.map(fn {name, params, _} -> {name, length(params)} end)
+
+      # Exactly one nowarn per lifted defp, matching name and arity.
+      assert Enum.sort(nowarns) == Enum.sort(defp_arities)
+      assert {:__bond_preconditions__new__1, 1} in nowarns
+      assert {:__bond_postconditions__new__1, 2} in nowarns
     end
   end
 
@@ -344,12 +362,12 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       code = Macro.to_string(elem(override, 2) |> List.last() |> Keyword.get(:do))
 
       # Override gates the evaluate call with should_evaluate?, passing the compile-time
-      # default of `false`. Eval's should_evaluate? feeds that into
-      # `Application.get_env(:bond, :preconditions, false)` internally.
+      # default of `false`. Eval's should_evaluate? uses that default when the kind's
+      # runtime mode is `:unset` (see Bond.Runtime.Eval and Bond.Config).
       assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:preconditions,\s*false"
 
       assert code =~
-               ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__add__2\(Bond\.Predicates\.__opaque__\(x\), Bond\.Predicates\.__opaque__\(y\)\)\s+end\)/s
+               ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__add__2\(x, y\)\s+end\)/s
     end
 
     test "preconditions: true — override emits evaluate_preconditions with true default",
@@ -366,12 +384,12 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:preconditions,\s*true"
 
       assert code =~
-               ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__add__2\(Bond\.Predicates\.__opaque__\(x\), Bond\.Predicates\.__opaque__\(y\)\)\s+end\)/s
+               ~r/Bond\.Runtime\.Eval\.evaluate_preconditions\(fn ->\s+__bond_preconditions__add__2\(x, y\)\s+end\)/s
 
       assert code =~ ~r"Bond\.Runtime\.Eval\.should_evaluate\?\(\s*:postconditions,\s*true"
 
       assert code =~
-               ~r/Bond\.Runtime\.Eval\.evaluate_postconditions\(fn ->\s+__bond_postconditions__add__2\(\s*Bond\.Predicates\.__opaque__\(x\),\s*Bond\.Predicates\.__opaque__\(y\),\s*Bond\.Predicates\.__opaque__\(var!\(result\)\)\s*\)\s+end\)/s
+               ~r/Bond\.Runtime\.Eval\.evaluate_postconditions\(fn ->\s+__bond_postconditions__add__2\(\s*x,\s*y,\s*var!\(result\)\s*\)\s+end\)/s
     end
 
     test "function with only preconditions: purging postconditions still emits override" do
@@ -462,6 +480,17 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
     |> Enum.filter(fn
       {:def, _, _} -> true
       _ -> false
+    end)
+  end
+
+  # Extracts `{name, arity}` for each `@dialyzer {:nowarn_function, [{name, arity}]}`
+  # attribute in `ast`.
+  defp nowarn_function_entries(ast) do
+    ast
+    |> block_clauses()
+    |> Enum.flat_map(fn
+      {:@, _, [{:dialyzer, _, [{:nowarn_function, entries}]}]} -> entries
+      _ -> []
     end)
   end
 

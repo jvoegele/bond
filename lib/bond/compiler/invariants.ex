@@ -184,11 +184,11 @@ defmodule Bond.Compiler.Invariants do
     for sp <- struct_params do
       arg_var = subject_var(sp)
 
-      # `__opaque__` widens the subject's narrowed type at the lifted-defp call boundary —
-      # without this, an `@invariant` like `subject.capacity >= 0` on a `non_neg_integer()`
-      # field would let Dialyzer prove `and`/`or` branches in the assertion expression dead
-      # under a `pattern_match` warning. Same motivation as
-      # `Bond.Compiler.ClauseWrapper.opaque_args/1`.
+      # The lifted invariant defp carries `@dialyzer {:nowarn_function, ...}` (see
+      # `build_lifted_defp/5`), so the subject's narrowed type can flow in unwrapped:
+      # any `pattern_match` warning from an `@invariant` duplicating a field's typespec
+      # (e.g. `subject.capacity >= 0` on a `non_neg_integer()` field) is suppressed at
+      # the defp rather than laundered at the call boundary.
       quote do
         if Bond.Runtime.Eval.should_evaluate?(
              :invariants,
@@ -196,7 +196,7 @@ defmodule Bond.Compiler.Invariants do
              unquote(Macro.escape(chain))
            ) do
           Bond.Runtime.Eval.evaluate_invariants(fn ->
-            unquote(name)(Bond.Predicates.__opaque__(unquote(arg_var)))
+            unquote(name)(unquote(arg_var))
           end)
         end
       end
@@ -236,8 +236,9 @@ defmodule Bond.Compiler.Invariants do
   def post_invariant_stmts(name, mode, struct_module, pre_mode, post_mode) do
     chain = %{preconditions: pre_mode, postconditions: post_mode}
 
-    # `__opaque__` widens the post-extracted subject's type at the lifted-defp call
-    # boundary — see the corresponding comment in `all_pre_invariant_stmts/5`.
+    # The post-extracted subject flows into the lifted defp unwrapped; the defp's
+    # `@dialyzer {:nowarn_function, ...}` suppresses any narrowed-type warning — see
+    # the corresponding note in `all_pre_invariant_stmts/5`.
     [
       quote do
         if Bond.Runtime.Eval.should_evaluate?(
@@ -249,7 +250,7 @@ defmodule Bond.Compiler.Invariants do
             var!(result),
             unquote(struct_module),
             fn __bond_post_value__ ->
-              unquote(name)(Bond.Predicates.__opaque__(__bond_post_value__))
+              unquote(name)(__bond_post_value__)
             end
           )
         end
@@ -274,6 +275,12 @@ defmodule Bond.Compiler.Invariants do
     body = Assertion.invariants_body(invariants, function_info)
 
     quote file: env.file, line: env.line do
+      # Suppress Dialyzer warnings for this generated defp instead of widening the
+      # caller's argument types through `Bond.Predicates.__opaque__/1`. An `@invariant`
+      # that duplicates a field's typespec-implied fact makes `and`/`or` branches in the
+      # assertion appear dead; nowarn silences that at zero runtime cost. The subject is
+      # already `term()`-checked at the call site, so little real coverage is lost.
+      @dialyzer {:nowarn_function, [{unquote(name), 1}]}
       defp unquote(name)(var!(bond_invariant_value)) do
         unquote(body)
       end

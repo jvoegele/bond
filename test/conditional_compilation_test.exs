@@ -9,12 +9,18 @@ defmodule BondTest.ConditionalCompilationTest do
   use ExUnit.Case, async: false
 
   setup do
+    # Clear the persistent_term runtime-modes cache before each test so a prior test's
+    # seed/override doesn't leak in. App-env keys are cleaned up after each test (they
+    # double as compile-time config for the modules defined inside these tests).
+    Bond.Config.reset()
+
     on_exit(fn ->
       Application.delete_env(:bond, :preconditions)
       Application.delete_env(:bond, :postconditions)
       Application.delete_env(:bond, :checks)
       Application.delete_env(:bond, :invariants)
       Application.delete_env(:bond, :overrides)
+      Bond.Config.reset()
     end)
   end
 
@@ -32,7 +38,7 @@ defmodule BondTest.ConditionalCompilationTest do
       assert PreFalse.positive(-1) == -1
     end
 
-    test "preconditions: false but runtime put_env true — error IS raised" do
+    test "preconditions: false but Bond.Config.enable at runtime — error IS raised" do
       Application.put_env(:bond, :preconditions, false)
 
       defmodule PreFalseFlippable do
@@ -42,8 +48,8 @@ defmodule BondTest.ConditionalCompilationTest do
         def positive(x), do: x
       end
 
-      # Flip runtime config to true; override re-engages.
-      Application.put_env(:bond, :preconditions, true)
+      # Flip runtime mode to enabled; override re-engages.
+      Bond.Config.enable(:preconditions)
       assert_raise Bond.PreconditionError, fn -> PreFalseFlippable.positive(-1) end
     end
 
@@ -62,21 +68,21 @@ defmodule BondTest.ConditionalCompilationTest do
 
     test "invariants: false at runtime — no InvariantError is raised" do
       # The SubjectInvariantSmoke fixture was compiled with the default
-      # `invariants: true`; flip it off at runtime via put_env. With invariants
+      # `invariants: true`; flip it off at runtime via Bond.Config. With invariants
       # disabled, an invariant-violating struct passes through (push/2 returns
       # `{:error, :full}` because items already exceed capacity, but no
       # InvariantError raises).
-      Application.put_env(:bond, :invariants, false)
+      Bond.Config.disable(:invariants)
       invalid = %BondTest.SubjectInvariantSmoke{items: [:a, :b, :c], capacity: 1}
       assert {:error, :full} = BondTest.SubjectInvariantSmoke.push(invalid, :d)
     end
 
     test "invariants flipped false then true at runtime — InvariantError returns" do
-      Application.put_env(:bond, :invariants, false)
+      Bond.Config.disable(:invariants)
       invalid = %BondTest.SubjectInvariantSmoke{items: [:a, :b, :c], capacity: 1}
       assert {:error, :full} = BondTest.SubjectInvariantSmoke.push(invalid, :d)
 
-      Application.put_env(:bond, :invariants, true)
+      Bond.Config.enable(:invariants)
 
       assert_raise Bond.InvariantError, fn ->
         BondTest.SubjectInvariantSmoke.push(invalid, :d)
@@ -137,7 +143,7 @@ defmodule BondTest.ConditionalCompilationTest do
       assert_raise Bond.PreconditionError, fn -> DefaultPre.positive(-1) end
     end
 
-    test "Application.put_env(:bond, :preconditions, false) disables eval at runtime" do
+    test "Bond.Config.disable/enable toggles eval at runtime" do
       defmodule RuntimeToggle do
         use Bond
 
@@ -145,15 +151,15 @@ defmodule BondTest.ConditionalCompilationTest do
         def positive(x), do: x
       end
 
-      # Before put_env: evaluates.
+      # By default: evaluates.
       assert_raise Bond.PreconditionError, fn -> RuntimeToggle.positive(-1) end
 
-      # After put_env false: skips.
-      Application.put_env(:bond, :preconditions, false)
+      # After disable: skips.
+      Bond.Config.disable(:preconditions)
       assert RuntimeToggle.positive(-1) == -1
 
       # Toggle back: evaluates again.
-      Application.put_env(:bond, :preconditions, true)
+      Bond.Config.enable(:preconditions)
       assert_raise Bond.PreconditionError, fn -> RuntimeToggle.positive(-1) end
     end
   end
@@ -285,7 +291,7 @@ defmodule BondTest.ConditionalCompilationTest do
       refute_received {:check_ran, ^ref}
 
       # Flip runtime to true: expression evaluated.
-      Application.put_env(:bond, :checks, true)
+      Bond.Config.enable(:checks)
       assert ChecksFalse.f(parent, ref) == :ok
       assert_received {:check_ran, ^ref}
     end

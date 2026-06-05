@@ -140,6 +140,119 @@ defmodule Bench.Check.Purge do
   end
 end
 
+# -----------------------------------------------------------------------------
+# Wide-signature @pre + @post with old() — REAL generated code, the case the
+# decomposition predicts benefits most. The lifted defps' `binding()` carries
+# the full parameter list (+ result + olds): pre defp sees a..f (6 vars), post
+# defp sees a..f + result + old(a) (8 vars). Each assertion references only a
+# couple of them (pre: a; post: result, old(a)), so referenced-only trimming
+# should drop ~5 and ~6 vars of per-call snapshot respectively.
+# -----------------------------------------------------------------------------
+
+defmodule Bench.PlainWide do
+  def f(a, b, c, d, e, f), do: a + b + c + d + e + f
+end
+
+defmodule Bench.PostWide.True do
+  use Bond, preconditions: true, postconditions: true, checks: :purge, invariants: :purge
+  @pre is_integer(a)
+  @post is_integer(result) and result >= old(a)
+  def f(a, b, c, d, e, f), do: a + b + c + d + e + f
+end
+
+defmodule Bench.PostWide.Purge do
+  use Bond, preconditions: :purge, postconditions: :purge, checks: :purge, invariants: :purge
+  @pre is_integer(a)
+  @post is_integer(result) and result >= old(a)
+  def f(a, b, c, d, e, f), do: a + b + c + d + e + f
+end
+
+# -----------------------------------------------------------------------------
+# Decomposition: what does the assertion-eval SUCCESS path actually cost?
+#
+# The real `@pre true` row above bundles: should_evaluate? (persistent_term) +
+# closure alloc + evaluate_assertions (Process.get/put + try frame) + the lifted
+# defp body, whose hot cost is `check_assertion(expr, info, binding())`. This
+# section isolates the THIRD argument — the per-call `binding()` snapshot — which
+# is built eagerly on every successful evaluation and discarded unless the
+# assertion fails. All variants do identical surrounding work (10 locals + a
+# tuple return, so `binding()` carries 11 entries); they differ ONLY in how the
+# failure context is passed:
+#
+#   work       — baseline: the surrounding work, NO assertion call
+#   eager_full — current Bond shape: eager binding() of the full scope
+#   eager_ref  — eager, but only the assertion-referenced var: [x: x]
+#   lazy_ref   — proposed: a 0-arity thunk capturing only x, invoked on failure
+#   empty_bind — lower bound: assertion call with [] (no snapshot at all)
+#
+# Reads:  binding() cost  ≈ eager_full − eager_ref   (same call, list size differs)
+#         thunk vs list   ≈ lazy_ref   − eager_ref
+#         check/3 floor    ≈ empty_bind − work
+# -----------------------------------------------------------------------------
+
+defmodule Bench.Decomp do
+  @moduledoc false
+
+  # Synthetic analog of Bond.Runtime.Eval.check_assertion/3: multi-clause on
+  # false/nil so the success clause ignores the third arg. On the (common)
+  # success path the binding is pure waste — this is what we're measuring.
+  def check(false, info, bind), do: throw({:assertion_failure, info, bind})
+  def check(nil, info, bind), do: throw({:assertion_failure, info, bind})
+  def check(_ok, _info, _bind), do: :ok
+
+  # Lazy variant: the third arg is a 0-arity thunk, invoked only on failure.
+  def check_lazy(false, info, fun), do: throw({:assertion_failure, info, fun.()})
+  def check_lazy(nil, info, fun), do: throw({:assertion_failure, info, fun.()})
+  def check_lazy(_ok, _info, _fun), do: :ok
+
+  @info %{kind: :precondition, label: nil, expression: "is_number(x)", line: 1}
+
+  def work(x) do
+    a1 = x + 1; a2 = x + 2; a3 = x + 3; a4 = x + 4; a5 = x + 5
+    a6 = x + 6; a7 = x + 7; a8 = x + 8; a9 = x + 9; a10 = x + 10
+    {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10}
+  end
+
+  def eager_full(x) do
+    a1 = x + 1; a2 = x + 2; a3 = x + 3; a4 = x + 4; a5 = x + 5
+    a6 = x + 6; a7 = x + 7; a8 = x + 8; a9 = x + 9; a10 = x + 10
+    check(is_number(x), @info, binding())
+    {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10}
+  end
+
+  def eager_ref(x) do
+    a1 = x + 1; a2 = x + 2; a3 = x + 3; a4 = x + 4; a5 = x + 5
+    a6 = x + 6; a7 = x + 7; a8 = x + 8; a9 = x + 9; a10 = x + 10
+    check(is_number(x), @info, x: x)
+    {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10}
+  end
+
+  def lazy_ref(x) do
+    a1 = x + 1; a2 = x + 2; a3 = x + 3; a4 = x + 4; a5 = x + 5
+    a6 = x + 6; a7 = x + 7; a8 = x + 8; a9 = x + 9; a10 = x + 10
+    check_lazy(is_number(x), @info, fn -> [x: x] end)
+    {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10}
+  end
+
+  def empty_bind(x) do
+    a1 = x + 1; a2 = x + 2; a3 = x + 3; a4 = x + 4; a5 = x + 5
+    a6 = x + 6; a7 = x + 7; a8 = x + 8; a9 = x + 9; a10 = x + 10
+    check(is_number(x), @info, [])
+    {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10}
+  end
+
+  # Lazy FULL binding: preserves exact error semantics (the whole scope on
+  # failure) but defers the snapshot into a thunk. The closure still captures
+  # all 11 vars eagerly on the success path, so this measures "closure capture
+  # of N" vs "eager list build of N".
+  def lazy_full(x) do
+    a1 = x + 1; a2 = x + 2; a3 = x + 3; a4 = x + 4; a5 = x + 5
+    a6 = x + 6; a7 = x + 7; a8 = x + 8; a9 = x + 9; a10 = x + 10
+    check_lazy(is_number(x), @info, fn -> binding() end)
+    {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10}
+  end
+end
+
 # =============================================================================
 # Measurement harness
 # =============================================================================
@@ -213,5 +326,18 @@ Bench.section("check/1 — check-only fixture")
 Bench.time(":purge", fn -> Bench.Check.Purge.f(42) end)
 Bench.time("true (enabled)", fn -> Bench.Check.True.f(42) end)
 Bench.time("false (runtime-disabled)", fn -> Bench.Check.False.f(42) end)
+
+Bench.section("@pre + @post wide signature (f/6) with old() — REAL generated code")
+Bench.time("plain f/6 (no Bond)", fn -> Bench.PlainWide.f(1, 2, 3, 4, 5, 6) end)
+Bench.time(":purge", fn -> Bench.PostWide.Purge.f(1, 2, 3, 4, 5, 6) end)
+Bench.time("true (enabled)", fn -> Bench.PostWide.True.f(1, 2, 3, 4, 5, 6) end)
+
+Bench.section("Decomposition — assertion-eval success path (11 vars in scope)")
+Bench.time("work (no check call)", fn -> Bench.Decomp.work(42) end)
+Bench.time("eager_full binding()", fn -> Bench.Decomp.eager_full(42) end)
+Bench.time("eager_ref [x: x]", fn -> Bench.Decomp.eager_ref(42) end)
+Bench.time("lazy_ref fn -> [x: x]", fn -> Bench.Decomp.lazy_ref(42) end)
+Bench.time("lazy_full fn -> binding()", fn -> Bench.Decomp.lazy_full(42) end)
+Bench.time("empty_bind []", fn -> Bench.Decomp.empty_bind(42) end)
 
 IO.puts("")

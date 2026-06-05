@@ -153,11 +153,20 @@ defmodule Bond.Compiler.Assertion do
         # the falsy branch unreachable when the user's expression is statically `true`
         # (e.g. `@pre is_binary(x)` on a `@spec`-narrowed argument), producing Pattern:
         # `false`, Type: `true` warnings in downstream apps.
+        #
+        # The failure binding is passed as a 0-arity thunk, not an eager `binding()`. A bare
+        # `binding()` builds a keyword list of every variable in this defp's scope (the whole
+        # parameter list, plus `result` and every `old(...)` capture) on EVERY successful
+        # evaluation and discards it unless the assertion fails — ~8 ns per in-scope variable
+        # of pure waste on the hot path. Wrapping it in `fn -> binding() end` captures the
+        # variables cheaply (pointers, ~1 ns each) but defers the list construction to
+        # `check_assertion/3`'s failure clauses, which almost never run. Error contents are
+        # identical; see the bench `bench/runtime_check_overhead.exs` decomposition section.
         quote do
           Bond.Runtime.Eval.check_assertion(
             unquote(expression),
             unquote(Macro.escape(assertion_info)),
-            binding()
+            fn -> binding() end
           )
         end
       end
@@ -206,14 +215,15 @@ defmodule Bond.Compiler.Assertion do
 
         # See the corresponding comment in `assertions_body/2` — the if/throw lives in
         # `Bond.Runtime.Eval.check_assertion/3` so Dialyzer can't prove the falsy branch
-        # unreachable for tautological invariants.
+        # unreachable for tautological invariants, and the failure binding is deferred via a
+        # `fn -> binding() end` thunk so the snapshot is only built when an invariant fails.
         quote do
           unquote(subject_var) = var!(bond_invariant_value)
 
           Bond.Runtime.Eval.check_assertion(
             unquote(expression),
             unquote(Macro.escape(assertion_info)),
-            binding()
+            fn -> binding() end
           )
         end
       end
@@ -252,14 +262,16 @@ defmodule Bond.Compiler.Assertion do
 
     # `check_value/3` returns the expression's value on success (so `check expr` evaluates
     # to `expr`'s value) and throws on failure, with the same Dialyzer-laundering motivation
-    # as `check_assertion/3`.
+    # as `check_assertion/3`. The failure binding is deferred via a `fn -> binding() end`
+    # thunk: `check/1` runs inline in the user's function, so a bare `binding()` would snapshot
+    # the user's ENTIRE local scope on every check — the thunk builds it only on failure.
     quote do
       import Bond.Predicates
 
       Bond.Runtime.Eval.check_value(
         unquote(expression),
         unquote(Macro.escape(assertion_info)),
-        binding()
+        fn -> binding() end
       )
     end
   end

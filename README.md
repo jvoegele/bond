@@ -351,8 +351,8 @@ of three values:
 
 | Value     | Compiled? | Runtime behaviour                                   | Doc section? |
 |-----------|-----------|-----------------------------------------------------|--------------|
-| `true`    | yes       | evaluated unless `Application.put_env/3` flips it   | yes          |
-| `false`   | yes       | skipped unless `Application.put_env/3` flips it     | yes          |
+| `true`    | yes       | evaluated unless disabled via `Bond.Config`         | yes          |
+| `false`   | yes       | skipped unless enabled via `Bond.Config`            | yes          |
 | `:purge`  | no        | n/a — there is no code to run                       | no           |
 
 The keys are `:preconditions`, `:postconditions`, `:invariants`, and
@@ -386,11 +386,10 @@ output might really be the caller's fault, not the callee's. Same for
   without removing the code, use `false` instead of `:purge`.
 
 - **Runtime.** If a lower kind is `false` at runtime
-  (`Application.put_env(:bond, :preconditions, false)`), the higher
-  kinds are also skipped — even if they're set to `true` themselves.
-  Bond emits a one-time-per-process `Logger.warning` the first time
-  this happens for a given (higher, lower) pair, so the diagnostic is
-  visible.
+  (`Bond.Config.disable(:preconditions)`), the higher kinds are also
+  skipped — even if they're set to `true` themselves. Bond emits a
+  one-time-per-process `Logger.warning` the first time this happens for
+  a given (higher, lower) pair, so the diagnostic is visible.
 
 `:checks` is *independent* of the chain. A `check/1` is an internal
 assertion about your computation, not a contract with a caller, so it
@@ -410,33 +409,53 @@ config :bond, preconditions: :purge   # postconditions and invariants still :tru
 ### Runtime toggling
 
 When a kind is compiled with `true` or `false`, Bond emits a runtime
-guard on every contract evaluation that reads
-`Application.get_env(:bond, <kind>, <compile_time_value>)`. The guard
-evaluates the contract unless the runtime value is exactly `false`. This
-means contracts can be flipped on and off without recompiling:
+guard on every contract evaluation. The guard reads the per-kind runtime
+state and evaluates the contract unless that state is exactly `false`, so
+contracts can be flipped on and off without recompiling. Use
+[`Bond.Config`](`Bond.Config`):
 
 ```elixir
 # In IEx or a remote console, against a running release:
-Application.put_env(:bond, :preconditions, false)  # dormant
-Application.put_env(:bond, :preconditions, true)   # active again
+Bond.Config.disable(:preconditions)   # dormant
+Bond.Config.enable(:preconditions)    # active again
+Bond.Config.all()                     # inspect the global state
 ```
 
+The state is held in a single `:persistent_term` entry, lazily seeded
+from application env on first use — so `config :bond, …` in both
+`config.exs` and `config/runtime.exs` is honoured. A kind with no global
+setting falls back to its compile-time default (including any per-module
+`:overrides`).
+
+> **`Application.put_env/3` is not live.** Setting `:bond` app env *after*
+> the first contracted call has run has no effect — the runtime state is
+> cached. Use `Bond.Config` to toggle, or `Bond.Config.reset/0` to re-seed
+> from current application env.
+
 `:purge` is the only value with no runtime presence — the code isn't
-compiled in, so `Application.put_env/3` can't bring it back.
+compiled in, so nothing can bring it back.
 
-The runtime check is a single `Application.get_env/3` lookup per call
-per contract kind. A trivial benchmark (a function with `@pre
-is_number(x)` called in a tight loop) shows:
+The runtime check is a single lock-free `:persistent_term` read per call
+per contract kind. A trivial benchmark (`bench/runtime_check_overhead.exs`,
+baseline subtracted) for a `@pre is_number(x)` fixture:
 
-| Mode      | ns / call | Overhead vs `:purge` |
-|-----------|-----------|---------------------|
-| `:purge`  | ~48 ns    | —                   |
-| `false`   | ~89 ns    | ~40 ns (the guard alone) |
-| `true`    | ~155 ns   | ~107 ns (guard + assertion eval) |
+| Mode      | overhead / call | note                              |
+|-----------|-----------------|-----------------------------------|
+| `:purge`  | ~0 ns           | no code emitted                   |
+| `false`   | ~15 ns          | the gate alone                    |
+| `true`    | ~85 ns          | gate + assertion evaluation       |
 
-For genuinely hot-path code, prefer `:purge`. The benchmark itself
-lives at `bench/runtime_check_overhead.exs` if you want to reproduce it
-on your hardware.
+The enabled (`true`) cost is dominated by the gate and by evaluating the
+assertion expressions themselves — **not** by the function's size. The
+failure `binding()` snapshot (reported in error messages) is captured
+lazily and only materialised when an assertion actually fails, so the
+per-call overhead does not grow with the number of parameters or
+`old(...)` captures. A wide signature with `old(...)` postconditions pays
+about the same as the one-argument fixture above.
+
+For genuinely hot-path code, prefer `:purge`. Run the benchmark on your
+own hardware to reproduce; absolute numbers vary by machine and Elixir
+version.
 
 ### Per-module overrides
 

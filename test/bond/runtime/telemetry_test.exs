@@ -99,8 +99,8 @@ defmodule Bond.Runtime.TelemetryTest do
     end
 
     test "does not fire when the runtime guard skips evaluation" do
-      Application.put_env(:bond, :preconditions, false)
-      on_exit(fn -> Application.delete_env(:bond, :preconditions) end)
+      Bond.Config.disable(:preconditions)
+      on_exit(fn -> Bond.Config.reset() end)
 
       # With preconditions runtime-disabled, sqrt(-1) no longer raises — but :math.sqrt(-1)
       # will. Catch that and confirm no telemetry event arrived from Bond.
