@@ -440,8 +440,16 @@ baseline subtracted) for a `@pre is_number(x)` fixture:
 | Mode      | overhead / call | note                              |
 |-----------|-----------------|-----------------------------------|
 | `:purge`  | ~0 ns           | no code emitted                   |
-| `false`   | ~12 ns          | the gate alone                    |
-| `true`    | ~80 ns          | gate + assertion evaluation       |
+| `false`   | ~15 ns          | the gate alone                    |
+| `true`    | ~85 ns          | gate + assertion evaluation       |
+
+The enabled (`true`) cost is dominated by the gate and by evaluating the
+assertion expressions themselves — **not** by the function's size. The
+failure `binding()` snapshot (reported in error messages) is captured
+lazily and only materialised when an assertion actually fails, so the
+per-call overhead does not grow with the number of parameters or
+`old(...)` captures. A wide signature with `old(...)` postconditions pays
+about the same as the one-argument fixture above.
 
 For genuinely hot-path code, prefer `:purge`. Run the benchmark on your
 own hardware to reproduce; absolute numbers vary by machine and Elixir

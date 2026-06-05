@@ -239,18 +239,20 @@ defmodule Bond.Runtime.Eval do
   into the user's lifted defp emitted Pattern: `false`, Type: `true` warnings under
   downstream `mix dialyzer`.
 
-  `assertion_info` is the map carrying the assertion's label/kind/file/line/etc. `binding`
-  is the calling-function's `binding()` snapshot — kept here so the lifted defp doesn't
-  have to wrap it itself.
+  `assertion_info` is the map carrying the assertion's label/kind/file/line/etc. `binding_fun`
+  is a 0-arity thunk that returns the calling-function's `binding()` snapshot. It is a thunk
+  rather than an eager keyword list so the (potentially large) snapshot is built only on the
+  failure clauses — the success clause never forces it. The lifted defps emit
+  `fn -> binding() end` for it; see `Bond.Compiler.Assertion.assertions_body/2`.
   """
-  @spec check_assertion(term(), map(), keyword()) :: :ok
-  def check_assertion(false, assertion_info, binding),
-    do: assertion_failure(assertion_info, binding)
+  @spec check_assertion(term(), map(), (-> keyword())) :: :ok
+  def check_assertion(false, assertion_info, binding_fun),
+    do: assertion_failure(assertion_info, binding_fun.())
 
-  def check_assertion(nil, assertion_info, binding),
-    do: assertion_failure(assertion_info, binding)
+  def check_assertion(nil, assertion_info, binding_fun),
+    do: assertion_failure(assertion_info, binding_fun.())
 
-  def check_assertion(_result, _assertion_info, _binding), do: :ok
+  def check_assertion(_result, _assertion_info, _binding_fun), do: :ok
 
   @doc """
   Variant of `check_assertion/3` for `Bond.check/1` calls: returns the assertion's value on
@@ -261,10 +263,14 @@ defmodule Bond.Runtime.Eval do
   with `if result do ... else ... end` lets caller-inferred narrowing prove the falsy branch
   dead even when the spec widens `result` to `term()`.
   """
-  @spec check_value(term(), map(), keyword()) :: term()
-  def check_value(false, assertion_info, binding), do: assertion_failure(assertion_info, binding)
-  def check_value(nil, assertion_info, binding), do: assertion_failure(assertion_info, binding)
-  def check_value(value, _assertion_info, _binding), do: value
+  @spec check_value(term(), map(), (-> keyword())) :: term()
+  def check_value(false, assertion_info, binding_fun),
+    do: assertion_failure(assertion_info, binding_fun.())
+
+  def check_value(nil, assertion_info, binding_fun),
+    do: assertion_failure(assertion_info, binding_fun.())
+
+  def check_value(value, _assertion_info, _binding_fun), do: value
 
   @spec assertion_failure(map(), keyword()) :: no_return()
   defp assertion_failure(assertion_info, binding) do
