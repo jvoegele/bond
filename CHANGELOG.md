@@ -5,6 +5,74 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-06-05
+
+Adds a supported runtime-configuration API (`Bond.Config`), makes the per-call
+runtime gate substantially cheaper, brings the ECMA-367 exit order in line with
+the standard, and adds Elixir 1.20 / OTP 29 to the test matrix.
+
+The public-API additions are backwards compatible. Two behavioural changes are
+called out under **Changed** below — both have a clear migration and neither
+affects compile-time configuration (`config.exs` / `config/runtime.exs`),
+per-module `:overrides`, or `:purge`.
+
+### Added
+
+- **`Bond.Config` — runtime contract configuration.** A small public module for
+  turning contract kinds on and off at runtime, replacing the previous reliance
+  on `Application.put_env/3`:
+
+    - `Bond.Config.enable/1` / `disable/1` / `put/2` — toggle a kind
+      (`:preconditions`, `:postconditions`, `:invariants`, `:checks`).
+    - `Bond.Config.enabled?/1` / `all/0` — inspect the current runtime state.
+    - `Bond.Config.reset/0` — discard runtime overrides and re-seed from current
+      application env.
+    - `Bond.Config.kinds/0` — the list of configurable kinds.
+
+  These take effect immediately and globally, and compose with the contract
+  chain (`preconditions ≤ postconditions ≤ invariants`).
+
+- **Elixir 1.20 / OTP 29 support.** Added a `1.20.0 / OTP 29.0.1` leg to CI; the
+  full suite passes on Elixir 1.16 through 1.20.
+
+### Changed
+
+- **The runtime contract gate is now backed by `:persistent_term`.** Whether a
+  contract kind is evaluated is resolved from a single lock-free
+  `:persistent_term` read per call instead of a per-call `Application.get_env/3`.
+  The term is lazily seeded from application env on the first contracted call, so
+  `config.exs` and `config/runtime.exs` are honoured exactly as before. On a
+  fully-contracted call the gate is roughly **2.6× cheaper**.
+
+- **Behaviour change — runtime toggling via `Application.put_env/3` is no longer
+  live.** Because the runtime modes are cached in `:persistent_term` after the
+  first contracted call, calling `Application.put_env(:bond, <kind>, …)` at
+  runtime no longer changes contract evaluation. Use **`Bond.Config`** to toggle
+  contracts at runtime, or **`Bond.Config.reset/0`** to re-seed from current
+  application env. Setting `config :bond, …` in `config.exs` /
+  `config/runtime.exs` before the application starts is unaffected.
+
+- **Behaviour change — on exit, the class invariant is now evaluated before the
+  postcondition** (matching ECMA-367 §8.23.26 and the entry order, where the
+  pre-invariant precedes the precondition). When a function's postcondition *and*
+  its struct invariant both fail on return, the raised error is now
+  `Bond.InvariantError` rather than `Bond.PostconditionError`. Correctness is
+  unchanged — the two checks are conjoined and order does not affect whether a
+  violation is detected — only which violation surfaces first.
+
+- **The failure binding is captured lazily.** The local binding reported in
+  contract-failure errors is now snapshotted only when an assertion actually
+  fails, rather than on every successful evaluation. Error contents are
+  unchanged; the per-call cost of an *enabled* contract no longer grows with the
+  function's arity or its number of `old(...)` captures.
+
+- **Dialyzer laundering moved off the call boundary.** The generated lifted
+  assertion functions now carry `@dialyzer {:nowarn_function, …}` instead of
+  routing their arguments through the internal `__opaque__/1` helper in
+  `Bond.Predicates` at the call site. This keeps downstream `mix dialyzer` clean
+  for contracts that duplicate a typespec-implied fact, at zero runtime cost. The
+  `~>` / `<~` operator launderers are unchanged.
+
 ## [1.0.0] - 2026-06-02
 
 First stable release. 1.0.0 promotes 1.0.0-rc.4 unchanged; the Semantic
