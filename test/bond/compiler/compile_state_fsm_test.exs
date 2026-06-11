@@ -315,6 +315,37 @@ defmodule Bond.Compiler.CompileStateFSMTest do
     end
   end
 
+  describe "inherited contracts" do
+    test "default to an empty map", %{fsm: fsm} do
+      assert FSM.inherited_contracts(fsm) == %{}
+    end
+
+    test "are stored and queryable", %{fsm: fsm} do
+      contracts = %{
+        {:withdraw, 2} => %{
+          arg_names: [:balance, :amount],
+          preconditions: [precondition_def(:positive)],
+          postconditions: []
+        }
+      }
+
+      FSM.inherited_contracts_def(fsm, contracts)
+      assert FSM.inherited_contracts(fsm) == contracts
+    end
+
+    test "merge across registrations", %{fsm: fsm} do
+      FSM.inherited_contracts_def(fsm, %{{:a, 1} => %{arg_names: [:x]}})
+      FSM.inherited_contracts_def(fsm, %{{:b, 2} => %{arg_names: [:y, :z]}})
+
+      assert %{{:a, 1} => _, {:b, 2} => _} = FSM.inherited_contracts(fsm)
+    end
+
+    test "do not move the FSM into :contracts_pending", %{fsm: fsm} do
+      FSM.inherited_contracts_def(fsm, %{{:a, 1} => %{arg_names: [:x]}})
+      assert FSM.current_state(fsm) == :no_contracts_pending
+    end
+  end
+
   defp start_fsm(module \\ __MODULE__) do
     {:ok, fsm} = FSM.start_link(module)
     fsm

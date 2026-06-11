@@ -242,6 +242,51 @@ separate feature. The recommended pattern is to keep the process state
 in a struct and declare invariants on that struct's module. See the
 [Contracts in a Concurrent World](guides/contracts-and-concurrency.md) guide.
 
+## Contract inheritance for behaviours
+
+A behaviour can declare `@pre`/`@post` on its `@callback`s, and every module
+that implements the behaviour inherits and enforces those contracts. This is
+the Liskov Substitution Principle made executable: an implementation is
+substitutable for the abstraction precisely because it honours the
+abstraction's contract.
+
+```elixir
+defmodule Ledger do
+  use Bond.Behaviour
+
+  @pre positive_amount: amount > 0
+  @post non_negative: result >= 0
+  @callback withdraw(balance :: non_neg_integer, amount :: pos_integer) :: non_neg_integer
+end
+
+defmodule BankAccount do
+  use Bond, behaviours: [Ledger]
+
+  @impl true
+  def withdraw(bal, amt) when amt <= bal, do: bal - amt
+end
+```
+
+`BankAccount.withdraw/2` now enforces `amount > 0` and `result >= 0` though
+neither is written in `BankAccount`. Contracts reference the *callback's*
+argument names and bind by position, so the implementation may name its
+parameters freely (`bal`/`amt` above). A failure is attributed to its origin —
+`precondition (inherited from Ledger) failed for call to BankAccount.withdraw/2`
+— and the error struct and telemetry carry a `:source_behaviour`.
+
+Passing `behaviours: [Ledger]` also emits `@behaviour Ledger` for you, so
+`@impl` and Elixir's callback checks apply.
+
+> #### Immutable inheritance {: .info}
+>
+> Inherited contracts are immutable in v1: an implementation may not modify or
+> add to them, and attaching `@pre`/`@post` to an inherited operation is a
+> compile error (use `check/1` in the body for implementation-specific
+> assertions). This keeps preconditions from being strengthened — which would
+> break substitutability — and reserves the syntax for future Eiffel-style
+> refinement. See the [Contract Inheritance for
+> Behaviours](guides/contract-inheritance.md) guide for the full rules.
+
 ## Inline `check/1` assertions
 
 Bond's `check/1` macro places assertions at arbitrary points inside a

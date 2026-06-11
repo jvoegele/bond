@@ -36,7 +36,14 @@ defmodule Bond.Compiler.AnnotatedFunction do
             preconditions: [],
             postconditions: [],
             invariants: [],
-            doc_attributes: []
+            doc_attributes: [],
+            # For functions inheriting a behaviour's callback contracts: the canonical
+            # positional names dictated by the callback (the contract expressions reference
+            # these). When set, the wrapper binds the impl's parameters to these names
+            # positionally and the multi-clause name-agreement check is bypassed — there is
+            # nothing to negotiate, the callback dictates the names. `nil` for ordinary
+            # functions, which derive canonical names from their own clauses.
+            canonical_names_override: nil
 
   @type t :: %__MODULE__{
           kind: :def | :defp | nil,
@@ -47,7 +54,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
           preconditions: [Bond.Compiler.Assertion.t()],
           postconditions: [Bond.Compiler.Assertion.t()],
           invariants: [Bond.Compiler.Assertion.t()],
-          doc_attributes: [FunctionDefinition.doc_attribute()]
+          doc_attributes: [FunctionDefinition.doc_attribute()],
+          canonical_names_override: [atom()] | nil
         }
 
   def new(%FunctionDefinition{} = function_def) do
@@ -107,6 +115,16 @@ defmodule Bond.Compiler.AnnotatedFunction do
       )
       when is_list(doc_attributes) do
     %{annotated_function | doc_attributes: existing_doc_attributes ++ doc_attributes}
+  end
+
+  @doc """
+  Sets the canonical positional names for a function inheriting behaviour contracts.
+
+  See the `:canonical_names_override` field: the names come from the inherited callback and
+  dictate how the wrapper rebinds the implementation's parameters.
+  """
+  def put_canonical_override(%__MODULE__{} = annotated_function, names) when is_list(names) do
+    %{annotated_function | canonical_names_override: names}
   end
 
   def has_preconditions?(%__MODULE__{preconditions: preconditions}),
@@ -312,24 +330,35 @@ defmodule Bond.Compiler.AnnotatedFunction do
     first_clause = List.first(annotated_function.clauses)
     function_info = {fun, arity}
 
-    # Only require clause-name agreement at positions whose names appear in
-    # some assertion's expression AST. Trivial contracts (`@post is_boolean(result)`)
-    # don't constrain parameter naming; shape-dependent contracts referencing
-    # `x` only constrain the position bound to `x`.
-    referenced_names =
-      Clauses.referenced_param_names(
-        annotated_function.preconditions ++
-          annotated_function.postconditions ++ annotated_function.invariants,
-        annotated_function.clauses
-      )
+    # Canonical positional names. For functions inheriting behaviour contracts the names are
+    # dictated by the callback (stored in `:canonical_names_override`), so there is nothing to
+    # negotiate across clauses — the agreement check is bypassed. Otherwise, require clause-name
+    # agreement only at positions whose names appear in some assertion's expression AST: trivial
+    # contracts (`@post is_boolean(result)`) don't constrain parameter naming; shape-dependent
+    # contracts referencing `x` only constrain the position bound to `x`.
+    canonical_names =
+      case annotated_function.canonical_names_override do
+        nil ->
+          referenced_names =
+            Clauses.referenced_param_names(
+              annotated_function.preconditions ++
+                annotated_function.postconditions ++ annotated_function.invariants,
+              annotated_function.clauses
+            )
 
-    {:ok, canonical_names} =
-      Clauses.assert_clauses_agree!(
-        annotated_function.clauses,
-        first_clause.env,
-        function_info,
-        referenced_names
-      )
+          {:ok, names} =
+            Clauses.assert_clauses_agree!(
+              annotated_function.clauses,
+              first_clause.env,
+              function_info,
+              referenced_names
+            )
+
+          names
+
+        override_names ->
+          override_names
+      end
 
     {postconditions, old_context} =
       if post_mode != :purge do
@@ -376,10 +405,21 @@ defmodule Bond.Compiler.AnnotatedFunction do
     #     uniformly to every clause, so destructured-name access from any
     #     individual clause is unavailable. Shape-dependent assertions use the
     #     `~>` implication operator.
+    #
+    #   * Inherited contracts: the contract expressions reference the callback's argument
+    #     names, not the impl's parameter names, so the lifted defp must take the canonical
+    #     names as bare vars regardless of clause count — the same value the wrapper rebinds
+    #     and passes via the canonical name.
     lifted_defp_params =
-      case annotated_function.clauses do
-        [_single] -> ClauseWrapper.strip_default_args(first_clause.params)
-        _multi -> Enum.map(canonical_names, &Macro.var(&1, nil))
+      cond do
+        annotated_function.canonical_names_override != nil ->
+          Enum.map(canonical_names, &Macro.var(&1, nil))
+
+        match?([_single], annotated_function.clauses) ->
+          ClauseWrapper.strip_default_args(first_clause.params)
+
+        true ->
+          Enum.map(canonical_names, &Macro.var(&1, nil))
       end
 
     wrapper_clauses =
@@ -396,6 +436,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
             [],
             annotated_function.preconditions,
             function_info,
+            struct_module,
             first_clause.env,
             pre_mode
           ),
@@ -405,6 +446,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
             postcondition_extra_params(old_pairs),
             postconditions,
             function_info,
+            struct_module,
             first_clause.env,
             post_mode
           ),
@@ -453,8 +495,17 @@ defmodule Bond.Compiler.AnnotatedFunction do
     [result_param | old_params]
   end
 
-  defp maybe_build_assertion_defp(_name, _params, _extra, _assertions, _info, _env, :purge),
-    do: nil
+  defp maybe_build_assertion_defp(
+         _name,
+         _params,
+         _extra,
+         _assertions,
+         _info,
+         _module,
+         _env,
+         :purge
+       ),
+       do: nil
 
   defp maybe_build_assertion_defp(
          name,
@@ -462,10 +513,11 @@ defmodule Bond.Compiler.AnnotatedFunction do
          extra_params,
          assertions,
          function_info,
+         function_module,
          env,
          _mode
        ) do
-    body = Assertion.assertions_body(assertions, function_info)
+    body = Assertion.assertions_body(assertions, function_info, function_module)
     params = call_params ++ extra_params
     arity = length(params)
 

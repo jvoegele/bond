@@ -25,7 +25,11 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
             postcondition_defs: [],
             invariant_defs: [],
             doc_attributes: [],
-            functions_with_contracts: []
+            functions_with_contracts: [],
+            # Contracts inherited from behaviours via `use Bond, behaviours: […]`, keyed by
+            # `{name, arity}`. Registered once at the implementer's `use` expansion and merged
+            # into the matching AnnotatedFunctions by `Bond.Compiler.__before_compile__/1`.
+            inherited_contracts: %{}
 
   @impl :gen_statem
   def callback_mode, do: :handle_event_function
@@ -100,6 +104,13 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
     {:next_state, :contracts_pending, new_data}
   end
 
+  # Inherited contracts are module-scoped like invariants — registered once before any def
+  # and queried at __before_compile__ time. They don't move the FSM into :contracts_pending.
+  def handle_event(:cast, {:inherited_contracts, contracts}, state, data)
+      when state in [:no_contracts_pending, :contracts_pending] do
+    {:keep_state, %{data | inherited_contracts: Map.merge(data.inherited_contracts, contracts)}}
+  end
+
   def handle_event(:cast, :doc_attributes_applied, _state, data) do
     {:keep_state, clear_pending_doc_attributes(data)}
   end
@@ -143,6 +154,10 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
 
   def handle_event({:call, from}, :annotated_functions, _state, data) do
     {:keep_state, data, {:reply, from, annotated_functions(data)}}
+  end
+
+  def handle_event({:call, from}, :inherited_contracts, _state, data) do
+    {:keep_state, data, {:reply, from, data.inherited_contracts}}
   end
 
   def handle_event({:call, from}, :functions_with_contracts, _state, data) do

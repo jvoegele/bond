@@ -672,3 +672,43 @@ The "Naming consistency is only required where contracts depend on it"
 relaxation (see above) also makes the workaround lighter: cross-clause
 agreement is only enforced at parameter positions a contract actually
 references.
+
+## How do I share one contract across every implementation of a behaviour?
+
+Declare the contract on the behaviour's `@callback` with `Bond.Behaviour`,
+and have implementers inherit it with `use Bond, behaviours: […]`:
+
+```elixir
+defmodule Ledger do
+  use Bond.Behaviour
+
+  @pre positive_amount: amount > 0
+  @post non_negative: result >= 0
+  @callback withdraw(balance :: non_neg_integer, amount :: pos_integer) :: non_neg_integer
+end
+
+defmodule BankAccount do
+  use Bond, behaviours: [Ledger]
+
+  @impl true
+  def withdraw(bal, amt) when amt <= bal, do: bal - amt
+end
+```
+
+Every implementation enforces the same `@pre`/`@post` without restating them.
+Contracts reference the callback's argument names and bind by position, so an
+implementation can name its parameters however it likes. A violation is
+attributed to the source behaviour (`precondition (inherited from Ledger)
+failed for call to BankAccount.withdraw/2`).
+
+Inherited contracts are immutable in v1 — an implementation can't modify or add
+to them, and attaching `@pre`/`@post` to an inherited operation is a compile
+error. Use `check/1` in the function body for an implementation-specific
+assertion. See the [Contract Inheritance for
+Behaviours](contract-inheritance.md) guide for the full rules.
+
+> #### Behaviour-level invariants {: .info}
+>
+> This applies to `@pre`/`@post` on `@callback`s. Struct `@invariant`s remain
+> scoped to the struct's own module and compose with inherited contracts
+> independently.

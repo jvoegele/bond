@@ -1,0 +1,44 @@
+flowchart TD
+%% Mikado graph for contract inheritance from behaviours (GitHub #13).
+%%
+%% Behaviour modules declare @pre/@post on their @callbacks; implementing
+%% modules `use Bond, behaviours: [Foo]` and inherit those contracts verbatim
+%% (immutable v1). This is DbC meeting the Liskov Substitution Principle.
+%%
+%% Each numbered node is a commit-sized step. Arrows point from a goal to its
+%% prerequisites — leaves (green) have no further prerequisites and are safe to
+%% start with. Depth-first per Mikado: pick a leaf, finish it, commit, repeat.
+%% Every commit compiles and the suite stays green.
+
+    G(["**Goal**<br/>Behaviour contracts inherited by impls (#13)"])
+
+    G --> S6[6. use Bond, behaviours: wiring + before_compile merge + bright-line error]
+    G --> S7[7. Sub-rules 1-4: multi-behaviour identity, non-Bond behaviour, optional/@impl]
+    G --> S8[8. End-to-end + attribution tests]
+    G --> S9[9. Docs: guide + README + FAQ + CHANGELOG]
+
+    S6 --> S2[2. Bond.Behaviour: @ capture of @pre/@post before @callback]
+    S6 --> S3[3. __bond_contracts__/0 reflection emitted at before_compile]
+    S6 --> S4[4. source_behaviour plumbed through Assertion + Eval + errors]
+    S6 --> S5[5. FSM inherited_contracts + AnnotatedFunction canonical_names_override]
+
+    S3 --> S2
+    S5 --> S1[1. Mikado graph]
+    S7 --> S6
+    S8 --> S6
+    S8 --> S7
+    S9 --> S8
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S1,S2,S4,S5 leaf;
+
+    style G fill:#90EE90
+    style S1 fill:#90EE90
+    style S2 fill:#90EE90
+    style S3 fill:#90EE90
+    style S4 fill:#90EE90
+    style S5 fill:#90EE90
+    style S6 fill:#90EE90
+    style S7 fill:#90EE90
+    style S8 fill:#90EE90
+    style S9 fill:#90EE90

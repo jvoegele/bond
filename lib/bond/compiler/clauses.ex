@@ -268,6 +268,18 @@ defmodule Bond.Compiler.Clauses do
     end)
   end
 
+  @doc """
+  Returns the set of bare-variable names referenced anywhere in `ast`.
+
+  A bare variable is `{name, meta, ctx}` with `name` and `ctx` both atoms; local and remote
+  calls (whose third element is an argument list, e.g. `is_integer(x)` or `old(amount)`) are
+  *not* themselves variables, though any bare variables nested in their arguments are collected.
+  Used by `Bond.Behaviour` to check that a callback contract references only names the callback
+  actually binds.
+  """
+  @spec expression_var_names(Macro.t()) :: MapSet.t(atom())
+  def expression_var_names(ast), do: collect_var_names(ast)
+
   # Walks an AST collecting every bare-variable reference. A bare variable in
   # Elixir AST is `{name, _meta, ctx}` where both `name` and `ctx` are atoms
   # (call AST has a list args at elem 2 instead of an atom context, so it's
