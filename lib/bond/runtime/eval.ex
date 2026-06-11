@@ -298,6 +298,36 @@ defmodule Bond.Runtime.Eval do
   end
 
   @doc """
+  Evaluates a protocol contract's assertions, attributing any failure to the protocol and the
+  implementation the call resolved to.
+
+  Used by the dispatch wrapper `Bond.Protocol` emits in a protocol module. Identical to
+  `evaluate_preconditions/1` / `evaluate_postconditions/1` (the kind comes from the assertion
+  itself), except that on failure the thrown `assertion_info` is enriched with
+  `:source_protocol` (the protocol module) and `:impl` (the resolved implementation module, via
+  `protocol.impl_for(subject)`, or `nil`). The impl is resolved only on the failure path, so an
+  enabled-but-passing contract pays nothing for it. `subject` is the value dispatch keyed on —
+  the protocol function's first argument.
+  """
+  @spec evaluate_protocol_assertions(module(), term(), assertion_fun()) :: term()
+  def evaluate_protocol_assertions(protocol, subject, assertions_fun)
+      when is_atom(protocol) and is_function(assertions_fun, 0) do
+    evaluate_assertions(assertions_fun, fn assertion_info ->
+      assertion_info
+      |> Map.put(:source_protocol, protocol)
+      |> Map.put(:impl, resolve_impl(protocol, subject))
+    end)
+  end
+
+  # `impl_for/1` is generated on every protocol module (and survives consolidation); guard
+  # against the unexpected so diagnostics can never mask the original contract failure.
+  defp resolve_impl(protocol, subject) do
+    protocol.impl_for(subject)
+  rescue
+    _ -> nil
+  end
+
+  @doc """
   Runs the lifted invariant check against a function's return value when that value carries
   the struct the invariants are declared on.
 
@@ -331,11 +361,15 @@ defmodule Bond.Runtime.Eval do
     end
   end
 
-  defp evaluate_assertions(assertions_fun) do
+  # `enrich` is applied to the thrown `assertion_info` before the failure event and exception
+  # are built — the seam `evaluate_protocol_assertions/3` uses to attach protocol/impl info on
+  # the failure path only. Defaults to the identity for ordinary `@pre`/`@post`/`@invariant`.
+  defp evaluate_assertions(assertions_fun, enrich \\ &Function.identity/1) do
     try do
       with_recursion_check(assertions_fun)
     catch
       {:assertion_failure, %{kind: kind} = assertion_info} ->
+        assertion_info = enrich.(assertion_info)
         emit_failure_event(assertion_info)
 
         exception_module = Map.fetch!(@assertion_errors, kind)

@@ -287,6 +287,42 @@ Passing `behaviours: [Ledger]` also emits `@behaviour Ledger` for you, so
 > refinement. See the [Contract Inheritance for
 > Behaviours](guides/contract-inheritance.md) guide for the full rules.
 
+## Contract inheritance for protocols
+
+A `defprotocol` can declare `@pre`/`@post` on its functions, and every
+implementation — present or future — enforces them. Implementations stay
+completely ordinary: no `use Bond`, no opt-in.
+
+```elixir
+defprotocol Sized do
+  use Bond.Protocol
+
+  @post non_negative: result >= 0
+  @spec size(t) :: non_neg_integer()
+  def size(data)
+end
+
+defimpl Sized, for: List do
+  def size(list), do: length(list)
+end
+```
+
+Every call through `Sized.size/1` now checks `result >= 0`, whichever
+implementation runs. Bond wraps the protocol's *dispatch* function once
+(`defoverridable` + `super`), so the check applies uniformly to all
+implementations and survives protocol consolidation. A failure is attributed to
+the protocol and names the resolved implementation —
+`postcondition (from protocol Sized, impl Sized.List) failed in Sized.size/1` —
+and the error struct and telemetry carry `:source_protocol` and `:impl`.
+
+> #### Dispatch-layer wrapping {: .info}
+>
+> Only calls through the protocol are checked; a direct call to a concrete
+> implementation (`Sized.List.size/1`) bypasses dispatch. Inheritance is
+> immutable in v1 (implementations cannot refine the contract), and `old/1` is
+> not supported in a protocol `@post`. See the [Contract Inheritance for
+> Protocols](guides/protocol-contracts.md) guide for the full rules.
+
 ## Inline `check/1` assertions
 
 Bond's `check/1` macro places assertions at arbitrary points inside a

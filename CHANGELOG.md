@@ -40,6 +40,31 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   See the [Contract Inheritance for Behaviours](guides/contract-inheritance.md)
   guide.
 
+- **Contract inheritance for protocols (GitHub #15).** A `defprotocol` can
+  declare `@pre`/`@post` contracts on its functions with the new `Bond.Protocol`,
+  and every implementation — present or future — enforces them at dispatch.
+
+    - Implementations need zero Bond awareness: a `defimpl` stays completely
+      ordinary, with no `use Bond` and no opt-in.
+    - Bond wraps the protocol's generated dispatch function once
+      (`defoverridable` + `super`), so the contract applies uniformly to all
+      implementations and **survives protocol consolidation**. Contracts
+      reference the function's declared argument names (and `result` in a
+      `@post`); no positional rebind is needed.
+    - Violations are attributed to the protocol and name the resolved
+      implementation: the message reads `postcondition (from protocol Sized,
+      impl Sized.List) failed in Sized.size/1`, and `:source_protocol` and
+      `:impl` fields are added to the error structs and the
+      `[:bond, :assertion, :failure]` telemetry metadata (the implementation is
+      resolved only on the failure path).
+    - Inheritance is **immutable** in v1: implementations cannot refine a
+      protocol's contracts. Only calls through the protocol are checked (a direct
+      call to a concrete implementation bypasses dispatch); `old/1` in a protocol
+      `@post` and compile-time `:purge` of protocol contracts are not supported.
+
+  See the [Contract Inheritance for Protocols](guides/protocol-contracts.md)
+  guide.
+
 ## [1.1.0] - 2026-06-05
 
 Adds a supported runtime-configuration API (`Bond.Config`), makes the per-call

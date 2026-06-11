@@ -11,7 +11,9 @@ defmodule Bond.AssertionError do
         :module,
         :function,
         :binding,
-        :source_behaviour
+        :source_behaviour,
+        :source_protocol,
+        :impl
       ]
 
       @typedoc """
@@ -19,6 +21,10 @@ defmodule Bond.AssertionError do
 
       `:source_behaviour` is the behaviour module an inherited contract came from (see
       `Bond.Behaviour`), or `nil` for a contract declared directly on the function.
+
+      `:source_protocol` is the protocol module a contract was declared on (see `Bond.Protocol`),
+      or `nil`; when set, `:impl` is the implementation module the failing call resolved to (or
+      `nil` if none could be resolved).
       """
       @type t :: %__MODULE__{
               label: Bond.assertion_label(),
@@ -28,7 +34,9 @@ defmodule Bond.AssertionError do
               module: module(),
               function: {String.t(), non_neg_integer()},
               binding: keyword(),
-              source_behaviour: module() | nil
+              source_behaviour: module() | nil,
+              source_protocol: module() | nil,
+              impl: module() | nil
             }
 
       @impl Exception
@@ -57,12 +65,23 @@ defmodule Bond.AssertionError do
   end
 
   @doc """
-  Returns a parenthetical attribution like `" (inherited from Ledger)"` when `source_behaviour`
-  is a module, or `""` when it is `nil`. Used by the precondition/postcondition messages to
-  name the behaviour an inherited contract came from.
+  Returns a parenthetical attribution naming where an inherited contract came from, for the
+  precondition/postcondition messages, or `""` for a contract declared directly on the function.
+
+  A behaviour-inherited contract (see `Bond.Behaviour`) reads `" (inherited from Ledger)"`; a
+  protocol contract (see `Bond.Protocol`) reads `" (from protocol Sized, impl Sized.List)"`,
+  dropping the `impl` clause when it could not be resolved.
   """
-  def attribution(nil), do: ""
-  def attribution(source_behaviour), do: " (inherited from #{inspect(source_behaviour)})"
+  def attribution(%{source_protocol: protocol} = error) when not is_nil(protocol) do
+    impl_part = if error.impl, do: ", impl #{inspect(error.impl)}", else: ""
+    " (from protocol #{inspect(protocol)}#{impl_part})"
+  end
+
+  def attribution(%{source_behaviour: behaviour}) when not is_nil(behaviour) do
+    " (inherited from #{inspect(behaviour)})"
+  end
+
+  def attribution(_error), do: ""
 
   def message(error, headline) do
     location =
@@ -101,7 +120,7 @@ defmodule Bond.PreconditionError do
   def message(%{module: module, function: {function, arity}} = error) do
     Bond.AssertionError.message(
       error,
-      "precondition#{Bond.AssertionError.attribution(error.source_behaviour)} failed " <>
+      "precondition#{Bond.AssertionError.attribution(error)} failed " <>
         "for call to #{inspect(module)}.#{function}/#{arity}"
     )
   end
@@ -118,7 +137,7 @@ defmodule Bond.PostconditionError do
   def message(%{module: module, function: {function, arity}} = error) do
     Bond.AssertionError.message(
       error,
-      "postcondition#{Bond.AssertionError.attribution(error.source_behaviour)} failed " <>
+      "postcondition#{Bond.AssertionError.attribution(error)} failed " <>
         "in #{inspect(module)}.#{function}/#{arity}"
     )
   end
