@@ -1,0 +1,25 @@
+%% Mikado graph — #15 Protocol contracts via dispatch-layer wrapping (Option B)
+%% Goal (root) at top; leaves (do first) at bottom. Depends on #14 spike (GO) and
+%% reuses the #13 capture/attribution core + the existing runtime/error pipeline.
+graph TD
+    G[#15: defprotocol declares @pre/@post; all impls enforced at dispatch]
+
+    G --> CAP[Bond.Protocol: capture @pre/@post + arg names by shadowing @ and def]
+    G --> WRAP[Bond.Protocol.__before_compile__: defoverridable + wrapper around super]
+    G --> ATTR[Attribute failures to the protocol + resolved impl]
+    G --> DOC[Guide + CHANGELOG + moduledoc]
+    G --> TEST[Tests: e2e, fallback_to_any, consolidation, telemetry, zero-impl-awareness]
+
+    CAP --> IMP[import Protocol, except: [def: 1] then shadow def — forward to Protocol.def]
+    CAP --> VAL[validate contract refs vs declared arg names — reuse Clauses.expression_var_names/1]
+
+    WRAP --> SPIKE[(#14 spike: defoverridable survives consolidation — DONE/GO)]
+    WRAP --> KQ[emit fully-qualified Kernel.def/defp/defoverridable - protocol body excludes Kernel.def]
+    WRAP --> BODY[reuse Assertion.assertions_body/3 for lifted defps]
+    WRAP --> GATE[reuse should_evaluate?/3 + evaluate_* with compile_default: true]
+
+    ATTR --> EVAL[Eval.evaluate_protocol_assertions/3: enrich thrown info with source_protocol + impl_for on failure]
+    ATTR --> ERR[errors.ex: add :source_protocol + :impl fields; attribution from error struct]
+
+    %% Non-goals v1: per-impl refinement (#16), old/1 in protocol @post, compile-time :purge,
+    %% direct concrete-impl calls (Sized.List.size/1) are NOT wrapped.
