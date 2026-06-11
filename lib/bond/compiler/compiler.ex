@@ -45,28 +45,34 @@ defmodule Bond.Compiler do
   Reads the `__bond_contracts__/0` reflection of each behaviour and registers the combined
   contracts with `module`'s FSM, keyed by `{name, arity}`.
 
-  Called from the `use Bond, behaviours: […]` expansion (the modules are already alias-resolved).
-  Each behaviour must `use Bond.Behaviour` — a behaviour without `__bond_contracts__/0` raises,
-  catching typos and accidental use of a plain behaviour. When two behaviours declare contracts
-  for the same `{name, arity}`, the contracts must be structurally identical (conjoining is
-  unsound; picking one is arbitrary), otherwise a `CompileError` is raised.
+  Called from the `use Bond, behaviours: […]` expansion (the modules are already alias-resolved);
+  `env` is the caller's `Macro.Env`, used to give any raised `CompileError` the source location
+  of the `use Bond` call. Each behaviour must `use Bond.Behaviour` — a behaviour without
+  `__bond_contracts__/0` raises, catching typos and accidental use of a plain behaviour. When two
+  behaviours declare contracts for the same `{name, arity}`, the contracts must be structurally
+  identical (conjoining is unsound; picking one is arbitrary), otherwise a `CompileError` is
+  raised. Structural identity is compared on the contract's *source form* (kind/label/code text),
+  not its meaning — `x <= 10` and `10 >= x` are treated as distinct.
   """
-  @spec register_behaviours(module(), [module()]) :: :ok
-  def register_behaviours(_module, []), do: :ok
+  @spec register_behaviours(module(), [module()], Macro.Env.t()) :: :ok
+  def register_behaviours(_module, [], _env), do: :ok
 
-  def register_behaviours(module, behaviours) when is_list(behaviours) do
+  def register_behaviours(module, behaviours, %Macro.Env{} = env) when is_list(behaviours) do
     combined =
       behaviours
       |> Enum.map(fn behaviour ->
         Code.ensure_compiled!(behaviour)
 
         unless function_exported?(behaviour, :__bond_contracts__, 0) do
-          raise CompileError, description: not_a_bond_behaviour_message(behaviour)
+          raise CompileError,
+            file: env.file,
+            line: env.line,
+            description: not_a_bond_behaviour_message(behaviour)
         end
 
         {behaviour, behaviour.__bond_contracts__()}
       end)
-      |> combine_behaviour_contracts()
+      |> combine_behaviour_contracts(env)
 
     FSM.inherited_contracts_def(FSM.server_ref(module), combined)
     :ok
@@ -74,7 +80,7 @@ defmodule Bond.Compiler do
 
   # Fold each behaviour's contracts into a single `{name, arity} => entry` map. A clash on the
   # same key across behaviours is allowed only when the two entries are structurally identical.
-  defp combine_behaviour_contracts(per_behaviour) do
+  defp combine_behaviour_contracts(per_behaviour, env) do
     Enum.reduce(per_behaviour, %{}, fn {behaviour, contracts}, acc ->
       Enum.reduce(contracts, acc, fn {key, entry}, acc ->
         case Map.fetch(acc, key) do
@@ -86,6 +92,8 @@ defmodule Bond.Compiler do
               acc
             else
               raise CompileError,
+                file: env.file,
+                line: env.line,
                 description: conflicting_behaviours_message(key, behaviour, existing, entry)
             end
         end

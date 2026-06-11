@@ -112,7 +112,7 @@ defmodule Bond do
       |> List.wrap()
       |> Enum.map(&Macro.expand(&1, __CALLER__))
 
-    Bond.Compiler.register_behaviours(__CALLER__.module, behaviour_mods)
+    Bond.Compiler.register_behaviours(__CALLER__.module, behaviour_mods, __CALLER__)
 
     behaviours_ast =
       for behaviour <- behaviour_mods do

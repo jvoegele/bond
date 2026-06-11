@@ -124,7 +124,9 @@ Helper functions and public functions *outside* the behaviour keep ordinary
     `behaviours:` list constrain the same operation, their contracts must be
     *structurally identical*. Conjoining would be unsound and picking one
     arbitrarily would be surprising, so a genuine difference is a compile
-    error.
+    error. Identity is compared on the contract's *source form* — its kind,
+    label, and the text of the expression — not its meaning, so `x <= 10` and
+    `10 >= x` count as different. Write them identically.
   * **Only Bond behaviours.** A module passed to `behaviours:` must
     `use Bond.Behaviour`. Passing a plain behaviour (or a typo) is a compile
     error — declare a plain behaviour with `@behaviour` as usual.
@@ -134,8 +136,11 @@ Helper functions and public functions *outside* the behaviour keep ordinary
     `@impl true`.
   * **Name your callback arguments.** Contracts reference callback argument
     names, so write `@callback f(x :: integer) :: integer`, not
-    `@callback f(integer) :: integer`. Unnamed positions can't be referenced
-    by a contract.
+    `@callback f(integer) :: integer`. A contract may reference only the
+    callback's named arguments (plus `result` in a `@post`); referencing any
+    other name — including an unnamed position — is a compile error reported
+    against the behaviour, where the contract is declared, rather than against
+    each module that inherits it.
 
 ## What's not here yet
 

@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
       assertions); two behaviours constraining the same operation must be
       structurally identical; and a non-`Bond.Behaviour` module passed to
       `behaviours:` is a compile error.
+    - A callback contract may reference only the callback's named arguments
+      (and `result` in a `@post`). Referencing any other name — a typo, or an
+      unnamed callback position — is a compile error reported against the
+      behaviour where the contract is declared, rather than surfacing as an
+      opaque error in each implementing module.
 
   See the [Contract Inheritance for Behaviours](guides/contract-inheritance.md)
   guide.

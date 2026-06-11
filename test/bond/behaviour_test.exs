@@ -112,15 +112,92 @@ defmodule Bond.BehaviourTest do
   end
 
   test "unnamed callback arguments get generated canonical names" do
+    # The contract references only `result`, never the unnamed position — see the validation
+    # test below for why a contract may not name an unnamed argument.
     [{mod, _bin}] =
       Code.compile_string("""
       defmodule Bond.BehaviourTest.Unnamed do
         use Bond.Behaviour
-        @pre is_integer(bond_arg_0)
+        @post is_integer(result)
         @callback f(integer) :: integer
       end
       """)
 
     assert %{arg_names: [:bond_arg_0]} = mod.__bond_contracts__()[{:f, 1}]
+  end
+
+  describe "contract reference validation (issue #13, open question 2)" do
+    test "a contract referencing a name the callback doesn't bind is a compile error" do
+      assert_raise CompileError, ~r/references `total`, which is not a callback argument/, fn ->
+        Code.compile_string("""
+        defmodule Bond.BehaviourTest.BadRef do
+          use Bond.Behaviour
+          @pre positive: total > 0
+          @callback withdraw(balance :: integer, amount :: integer) :: integer
+        end
+        """)
+      end
+    end
+
+    test "a contract referencing an unnamed position is a compile error pointing at the names" do
+      error =
+        assert_raise CompileError, fn ->
+          Code.compile_string("""
+          defmodule Bond.BehaviourTest.UnnamedRef do
+            use Bond.Behaviour
+            @pre amount > 0
+            @callback withdraw(non_neg_integer, pos_integer) :: integer
+          end
+          """)
+        end
+
+      message = Exception.message(error)
+      assert message =~ "references `amount`"
+      assert message =~ "the callback declares no named arguments"
+    end
+
+    test "the error is reported against the behaviour, with the @pre's line" do
+      error =
+        assert_raise CompileError, fn ->
+          Code.compile_string(
+            """
+            defmodule Bond.BehaviourTest.LineRef do
+              use Bond.Behaviour
+              @pre nonsense > 0
+              @callback f(x :: integer) :: integer
+            end
+            """,
+            "lib/my_behaviour.ex"
+          )
+        end
+
+      assert error.file =~ "my_behaviour.ex"
+      assert error.line == 3
+    end
+
+    test "`result` is allowed in a postcondition" do
+      [{mod, _bin}] =
+        Code.compile_string("""
+        defmodule Bond.BehaviourTest.ResultRef do
+          use Bond.Behaviour
+          @post result >= 0
+          @callback f(x :: integer) :: integer
+        end
+        """)
+
+      assert mod.__bond_contracts__()[{:f, 1}]
+    end
+
+    test "`result` is rejected in a precondition" do
+      assert_raise CompileError, ~r/references `result`/, fn ->
+        Code.compile_string("""
+        defmodule Bond.BehaviourTest.ResultInPre do
+          use Bond.Behaviour
+          @pre result > 0
+          @callback f(x :: integer) :: integer
+        end
+        """)
+      end
+    end
   end
 end

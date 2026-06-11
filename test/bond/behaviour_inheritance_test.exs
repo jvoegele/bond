@@ -211,42 +211,56 @@ defmodule Bond.BehaviourInheritanceTest do
       assert_raise Bond.PreconditionError, fn -> DualLimiter.clamp(11) end
     end
 
-    test "conflicting contracts from two behaviours are a compile error" do
-      assert_raise CompileError, ~r/conflicting inherited contracts/, fn ->
-        Code.compile_string("""
-        defmodule Bond.BehaviourInheritanceTest.ConflictBehaviourC do
-          use Bond.Behaviour
-          @pre bounded: x <= 5
-          @callback clamp(x :: integer) :: integer
+    test "conflicting contracts from two behaviours are a compile error located at the `use`" do
+      error =
+        assert_raise CompileError, ~r/conflicting inherited contracts/, fn ->
+          Code.compile_string(
+            """
+            defmodule Bond.BehaviourInheritanceTest.ConflictBehaviourC do
+              use Bond.Behaviour
+              @pre bounded: x <= 5
+              @callback clamp(x :: integer) :: integer
+            end
+
+            defmodule Bond.BehaviourInheritanceTest.Conflicted do
+              use Bond, behaviours: [
+                Bond.BehaviourInheritanceTest.LimiterA,
+                Bond.BehaviourInheritanceTest.ConflictBehaviourC
+              ]
+
+              def clamp(x), do: x
+            end
+            """,
+            "lib/conflicted.ex"
+          )
         end
 
-        defmodule Bond.BehaviourInheritanceTest.Conflicted do
-          use Bond, behaviours: [
-            Bond.BehaviourInheritanceTest.LimiterA,
-            Bond.BehaviourInheritanceTest.ConflictBehaviourC
-          ]
-
-          def clamp(x), do: x
-        end
-        """)
-      end
+      assert error.file =~ "conflicted.ex"
+      assert is_integer(error.line) and error.line > 0
     end
   end
 
   describe "sub-rule 2: behaviour without Bond contracts" do
-    test "passing a plain (non-Bond) behaviour is a compile error" do
-      assert_raise CompileError, ~r/does not use `Bond.Behaviour`/, fn ->
-        Code.compile_string("""
-        defmodule Bond.BehaviourInheritanceTest.PlainBehaviour do
-          @callback run() :: :ok
+    test "passing a plain (non-Bond) behaviour is a compile error located at the `use`" do
+      error =
+        assert_raise CompileError, ~r/does not use `Bond.Behaviour`/, fn ->
+          Code.compile_string(
+            """
+            defmodule Bond.BehaviourInheritanceTest.PlainBehaviour do
+              @callback run() :: :ok
+            end
+
+            defmodule Bond.BehaviourInheritanceTest.UsesPlain do
+              use Bond, behaviours: [Bond.BehaviourInheritanceTest.PlainBehaviour]
+              def run, do: :ok
+            end
+            """,
+            "lib/uses_plain.ex"
+          )
         end
 
-        defmodule Bond.BehaviourInheritanceTest.UsesPlain do
-          use Bond, behaviours: [Bond.BehaviourInheritanceTest.PlainBehaviour]
-          def run, do: :ok
-        end
-        """)
-      end
+      assert error.file =~ "uses_plain.ex"
+      assert is_integer(error.line) and error.line > 0
     end
   end
 end

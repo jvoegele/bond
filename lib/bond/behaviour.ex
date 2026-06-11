@@ -48,6 +48,7 @@ defmodule Bond.Behaviour do
   """
 
   alias Bond.Compiler.Assertion
+  alias Bond.Compiler.Clauses
 
   @doc false
   defmacro __using__(_opts) do
@@ -157,6 +158,8 @@ defmodule Bond.Behaviour do
     if pre != [] or post != [] do
       case parse_callback(spec) do
         {name, arity, arg_names} ->
+          validate_referenced_names!(pre, post, {name, arity}, arg_names, env)
+
           entry =
             {{name, arity}, %{arg_names: arg_names, preconditions: pre, postconditions: post}}
 
@@ -174,6 +177,76 @@ defmodule Bond.Behaviour do
       end
     end
   end
+
+  # --- internal: reference validation ---
+
+  # Verify every variable a contract references is a name the callback actually binds: one of
+  # its named arguments, plus `result` in a postcondition. Caught here at the behaviour's own
+  # compile time, the error points at the offending `@pre`/`@post`; left to the implementer it
+  # would surface only as an opaque "undefined variable" inside Bond-generated code, far from
+  # the cause (issue #13, open question 2).
+  defp validate_referenced_names!(pre, post, {name, arity}, arg_names, env) do
+    named = referenceable_names(arg_names)
+
+    validate_assertions!(pre, named, {name, arity}, arg_names, env, "precondition")
+
+    validate_assertions!(
+      post,
+      MapSet.put(named, :result),
+      {name, arity},
+      arg_names,
+      env,
+      "postcondition"
+    )
+  end
+
+  defp validate_assertions!(assertions, allowed, {name, arity}, arg_names, env, kind) do
+    for %Assertion{expression: expression} = assertion <- assertions do
+      unknown =
+        expression
+        |> Clauses.expression_var_names()
+        |> MapSet.difference(allowed)
+        |> Enum.sort()
+
+      if unknown != [] do
+        raise CompileError,
+          file: env.file,
+          line: assertion.definition_env.line || env.line,
+          description: unknown_reference_message(unknown, {name, arity}, arg_names, kind)
+      end
+    end
+  end
+
+  # Only genuinely named positions are referenceable; unnamed positions get a generated
+  # `bond_arg_<idx>` placeholder that no contract can meaningfully name.
+  defp referenceable_names(arg_names) do
+    arg_names
+    |> Enum.reject(&generated_name?/1)
+    |> MapSet.new()
+  end
+
+  defp generated_name?(name), do: String.starts_with?(Atom.to_string(name), "bond_arg_")
+
+  defp unknown_reference_message(unknown, {name, arity}, arg_names, kind) do
+    referenceable = arg_names |> Enum.reject(&generated_name?/1)
+
+    names_phrase =
+      case referenceable do
+        [] -> "the callback declares no named arguments"
+        names -> "the callback's argument names are #{Enum.map_join(names, ", ", &"`#{&1}`")}"
+      end
+
+    extra = if kind == "postcondition", do: " (and `result` for the return value)", else: ""
+
+    "Bond: the #{kind} on `#{name}/#{arity}` references " <>
+      "#{Enum.map_join(unknown, ", ", &"`#{&1}`")}, which #{unknown_verb(unknown)} not a callback " <>
+      "argument. A contract on a behaviour callback may reference only the callback's named " <>
+      "arguments#{extra}; #{names_phrase}. Name the callback's arguments (e.g. " <>
+      "`@callback #{name}(amount :: integer, …) :: …`) so contracts can bind to them positionally."
+  end
+
+  defp unknown_verb([_single]), do: "is"
+  defp unknown_verb(_many), do: "are"
 
   # Callback spec AST shapes:
   #   name(a :: t, b :: t) :: ret
