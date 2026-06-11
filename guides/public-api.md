@@ -1,4 +1,4 @@
-# Public API surface (1.0)
+# Public API surface (1.2)
 
 This page enumerates every callable, attribute, and configuration value Bond
 considers part of its **public surface** under the [stability
@@ -11,6 +11,8 @@ The full set of modules in published API docs is the source-of-truth for
 "public module":
 
   * `Bond`
+  * `Bond.Behaviour`
+  * `Bond.Protocol`
   * `Bond.Predicates`
   * `Bond.Test`
   * `Bond.PropertyTest`
@@ -124,6 +126,9 @@ any `:overrides` entry that matches the module:
     invariant-declaring module has no clause that pattern-matches the
     struct or returns one. See the FAQ entry "Why is Bond warning about
     skipped invariants?"
+  * `:behaviours` — a module or list of `Bond.Behaviour` modules whose callback
+    contracts this module inherits and enforces. Also emits `@behaviour` for
+    each. See "Contract inheritance" below.
 
 ## Per-function module attribute
 
@@ -133,6 +138,29 @@ any `:overrides` entry that matches the module:
     `false` suppresses the warning for that single function; `true` re-
     enables the warning for that single function even under a module-wide or
     global `false`.
+
+## Contract inheritance
+
+Two modules let an abstraction declare contracts that every implementation
+enforces. Both are part of the public surface; the full rules are in the
+[Contract Inheritance for Behaviours](contract-inheritance.md) and [Contract
+Inheritance for Protocols](protocol-contracts.md) guides.
+
+  * **`Bond.Behaviour`** — `use Bond.Behaviour` in a behaviour module enables
+    `@pre`/`@post` immediately preceding each `@callback`. The accepted contract
+    forms are the same as `@pre`/`@post` under `use Bond` (bare or labelled
+    keyword list); contract expressions reference the callback's argument names
+    and `result`. A module inherits them with `use Bond, behaviours: […]`.
+  * **`Bond.Protocol`** — `use Bond.Protocol` in a `defprotocol` enables
+    `@pre`/`@post` immediately preceding each `def`. Contracts are enforced at
+    the protocol's dispatch boundary across all implementations; expressions
+    reference the function's declared argument names and `result`.
+
+Inherited contracts are immutable: an implementation cannot weaken, strengthen,
+or refine them. The *fact* that the documented compile-time rules fire (e.g. an
+impl `@pre`/`@post` on an inherited operation is rejected; a contract may
+reference only declared names) is part of the public surface; the exact wording
+of those diagnostics is not.
 
 ## `Bond.Predicates`
 
@@ -185,7 +213,10 @@ Bond emits exactly one telemetry event:
   * **Metadata:** map with keys `:kind` (`:precondition` | `:postcondition` |
     `:invariant` | `:check`), `:label`, `:module`, `:function` (`{name, arity}`
     tuple), `:expression` (string source), `:file`, `:line`, `:binding`
-    (keyword list of variables in scope at the assertion site).
+    (keyword list of variables in scope at the assertion site). For inherited
+    contracts the metadata also carries `:source_behaviour` (the originating
+    `Bond.Behaviour`) or `:source_protocol` and `:impl` (the originating
+    `Bond.Protocol` and the resolved implementation module).
 
 The event is published *before* the corresponding error struct is raised, so
 telemetry handlers see every assertion failure even when an upstream
@@ -211,6 +242,12 @@ Public fields on every error struct:
   * `:module` — `module()`.
   * `:function` — `{name :: atom(), arity :: non_neg_integer()}` tuple.
   * `:binding` — `keyword()` of in-scope variables at the assertion site.
+  * `:source_behaviour` — `module() | nil`. The behaviour an inherited contract
+    came from (`Bond.Behaviour`), or `nil`.
+  * `:source_protocol` — `module() | nil`. The protocol a contract was declared
+    on (`Bond.Protocol`), or `nil`.
+  * `:impl` — `module() | nil`. When `:source_protocol` is set, the
+    implementation the failing call resolved to (or `nil` if unresolved).
 
 The `Exception.message/1` format is rendered by `Bond.AssertionError.message/2`
 and is human-readable — the exact text is *not* part of the public surface
