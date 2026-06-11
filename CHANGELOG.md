@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-06-11
+
+Brings **contract inheritance** to Bond: a behaviour or a protocol declares
+`@pre`/`@post` once, and every implementation enforces them — Design by Contract
+meeting the Liskov Substitution Principle. The release is backwards compatible;
+all additions are opt-in, and the new modules and options are now covered by the
+stability guarantees in `guides/stability.md`.
 
 ### Added
 
