@@ -92,6 +92,7 @@ defmodule Bond.MixProject do
         "CHANGELOG.md",
         "guides/getting-started.md",
         "guides/contract-inheritance.md",
+        "guides/protocol-contracts.md",
         "guides/stability.md",
         "guides/public-api.md",
         "guides/overhead.md",
