@@ -1,0 +1,27 @@
+%% Mikado graph — Allow `<~` pattern-bound names in protocol/behaviour contracts
+%% Goal (root) at top; leaves (do first) at bottom.
+%%
+%% Bug (from Photon dogfooding of #15): a protocol/behaviour @post such as
+%%   ({:ok, path} when is_binary(path)) <~ result
+%% is rejected because the reference validator counts `path` as a non-argument
+%% reference. But `path` is *bound* by the `<~` LHS pattern (which expands to a
+%% `case` clause head in Bond.Predicates.<~/2), not a free reference to a function
+%% argument — so the validator over-collects and the generated code would compile
+%% fine. The ordinary compiler path has no such restriction, so protocols/behaviours
+%% are inconsistent with the rest of Bond.
+graph TD
+    G[Goal: `<~` pattern bindings accepted in protocol & behaviour contracts]
+
+    G --> FIX[Clauses.expression_var_names/1 excludes `<~` pattern-bound names]
+    G --> PTEST[protocol_test: bound-name @post compiles AND enforces]
+    G --> BTEST[behaviour_test: bound-name @post compiles AND enforces]
+
+    FIX --> BOUND[match_pattern_bound_names/1: collect vars bound by each `<~` LHS pattern]
+    BOUND --> SPLIT[pattern vs guard: subtract pattern vars only, so a guard ref to a real arg still validates]
+    BOUND --> PIN[pinned `^var` is a reference, not a binding — not collected]
+    FIX --> CTEST[clauses_test: expression_var_names unit cases for `<~`, guard-ref, pin, nesting]
+
+    %% PTEST/BTEST depend on FIX; both validators already call expression_var_names/1,
+    %% so the single Clauses change fixes both sites at once.
+    PTEST --> FIX
+    BTEST --> FIX

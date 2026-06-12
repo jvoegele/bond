@@ -70,6 +70,26 @@ defmodule Bond.ProtocolTest do
     def describe(_), do: ""
   end
 
+  # Regression (Photon dogfooding of #15): a @post that binds a name inside a `<~` pattern, and
+  # references that name from the pattern's `when` guard, must compile and enforce. `path` is
+  # bound by the match (not a function argument), so the reference validator must not reject it.
+  defprotocol Resolvable do
+    use Bond.Protocol
+
+    @post ok_string: ({:ok, path} when is_binary(path)) <~ result
+    def resolve(spec)
+  end
+
+  defmodule Spec do
+    defstruct [:value]
+  end
+
+  defimpl Resolvable, for: Spec do
+    def resolve(%Spec{value: v}) do
+      if is_binary(v), do: {:ok, v}, else: {:error, :not_a_string}
+    end
+  end
+
   setup do
     # Contracts default to enabled; make sure no prior test left a runtime override in the
     # global persistent_term modes term.
@@ -153,6 +173,19 @@ defmodule Bond.ProtocolTest do
     end
   end
 
+  describe "`<~` pattern bindings in a postcondition (Photon regression)" do
+    test "the contract compiles and passes when the result matches the bound pattern" do
+      assert Resolvable.resolve(%Spec{value: "/etc/app"}) == {:ok, "/etc/app"}
+    end
+
+    test "the postcondition fails when the result doesn't match the bound pattern" do
+      error =
+        assert_raise Bond.PostconditionError, fn -> Resolvable.resolve(%Spec{value: nil}) end
+
+      assert error.label == :ok_string
+    end
+  end
+
   describe "compile-time validation" do
     test "a contract referencing a name the function doesn't declare is a compile error" do
       assert_raise CompileError, ~r/references `total`, which is not a function argument/, fn ->
@@ -161,6 +194,18 @@ defmodule Bond.ProtocolTest do
           use Bond.Protocol
           @pre positive: total > 0
           def withdraw(account, amount)
+        end
+        """)
+      end
+    end
+
+    test "a `<~` guard reference to an unknown name is still rejected (pattern bindings only are exempt)" do
+      assert_raise CompileError, ~r/references `limit`, which is not a function argument/, fn ->
+        Code.compile_string("""
+        defprotocol Bond.ProtocolTest.GuardRef do
+          use Bond.Protocol
+          @post ({:ok, v} when v > limit) <~ result
+          def f(data)
         end
         """)
       end

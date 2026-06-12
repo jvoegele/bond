@@ -74,6 +74,31 @@ contract binds by position, not by your chosen name. The same holds across
 every clause of a multi-clause implementation — one inherited contract applies
 uniformly to all of them.
 
+## Names a `<~` pattern binds are local to the contract
+
+The rule that a contract may reference only the callback's arguments (plus
+`result`) applies to *free* names — names that have to resolve to something
+outside the expression. A name **bound** by a `<~` match pattern is not free:
+the match introduces it, so it does not need to be an argument. This lets a
+`@post` destructure the result and constrain its parts in one expression:
+
+```elixir
+defmodule PathResolver do
+  use Bond.Behaviour
+
+  @post ok_string: ({:ok, path} when is_binary(path)) <~ result
+  @callback resolve(spec :: term) :: {:ok, String.t()} | {:error, term}
+end
+```
+
+Here `path` is bound by the pattern on the left of `<~`, and the `when` guard
+references that local binding — neither is a callback argument, and both are
+fine. Only the pattern's own bindings are exempt: a `when` guard may still
+reference an outer name, and that reference *is* validated. In
+`({:ok, v} when v > limit) <~ result`, `v` is pattern-bound but `limit` must be
+a callback argument (or `result`), or it is a compile error. The same applies
+to protocol contracts (see `guides/protocol-contracts.md`).
+
 ## Immutable inheritance (v1)
 
 Inherited contracts are **immutable**. An implementation may not weaken,
