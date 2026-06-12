@@ -77,36 +77,40 @@ defmodule Bond.Compiler.AnnotatedFunction do
     %{function_def | clauses: clauses ++ [Clause.new(clause_def)]}
   end
 
-  def put_preconditions(
-        %__MODULE__{preconditions: existing_preconditions} = annotated_function,
-        preconditions
-      )
+  def put_preconditions(%__MODULE__{preconditions: existing} = annotated_function, preconditions)
       when is_list(preconditions) do
-    # Check to make sure each element in the list is a `Bond.Assertion` struct.
-    Enum.each(preconditions, fn %Assertion{} -> :ok end)
-
-    %{annotated_function | preconditions: existing_preconditions ++ preconditions}
+    %{
+      annotated_function
+      | preconditions: existing ++ validate_all!(preconditions, fn %Assertion{} -> :ok end)
+    }
   end
 
   def put_postconditions(
-        %__MODULE__{postconditions: existing_postconditions} = annotated_function,
+        %__MODULE__{postconditions: existing} = annotated_function,
         postconditions
       )
       when is_list(postconditions) do
-    # Check to make sure each element in the list is a `Bond.Assertion` struct.
-    Enum.each(postconditions, fn %Assertion{} -> :ok end)
-
-    %{annotated_function | postconditions: existing_postconditions ++ postconditions}
+    %{
+      annotated_function
+      | postconditions: existing ++ validate_all!(postconditions, fn %Assertion{} -> :ok end)
+    }
   end
 
-  def put_invariants(
-        %__MODULE__{invariants: existing_invariants} = annotated_function,
-        invariants
-      )
+  def put_invariants(%__MODULE__{invariants: existing} = annotated_function, invariants)
       when is_list(invariants) do
-    Enum.each(invariants, fn %Assertion{kind: :invariant} -> :ok end)
+    %{
+      annotated_function
+      | invariants:
+          existing ++ validate_all!(invariants, fn %Assertion{kind: :invariant} -> :ok end)
+    }
+  end
 
-    %{annotated_function | invariants: existing_invariants ++ invariants}
+  # Raises (a MatchError from `validator`) unless every element is the expected assertion struct —
+  # preconditions/postconditions any `Assertion`, invariants an `Assertion` of `kind: :invariant`.
+  # Returns the list unchanged so callers can append it inline.
+  defp validate_all!(assertions, validator) do
+    Enum.each(assertions, validator)
+    assertions
   end
 
   def put_doc_attributes(
