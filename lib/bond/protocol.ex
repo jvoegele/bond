@@ -50,6 +50,7 @@ defmodule Bond.Protocol do
   (`config :bond, …` and `Bond.Config`) applies as usual.
   """
 
+  alias Bond.Compiler.EnvSnapshot
   alias Bond.Compiler.InheritedContracts
   alias Bond.Compiler.InheritedContracts.Context
   alias Bond.Compiler.ProtocolWrapper
@@ -135,7 +136,32 @@ defmodule Bond.Protocol do
         ProtocolWrapper.build_wrapper(env.module, name, arity, arg_names, pre, post)
       end
 
-    {:__block__, [], wrappers}
+    # Emit a reflection function so `Bond.Protocol.Impl` can read the protocol's contracts at
+    # impl compile time (the protocol is always compiled before its impls). Assertions are
+    # sanitized with `EnvSnapshot` before escaping — a live `Macro.Env` carries a pid
+    # (`:lexical_tracker`) that has no quoted form.
+    contract_clauses =
+      for {{name, arity}, arg_names, pre, post} <- contracts do
+        sanitized_pre = Enum.map(pre, &EnvSnapshot.sanitize_assertion/1)
+        sanitized_post = Enum.map(post, &EnvSnapshot.sanitize_assertion/1)
+
+        quote do
+          @doc false
+          def __bond_protocol_contract__(unquote(name), unquote(arity)) do
+            {unquote(Macro.escape(arg_names)),
+             unquote(Macro.escape(sanitized_pre)),
+             unquote(Macro.escape(sanitized_post))}
+          end
+        end
+      end
+
+    catch_all =
+      quote do
+        @doc false
+        def __bond_protocol_contract__(_name, _arity), do: :no_contract
+      end
+
+    {:__block__, [], wrappers ++ contract_clauses ++ [catch_all]}
   end
 
   # The shared inheritance plumbing (pending accumulation, reference validation, diagnostics)
