@@ -30,14 +30,44 @@ defmodule Bond.Behaviour do
   implementation's parameters are rebound to them positionally — so the impl is free to name
   its parameters differently.
 
-  ## Immutable inheritance (v1)
+  ## Inheriting verbatim
 
-  Inherited contracts are **immutable**: an implementation may not weaken, strengthen, or add
-  to them. Attaching `@pre`/`@post` to an impl function whose `{name, arity}` matches an
-  inherited contract is a compile error — use `Bond.check/1` in the body for
-  implementation-specific assertions. Forbidding (rather than silently accepting) impl-level
-  contracts on inherited operations keeps that syntax reserved for a future Eiffel-style
-  refinement feature (`@pre_else`/`@post_then`).
+  By default an implementation inherits its callbacks' contracts **verbatim**. Attaching a plain
+  `@pre`/`@post` to an impl function whose `{name, arity}` matches an inherited contract is a
+  compile error: a plain impl-level precondition would *strengthen* the inherited one, which
+  breaks Liskov substitutability. For an implementation-specific assertion that is independent of
+  the contract, use `Bond.check/1` in the body.
+
+  ## Refining inherited contracts (`@pre_weaken` / `@post_strengthen`)
+
+  An implementation may *deliberately refine* what it inherits, following Eiffel's
+  behavioural-subtyping rules. Two distinct annotations make the (counterintuitive) variance
+  explicit:
+
+    * `@pre_weaken` — **weakens** the precondition. The effective precondition is
+      `inherited or pre_weaken`: the impl accepts everything the abstraction promised, and *more*.
+      (Preconditions may only weaken down a hierarchy — contravariance.)
+    * `@post_strengthen` — **strengthens** the postcondition. The effective postcondition is
+      `inherited and post_strengthen`: callers get at least the abstract guarantee, and *more*.
+      (Postconditions may only strengthen — covariance.)
+
+  Unlike inherited contracts, refinement expressions reference the **implementation's own**
+  parameter names (so they read like, and document like, an ordinary `@pre`/`@post` on the
+  function).
+
+      defmodule SavingsAccount do
+        use Bond, behaviours: [Ledger]
+
+        @impl true
+        @pre_weaken small_withdrawal: amt == 0        # effective pre  = Ledger's OR this
+        @post_strengthen audited: log_exists?(result) # effective post = Ledger's AND this
+        def withdraw(bal, amt), do: ...
+      end
+
+  A refinement only applies to a function that inherits a contract. `@pre_weaken` requires an
+  inherited precondition to weaken (you may not *introduce* one — that would strengthen);
+  `@post_strengthen` may add a postcondition where the callback declared none. `old/1` is not
+  available in `@post_strengthen` (it remains available in the inherited `@post`).
 
   ## Reflection
 

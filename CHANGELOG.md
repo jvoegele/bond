@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Eiffel-style contract refinement of inherited behaviour contracts (GitHub
+  #16).** An implementation that inherits a `Bond.Behaviour` callback's contract
+  may now *refine* it instead of inheriting it verbatim, following Eiffel's
+  behavioural-subtyping rules:
+
+    - `@pre_weaken` **weakens** the inherited precondition — effective precondition
+      is `inherited or pre_weaken` (contravariance; the impl accepts everything the
+      abstraction promised, and more).
+    - `@post_strengthen` **strengthens** the inherited postcondition — effective
+      postcondition is `inherited and post_strengthen` (covariance; callers get at
+      least the abstract guarantee, and more). It may also add a postcondition
+      where the callback declared none.
+
+  The distinct keywords make the (counterintuitive) variance explicit, and
+  refinement expressions reference the implementation's own parameter names. Plain
+  `@pre`/`@post` on an inherited operation remains a compile error. `@pre_weaken`
+  requires an inherited precondition to weaken; `old/1` is not available in
+  `@post_strengthen`. Qualified `Bond.pre_weaken/1` and `Bond.post_strengthen/1`
+  are available for the `at_annotations: false` path.
+
 ## [1.2.1] - 2026-06-12
 
 ### Fixed

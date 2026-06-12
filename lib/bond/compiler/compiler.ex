@@ -366,32 +366,87 @@ defmodule Bond.Compiler do
   # Attaches a behaviour's inherited contracts to the matching implementation function. The
   # match is purely on `{name, arity}` — independent of whether the impl wrote `@impl true`,
   # and triggered only for callbacks the module actually implements (so optional callbacks the
-  # impl skips contribute nothing). Enforces the immutable-v1 bright line: an impl that attaches
-  # its own `@pre`/`@post` to an inherited operation is a compile error, because adding to an
-  # inherited precondition would strengthen it (breaking Liskov substitutability) and adding to
-  # a postcondition is refinement by the back door. Use `check/1` in the body for impl-specific
-  # assertions.
+  # impl skips contribute nothing).
+  #
+  # An impl may not attach a *plain* `@pre`/`@post` to an inherited operation (it would strengthen
+  # the inherited precondition, breaking Liskov substitutability) — that stays a compile error.
+  # It MAY deliberately refine the inherited contract with `@pre_weaken` (effective pre =
+  # inherited OR weaken) or `@post_strengthen` (effective post = inherited AND strengthen) (#16);
+  # those are partitioned off here and folded by the codegen. A refinement that targets a
+  # non-inherited function, or a `@pre_weaken` with no inherited precondition to weaken, is itself
+  # a compile error.
   defp merge_inherited_contract(%AnnotatedFunction{} = annotated_function, inherited) do
     key = {annotated_function.fun, annotated_function.arity}
 
+    {plain_pre, weaken_pre} = partition_refinements(annotated_function.preconditions)
+    {plain_post, strengthen_post} = partition_refinements(annotated_function.postconditions)
+
     case Map.fetch(inherited, key) do
       :error ->
+        # Not an inherited operation: `@pre_weaken`/`@post_strengthen` have nothing to refine.
+        if weaken_pre != [] or strengthen_post != [] do
+          raise CompileError,
+            file: inherited_violation_file(annotated_function),
+            line: inherited_violation_line(annotated_function),
+            description: nothing_to_refine_message(annotated_function)
+        end
+
         annotated_function
 
-      {:ok, %{arg_names: names, preconditions: pre, postconditions: post}} ->
-        if AnnotatedFunction.has_preconditions?(annotated_function) or
-             AnnotatedFunction.has_postconditions?(annotated_function) do
+      {:ok, %{arg_names: names, preconditions: inherited_pre, postconditions: inherited_post}} ->
+        if plain_pre != [] or plain_post != [] do
           raise CompileError,
             file: inherited_violation_file(annotated_function),
             line: inherited_violation_line(annotated_function),
             description: immutable_contract_message(annotated_function)
         end
 
+        if weaken_pre != [] and inherited_pre == [] do
+          raise CompileError,
+            file: inherited_violation_file(annotated_function),
+            line: inherited_violation_line(annotated_function),
+            description: nothing_to_weaken_message(annotated_function)
+        end
+
+        reject_old_in_strengthen!(strengthen_post, annotated_function)
+
         annotated_function
-        |> AnnotatedFunction.put_preconditions(pre)
-        |> AnnotatedFunction.put_postconditions(post)
+        |> AnnotatedFunction.replace_preconditions(inherited_pre)
+        |> AnnotatedFunction.replace_postconditions(inherited_post)
+        |> AnnotatedFunction.put_pre_weaken(weaken_pre)
+        |> AnnotatedFunction.put_post_strengthen(strengthen_post)
         |> AnnotatedFunction.put_canonical_override(names)
     end
+  end
+
+  # Splits a function's own assertions into {plain, refinement} by the `:refinement` tag the
+  # `@pre_weaken`/`@post_strengthen` macros set (`nil` => plain `@pre`/`@post`).
+  defp partition_refinements(assertions) do
+    Enum.split_with(assertions, fn %Assertion{refinement: r} -> is_nil(r) end)
+  end
+
+  # `@post_strengthen` runs in the lifted postcondition defp without `old/1` precompilation, so
+  # reject `old(...)` rather than letting it surface as an "undefined function old/1" deep in
+  # generated code. The inherited postcondition may still use `old/1` as before.
+  defp reject_old_in_strengthen!(strengthen_post, annotated_function) do
+    if Enum.any?(strengthen_post, &uses_old?(&1.expression)) do
+      raise CompileError,
+        file: inherited_violation_file(annotated_function),
+        line: inherited_violation_line(annotated_function),
+        description: old_in_strengthen_message(annotated_function)
+    end
+
+    :ok
+  end
+
+  defp uses_old?(expression) do
+    {_, found?} =
+      Macro.prewalk(expression, false, fn
+        {:old, _, args} = node, _acc when is_list(args) -> {node, true}
+        node, acc -> {node, acc}
+      end)
+
+    found?
   end
 
   defp inherited_violation_file(%AnnotatedFunction{clauses: [clause | _]}), do: clause.env.file
@@ -402,10 +457,31 @@ defmodule Bond.Compiler do
 
   defp immutable_contract_message(%AnnotatedFunction{fun: fun, arity: arity}) do
     "Bond: `#{fun}/#{arity}` inherits a contract from a behaviour, so it may not declare its " <>
-      "own `@pre`/`@post`. Inherited contracts are immutable in v1 — adding an impl-level " <>
-      "precondition would strengthen the inherited one (violating Liskov substitutability), " <>
-      "and an impl-level postcondition is refinement by the back door. For an " <>
-      "implementation-specific assertion, use `check/1` in the function body instead."
+      "own `@pre`/`@post` (a plain impl-level precondition would strengthen the inherited one, " <>
+      "violating Liskov substitutability). To deliberately refine the inherited contract, use " <>
+      "`@pre_weaken` (weakens the inherited precondition) or `@post_strengthen` (strengthens the " <>
+      "inherited postcondition). For an implementation-specific assertion independent of the " <>
+      "contract, use `check/1` in the function body instead."
+  end
+
+  defp nothing_to_refine_message(%AnnotatedFunction{fun: fun, arity: arity}) do
+    "Bond: `#{fun}/#{arity}` uses `@pre_weaken`/`@post_strengthen` but inherits no contract to " <>
+      "refine. Refinement only applies to a function that inherits a `@pre`/`@post` from a " <>
+      "behaviour callback. Use plain `@pre`/`@post` for a contract on a non-inherited function."
+  end
+
+  defp nothing_to_weaken_message(%AnnotatedFunction{fun: fun, arity: arity}) do
+    "Bond: `#{fun}/#{arity}` uses `@pre_weaken` but the inherited contract declares no " <>
+      "precondition to weaken. An implementation may not introduce a precondition on an " <>
+      "inherited operation — that would strengthen it, violating Liskov substitutability. " <>
+      "Use `@post_strengthen` to strengthen the postcondition, or `check/1` in the body for an " <>
+      "implementation-specific assertion."
+  end
+
+  defp old_in_strengthen_message(%AnnotatedFunction{fun: fun, arity: arity}) do
+    "Bond: the `@post_strengthen` on `#{fun}/#{arity}` uses `old/1`, which is not supported in a " <>
+      "refinement postcondition. `old/1` is available in the inherited `@post` (on the behaviour " <>
+      "callback) but not in the implementation's `@post_strengthen`."
   end
 
   # Builds the AST that augments the user's `@moduledoc` with a generated
@@ -455,8 +531,17 @@ defmodule Bond.Compiler do
   end
 
   def register_assertion(kind, expression, label, env, meta) do
+    register_assertion(kind, expression, label, env, meta, nil)
+  end
+
+  @doc false
+  def register_assertion(kind, expression, label, env, meta, refinement)
+      when kind in [:precondition, :postcondition] do
     Assertion.validate_expression!(expression, env)
-    assertion = Assertion.new(kind, label, expression, env, meta)
+
+    assertion =
+      Assertion.new(kind, label, expression, env, meta)
+      |> maybe_put_refinement(refinement)
 
     fsm_event =
       case kind do
@@ -466,6 +551,11 @@ defmodule Bond.Compiler do
 
     apply(FSM, fsm_event, [fsm(env), assertion])
   end
+
+  defp maybe_put_refinement(assertion, nil), do: assertion
+
+  defp maybe_put_refinement(assertion, refinement),
+    do: Assertion.put_refinement(assertion, refinement)
 
   @doc false
   def register_invariant(expression, label, env, meta) do

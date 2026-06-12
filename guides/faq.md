@@ -796,11 +796,14 @@ implementation can name its parameters however it likes. A violation is
 attributed to the source behaviour (`precondition (inherited from Ledger)
 failed for call to BankAccount.withdraw/2`).
 
-Inherited contracts are immutable in v1 — an implementation can't modify or add
-to them, and attaching `@pre`/`@post` to an inherited operation is a compile
-error. Use `check/1` in the function body for an implementation-specific
-assertion. See the [Contract
-Inheritance](contract-inheritance.md#behaviours) guide for the full rules.
+By default an implementation inherits its contracts verbatim, and attaching a
+plain `@pre`/`@post` to an inherited operation is a compile error. An
+implementation may *deliberately* refine a behaviour's contract with
+`@pre_weaken` (weakens the precondition) or `@post_strengthen` (strengthens the
+postcondition) — Eiffel-style behavioural subtyping. Use `check/1` in the
+function body for an implementation-specific assertion independent of the
+contract. See the [Contract Inheritance](contract-inheritance.md#behaviours)
+guide for the full rules.
 
 > #### Behaviour-level invariants {: .info}
 >

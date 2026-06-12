@@ -43,7 +43,15 @@ defmodule Bond.Compiler.AnnotatedFunction do
             # positionally and the multi-clause name-agreement check is bypassed — there is
             # nothing to negotiate, the callback dictates the names. `nil` for ordinary
             # functions, which derive canonical names from their own clauses.
-            canonical_names_override: nil
+            canonical_names_override: nil,
+            # Impl-authored refinement assertions (#16). When either is non-empty the function
+            # *refines* an inherited contract: `@pre_weaken` weakens the inherited precondition
+            # (effective pre = inherited OR pre_weaken) and `@post_strengthen` strengthens the
+            # inherited postcondition (effective post = inherited AND post_strengthen). Their
+            # expressions reference the implementation's own parameter names; `preconditions` /
+            # `postconditions` hold the inherited (canonical-named) assertions they fold against.
+            pre_weaken_assertions: [],
+            post_strengthen_assertions: []
 
   @type t :: %__MODULE__{
           kind: :def | :defp | nil,
@@ -55,7 +63,9 @@ defmodule Bond.Compiler.AnnotatedFunction do
           postconditions: [Bond.Compiler.Assertion.t()],
           invariants: [Bond.Compiler.Assertion.t()],
           doc_attributes: [FunctionDefinition.doc_attribute()],
-          canonical_names_override: [atom()] | nil
+          canonical_names_override: [atom()] | nil,
+          pre_weaken_assertions: [Bond.Compiler.Assertion.t()],
+          post_strengthen_assertions: [Bond.Compiler.Assertion.t()]
         }
 
   def new(%FunctionDefinition{} = function_def) do
@@ -131,6 +141,36 @@ defmodule Bond.Compiler.AnnotatedFunction do
     %{annotated_function | canonical_names_override: names}
   end
 
+  @doc """
+  Replaces the precondition/postcondition lists outright (vs the appending `put_*` setters).
+
+  Used by `Bond.Compiler.merge_inherited_contract/2` when folding a refinement: the impl's own
+  `@pre_weaken`/`@post_strengthen` assertions are moved off `preconditions`/`postconditions`
+  (where the FSM placed them) into the dedicated refinement fields, and these fields are reset to
+  hold only the inherited (canonical-named) assertions they fold against.
+  """
+  def replace_preconditions(%__MODULE__{} = annotated_function, preconditions)
+      when is_list(preconditions),
+      do: %{annotated_function | preconditions: preconditions}
+
+  def replace_postconditions(%__MODULE__{} = annotated_function, postconditions)
+      when is_list(postconditions),
+      do: %{annotated_function | postconditions: postconditions}
+
+  @doc """
+  Sets the impl's `@pre_weaken` / `@post_strengthen` refinement assertions (#16). These reference
+  the implementation's own parameter names and fold against the inherited contract at codegen.
+  """
+  def put_pre_weaken(%__MODULE__{} = annotated_function, assertions) when is_list(assertions),
+    do: %{annotated_function | pre_weaken_assertions: assertions}
+
+  def put_post_strengthen(%__MODULE__{} = annotated_function, assertions)
+      when is_list(assertions),
+      do: %{annotated_function | post_strengthen_assertions: assertions}
+
+  def has_pre_weaken?(%__MODULE__{pre_weaken_assertions: a}), do: not Enum.empty?(a)
+  def has_post_strengthen?(%__MODULE__{post_strengthen_assertions: a}), do: not Enum.empty?(a)
+
   def has_preconditions?(%__MODULE__{preconditions: preconditions}),
     do: not Enum.empty?(preconditions)
 
@@ -146,6 +186,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
   def override?(%__MODULE__{} = annotated_function) do
     has_preconditions?(annotated_function) or
       has_postconditions?(annotated_function) or
+      has_pre_weaken?(annotated_function) or
+      has_post_strengthen?(annotated_function) or
       (annotated_function.kind == :def and has_invariants?(annotated_function))
   end
 
@@ -223,11 +265,20 @@ defmodule Bond.Compiler.AnnotatedFunction do
   def apply_contract(annotated_function, config \\ %{preconditions: true, postconditions: true})
 
   def apply_contract(%__MODULE__{} = annotated_function, config) do
+    # A refinement (`@pre_weaken`/`@post_strengthen`) counts as "having" that kind even when the
+    # inherited group is empty (e.g. adding a postcondition where the behaviour declared none), so
+    # the kind isn't purged out from under it.
     pre_mode =
-      resolve_mode(Map.fetch!(config, :preconditions), has_preconditions?(annotated_function))
+      resolve_mode(
+        Map.fetch!(config, :preconditions),
+        has_preconditions?(annotated_function) or has_pre_weaken?(annotated_function)
+      )
 
     post_mode =
-      resolve_mode(Map.fetch!(config, :postconditions), has_postconditions?(annotated_function))
+      resolve_mode(
+        Map.fetch!(config, :postconditions),
+        has_postconditions?(annotated_function) or has_post_strengthen?(annotated_function)
+      )
 
     inv_mode =
       Invariants.resolve_mode(
@@ -340,10 +391,13 @@ defmodule Bond.Compiler.AnnotatedFunction do
       if post_mode != :purge do
         OldExpression.precompile(annotated_function.postconditions)
       else
-        {[], %{}}
+        OldExpression.precompile([])
       end
 
     doc_asts = ContractDocs.doc_clauses(annotated_function, env, pre_mode, post_mode)
+
+    {weaken_prelude, strengthen_prelude} =
+      refinement_preludes(annotated_function, canonical_names, env, {fun, arity})
 
     wrapper_context = %{
       fun: fun,
@@ -357,7 +411,9 @@ defmodule Bond.Compiler.AnnotatedFunction do
       post_fn_name: lifted_fn_name(:postconditions, fun, arity),
       inv_fn_name: lifted_fn_name(:invariants, fun, arity),
       old_pairs: OldExpression.pairs(old_context),
-      old_assignments: OldExpression.resolve(old_context)
+      old_assignments: OldExpression.resolve(old_context),
+      weaken_prelude: weaken_prelude,
+      strengthen_prelude: strengthen_prelude
     }
 
     defp_params = lifted_defp_params(annotated_function, canonical_names, first_clause)
@@ -452,25 +508,22 @@ defmodule Bond.Compiler.AnnotatedFunction do
     struct_module = wrapper_context.struct_module
 
     [
-      maybe_build_assertion_defp(
-        wrapper_context.pre_fn_name,
+      build_pre_defp(
+        annotated_function,
         defp_params,
-        [],
-        annotated_function.preconditions,
         function_info,
         struct_module,
         env,
-        wrapper_context.pre_mode
+        wrapper_context
       ),
-      maybe_build_assertion_defp(
-        wrapper_context.post_fn_name,
-        defp_params,
-        postcondition_extra_params(wrapper_context.old_pairs),
+      build_post_defp(
+        annotated_function,
         postconditions,
+        defp_params,
         function_info,
         struct_module,
         env,
-        wrapper_context.post_mode
+        wrapper_context
       ),
       Invariants.build_lifted_defp(
         wrapper_context.inv_fn_name,
@@ -506,18 +559,173 @@ defmodule Bond.Compiler.AnnotatedFunction do
     [result_param | old_params]
   end
 
-  defp maybe_build_assertion_defp(
-         _name,
-         _params,
-         _extra,
-         _assertions,
-         _info,
-         _module,
-         _env,
-         :purge
-       ),
-       do: nil
+  # Precondition defp: the refined (`inherited OR @pre_weaken`) form when a refinement is present,
+  # otherwise the ordinary conjunction defp. Both share the lifted-defp name/shape so the wrapper's
+  # `evaluate_preconditions(fn -> __bond_preconditions__…() end)` call is unchanged.
+  defp build_pre_defp(_af, _params, _info, _module, _env, %{pre_mode: :purge}), do: nil
 
+  defp build_pre_defp(
+         %__MODULE__{pre_weaken_assertions: []} = af,
+         defp_params,
+         info,
+         module,
+         env,
+         wc
+       ) do
+    maybe_build_assertion_defp(
+      wc.pre_fn_name,
+      defp_params,
+      [],
+      af.preconditions,
+      info,
+      module,
+      env,
+      wc.pre_mode
+    )
+  end
+
+  defp build_pre_defp(%__MODULE__{} = af, defp_params, info, module, env, wc) do
+    body =
+      Assertion.pre_weaken_body(
+        af.preconditions,
+        af.pre_weaken_assertions,
+        wc.weaken_prelude,
+        info,
+        module
+      )
+
+    build_lifted_defp_with_body(wc.pre_fn_name, defp_params, body, env)
+  end
+
+  # Postcondition defp: the strengthened (`inherited AND @post_strengthen`) form when a refinement
+  # is present, otherwise the ordinary one. `postconditions` is the inherited group, already
+  # `OldExpression.precompile`d; `@post_strengthen` assertions carry no `old/1` (rejected at the
+  # merge gate) so they need no precompilation.
+  defp build_post_defp(_af, _post, _params, _info, _module, _env, %{post_mode: :purge}), do: nil
+
+  defp build_post_defp(
+         %__MODULE__{post_strengthen_assertions: []},
+         postconditions,
+         defp_params,
+         info,
+         module,
+         env,
+         wc
+       ) do
+    maybe_build_assertion_defp(
+      wc.post_fn_name,
+      defp_params,
+      postcondition_extra_params(wc.old_pairs),
+      postconditions,
+      info,
+      module,
+      env,
+      wc.post_mode
+    )
+  end
+
+  defp build_post_defp(%__MODULE__{} = af, postconditions, defp_params, info, module, env, wc) do
+    body =
+      Assertion.post_strengthen_body(
+        postconditions,
+        af.post_strengthen_assertions,
+        wc.strengthen_prelude,
+        info,
+        module
+      )
+
+    params = defp_params ++ postcondition_extra_params(wc.old_pairs)
+    build_lifted_defp_with_body(wc.post_fn_name, params, body, env)
+  end
+
+  # Emits the `@dialyzer {:nowarn_function, ...}` + `defp name(params) do body end` pair shared by
+  # the refined assertion defps (the ordinary path inlines the same shape in
+  # `maybe_build_assertion_defp/8`). See that function for why the nowarn attribute is needed.
+  defp build_lifted_defp_with_body(name, params, body, env) do
+    arity = length(params)
+
+    quote file: env.file, line: env.line do
+      @dialyzer {:nowarn_function, [{unquote(name), unquote(arity)}]}
+      defp unquote(name)(unquote_splicing(params)) do
+        unquote(body)
+      end
+    end
+  end
+
+  # Builds the `impl_name = canonical_name` assignment preludes for a refining function (#16). The
+  # lifted assertion defps take the inherited contract's *canonical* (callback) names as their
+  # parameters, but `@pre_weaken`/`@post_strengthen` expressions reference the implementation's OWN
+  # parameter names; for each position a refinement references, bind the impl name to the canonical
+  # value so the refinement evaluates correctly. Returns `{weaken_prelude, strengthen_prelude}` —
+  # assignment-AST lists spliced into the precondition and postcondition defps; both empty for a
+  # non-refining function.
+  defp refinement_preludes(%__MODULE__{} = af, canonical_names, env, function_info) do
+    if af.pre_weaken_assertions == [] and af.post_strengthen_assertions == [] do
+      {[], []}
+    else
+      all = af.pre_weaken_assertions ++ af.post_strengthen_assertions
+      referenced_any = Clauses.referenced_param_names(all, af.clauses)
+
+      {:ok, impl_names} =
+        Clauses.assert_clauses_agree!(af.clauses, env, function_info, referenced_any)
+
+      canonical_set = MapSet.new(canonical_names)
+
+      {
+        group_prelude(
+          af.pre_weaken_assertions,
+          af,
+          impl_names,
+          canonical_names,
+          canonical_set,
+          env
+        ),
+        group_prelude(
+          af.post_strengthen_assertions,
+          af,
+          impl_names,
+          canonical_names,
+          canonical_set,
+          env
+        )
+      }
+    end
+  end
+
+  defp group_prelude([], _af, _impl_names, _canonical_names, _canonical_set, _env), do: []
+
+  defp group_prelude(group, af, impl_names, canonical_names, canonical_set, env) do
+    referenced = Clauses.referenced_param_names(group, af.clauses)
+
+    bindings =
+      impl_names
+      |> Enum.zip(canonical_names)
+      |> Enum.filter(fn {impl_name, _canonical} -> MapSet.member?(referenced, impl_name) end)
+      |> Enum.reject(fn {impl_name, canonical} -> impl_name == canonical end)
+
+    Enum.each(bindings, fn {impl_name, _canonical} ->
+      if MapSet.member?(canonical_set, impl_name) do
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description: refinement_name_collision_message(impl_name, {af.fun, af.arity})
+      end
+    end)
+
+    for {impl_name, canonical} <- bindings do
+      quote do: unquote(Macro.var(impl_name, nil)) = unquote(Macro.var(canonical, nil))
+    end
+  end
+
+  defp refinement_name_collision_message(impl_name, {fun, arity}) do
+    "Bond: the refinement on `#{fun}/#{arity}` uses the parameter name `#{impl_name}`, which is " <>
+      "also an argument name of the inherited contract at a different position. Rename the " <>
+      "implementation's parameter so refinement (`@pre_weaken`/`@post_strengthen`) bindings do " <>
+      "not shadow the inherited contract's arguments."
+  end
+
+  # The `:purge` mode is intercepted by `build_pre_defp/6` / `build_post_defp/7` before reaching
+  # here, so this builder is only ever called for an emitted kind.
   defp maybe_build_assertion_defp(
          name,
          call_params,

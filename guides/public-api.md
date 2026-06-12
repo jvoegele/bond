@@ -157,11 +157,26 @@ enforces. Both are part of the public surface; the full rules are in the
     the protocol's dispatch boundary across all implementations; expressions
     reference the function's declared argument names and `result`.
 
-Inherited contracts are immutable: an implementation cannot weaken, strengthen,
-or refine them. The *fact* that the documented compile-time rules fire (e.g. an
-impl `@pre`/`@post` on an inherited operation is rejected; a contract may
-reference only declared names) is part of the public surface; the exact wording
-of those diagnostics is not.
+By default an implementation inherits its contracts verbatim; a plain
+`@pre`/`@post` on an inherited operation is rejected. An implementation that
+inherits a **behaviour** callback's contract may *refine* it with two further
+annotations (Eiffel-style behavioural subtyping):
+
+  * `@pre_weaken` / `Bond.pre_weaken/1` — weakens the inherited precondition
+    (effective pre = `inherited or pre_weaken`).
+  * `@post_strengthen` / `Bond.post_strengthen/1` — strengthens the inherited
+    postcondition (effective post = `inherited and post_strengthen`).
+
+They accept the same bare/labelled forms as `@pre`/`@post`, and their
+expressions reference the implementation's own parameter names (plus `result` for
+`@post_strengthen`). The qualified `Bond.pre_weaken/1` / `Bond.post_strengthen/1`
+forms serve the `at_annotations: false` path. Refining a *protocol* contract is
+not yet supported.
+
+The *fact* that the documented compile-time rules fire (e.g. a plain
+`@pre`/`@post` on an inherited operation is rejected; `@pre_weaken` requires an
+inherited precondition; a contract may reference only declared names) is part of
+the public surface; the exact wording of those diagnostics is not.
 
 ## `Bond.Predicates`
 
