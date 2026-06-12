@@ -265,11 +265,20 @@ defmodule Bond.Compiler.AnnotatedFunction do
   def apply_contract(annotated_function, config \\ %{preconditions: true, postconditions: true})
 
   def apply_contract(%__MODULE__{} = annotated_function, config) do
+    # A refinement (`@pre_weaken`/`@post_strengthen`) counts as "having" that kind even when the
+    # inherited group is empty (e.g. adding a postcondition where the behaviour declared none), so
+    # the kind isn't purged out from under it.
     pre_mode =
-      resolve_mode(Map.fetch!(config, :preconditions), has_preconditions?(annotated_function))
+      resolve_mode(
+        Map.fetch!(config, :preconditions),
+        has_preconditions?(annotated_function) or has_pre_weaken?(annotated_function)
+      )
 
     post_mode =
-      resolve_mode(Map.fetch!(config, :postconditions), has_postconditions?(annotated_function))
+      resolve_mode(
+        Map.fetch!(config, :postconditions),
+        has_postconditions?(annotated_function) or has_post_strengthen?(annotated_function)
+      )
 
     inv_mode =
       Invariants.resolve_mode(
