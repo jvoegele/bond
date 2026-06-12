@@ -673,6 +673,101 @@ relaxation (see above) also makes the workaround lighter: cross-clause
 agreement is only enforced at parameter positions a contract actually
 references.
 
+## How do I reuse a predicate across several functions?
+
+If the same condition guards an argument in several functions, you don't
+have to retype the expression each time. Contract expressions are ordinary
+Elixir, so the simplest reuse is to **define the predicate as a function**
+and call it from each contract:
+
+```elixir
+defmodule Mailer do
+  use Bond
+
+  @pre valid_recipient: valid_email?(to)
+  def send_welcome(to, name), do: ...
+
+  @pre valid_recipient: valid_email?(to)
+  def unsubscribe(to), do: ...
+
+  # The reusable predicate — declared once, called from any contract.
+  def valid_email?(address) do
+    is_binary(address) and String.contains?(address, "@")
+  end
+end
+```
+
+The predicate can be a private `defp`; it still resolves inside contracts
+because Bond's checks run in the same module. On failure the error reports
+the **call**, not the expanded body:
+
+```
+label: :valid_recipient
+assertion: valid_email?(to)
+```
+
+That named form is exactly what you want when the predicate is gnarly (a
+real email regex reads worse than `valid_email?`). When you'd rather see
+the **full expanded expression** in errors and docs — and abstract the
+*label* along with it — reach for a macro instead.
+
+### Abstracting the label, and inlining the expanded source
+
+Bond renders an assertion by running `Macro.to_string/1` on the surface
+AST you wrote, **without macro-expanding it first**. So a macro *call*
+inside `@pre` prints as the call (the named form above). To make the
+expanded expression show up, write a macro that **emits the whole labelled
+`@pre`**:
+
+```elixir
+defmodule Contracts do
+  use Bond  # <-- required; see the caveat below
+
+  defmacro require_email(name) do
+    var = Macro.var(name, nil)
+
+    quote do
+      @pre valid_recipient:
+             is_binary(unquote(var)) and String.contains?(unquote(var), "@")
+    end
+  end
+end
+
+defmodule Mailer do
+  use Bond
+  require Contracts
+
+  Contracts.require_email(:email)   # one line per function
+  def send(email), do: email
+end
+```
+
+Now both the label and the expression are abstracted into one reusable
+macro, and the error reports the fully expanded contract:
+
+```
+label: :valid_recipient
+assertion: is_binary(email) and String.contains?(email, "@")
+binding: [email: "nope"]
+```
+
+The generated `## Contracts` documentation uses the same captured string,
+so it shows the expanded expression too. A single macro can emit several
+`@pre`/`@post` lines, which lets you abstract over a *group* of labelled
+predicates at once.
+
+### Caveat: the predicate macro's module must `use Bond`
+
+This is macro hygiene. The `@` inside `Contracts`'s `quote` resolves in
+`Contracts`'s context — so if that module doesn't `use Bond`, its `@pre`
+is plain `Kernel.@/1`, which treats `@pre <expr>` as a module-attribute
+assignment and *eagerly evaluates* the right-hand side. The symptom is a
+compile error like `undefined variable "email"`. Add `use Bond` to the
+module that defines the predicate macros and `@pre` resolves to Bond's
+override, deferring the expression into the generated check as intended.
+(You don't need `var!` — `Macro.var(name, nil)` unifies with the function
+parameter on its own.)
+
 ## How do I share one contract across every implementation of a behaviour?
 
 Declare the contract on the behaviour's `@callback` with `Bond.Behaviour`,
