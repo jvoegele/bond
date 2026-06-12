@@ -277,16 +277,17 @@ parameters freely (`bal`/`amt` above). A failure is attributed to its origin —
 Passing `behaviours: [Ledger]` also emits `@behaviour Ledger` for you, so
 `@impl` and Elixir's callback checks apply.
 
-> #### Immutable inheritance {: .info}
+> #### Inheriting and refining {: .info}
 >
-> Inherited contracts are immutable in v1: an implementation may not modify or
-> add to them, and attaching `@pre`/`@post` to an inherited operation is a
-> compile error (use `check/1` in the body for implementation-specific
-> assertions). This keeps preconditions from being strengthened — which would
-> break substitutability — and reserves the syntax for future Eiffel-style
-> refinement. See the [Contract
-> Inheritance](guides/contract-inheritance.md#behaviours) guide for the full
-> rules.
+> By default an implementation inherits its contracts verbatim, and attaching a
+> plain `@pre`/`@post` to an inherited operation is a compile error (use
+> `check/1` in the body for implementation-specific assertions) — this keeps
+> preconditions from being strengthened, which would break substitutability. An
+> implementation may *deliberately* refine a behaviour's contract with
+> `@pre_weaken` (weakens the precondition) or `@post_strengthen` (strengthens the
+> postcondition), following Eiffel's behavioural-subtyping rules. See the
+> [Contract Inheritance](guides/contract-inheritance.md#behaviours) guide for the
+> full rules.
 
 ## Contract inheritance for protocols
 

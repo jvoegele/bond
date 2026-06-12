@@ -216,12 +216,11 @@ outer name, and that reference *is* validated. In
 `({:ok, v} when v > limit) <~ result`, `v` is pattern-bound but `limit` must be
 a declared argument (or `result`), or it is a compile error.
 
-### Immutable inheritance (v1)
+### Inheriting verbatim — and the plain-`@pre`/`@post` rule
 
-Inherited contracts are **immutable**. An implementation may not weaken,
-strengthen, refine, or add to them. For a behaviour, attaching `@pre`/`@post`
-to an implementation function whose `{name, arity}` matches an inherited
-contract is a compile error:
+By default an implementation inherits its contracts **verbatim**. For a
+behaviour, attaching a *plain* `@pre`/`@post` to an implementation function whose
+`{name, arity}` matches an inherited contract is a compile error:
 
 ```elixir
 defmodule BankAccount do
@@ -233,10 +232,7 @@ defmodule BankAccount do
 end
 ```
 
-Protocol implementations enforce the protocol's contracts verbatim for the same
-reason — there is no per-implementation `@pre`/`@post` to attach.
-
-This is a deliberate soundness boundary, not a missing feature:
+This is a deliberate soundness boundary:
 
   * **Strengthening a precondition breaks substitutability.** If an
     implementation could add its own `@pre` (conjoined with `AND`), a caller
@@ -244,14 +240,13 @@ This is a deliberate soundness boundary, not a missing feature:
     particular implementation — so the implementation would *not* be
     substitutable for the abstraction. The Liskov Substitution Principle
     requires preconditions to only ever *weaken* down a hierarchy.
-  * **Adding a postcondition is refinement by the back door.** It would be
-    sound, but Bond reserves that meaning for a future Eiffel-style refinement
-    feature (`@pre_else` / `@post_then`) so that giving plain impl-level
-    `@pre`/`@post` a different meaning now doesn't create migration debt later.
+  * **Adding a postcondition silently would be refinement by the back door.**
+    Bond reserves that meaning for the *explicit* refinement annotations below,
+    so plain `@pre`/`@post` keeps one clear meaning.
 
-For a behaviour, the sanctioned escape hatch for an implementation-specific
-assertion is `check/1` in the function body — it is independent of the contract
-chain:
+For an implementation-specific assertion that is independent of the contract, the
+sanctioned escape hatch is `check/1` in the function body — it is independent of
+the contract chain:
 
 ```elixir
 @impl true
@@ -264,20 +259,59 @@ end
 Helper functions and public functions *outside* the abstraction keep ordinary
 `@pre`/`@post`, and struct `@invariant`s compose untouched.
 
+Protocol implementations enforce the protocol's contracts verbatim — there is no
+per-implementation hook to refine them (see the scope notes below).
+
+### Refining a behaviour's contract (`@pre_weaken` / `@post_strengthen`)
+
+An implementation may deliberately *refine* a contract it inherits from a
+behaviour callback, following Eiffel's behavioural-subtyping rules. Two distinct
+annotations make the (counterintuitive) variance explicit:
+
+  * `@pre_weaken` **weakens** the precondition — effective pre =
+    `inherited or pre_weaken`. The implementation accepts everything the
+    abstraction promised, and *more* (preconditions may only weaken down a
+    hierarchy — contravariance).
+  * `@post_strengthen` **strengthens** the postcondition — effective post =
+    `inherited and post_strengthen`. Callers get at least the abstract
+    guarantee, and *more* (postconditions may only strengthen — covariance).
+
+The distinct keywords are the teaching: `or` to *weaken* a precondition is
+exactly the Liskov-safe direction, even though it reads backwards at first.
+Unlike inherited contracts, refinement expressions reference the
+**implementation's own** parameter names:
+
+```elixir
+defmodule SavingsAccount do
+  use Bond, behaviours: [Ledger]
+
+  @impl true
+  @pre_weaken small_withdrawal: amt == 0        # effective pre  = Ledger's OR this
+  @post_strengthen audited: log_exists?(result) # effective post = Ledger's AND this
+  def withdraw(bal, amt), do: ...
+end
+```
+
+A refinement only applies to a function that inherits a contract. `@pre_weaken`
+requires an inherited precondition to weaken — you may not *introduce* one (that
+would strengthen). `@post_strengthen` may add a postcondition where the callback
+declared none. `old/1` is available in the inherited `@post` but not in
+`@post_strengthen`.
+
 ### Runtime configuration
 
 Inherited contracts honour the same runtime controls as ordinary contracts:
 `config :bond, …` and the `Bond.Config` runtime API toggle them, and they obey
 the contract-checking chain (`preconditions ≤ postconditions ≤ invariants`).
 
-## Scope and non-goals (v1)
+## Scope and non-goals
 
-v1 is the immutable model only, for both flavours. The following are
-deliberately out of scope:
+The following are deliberately out of scope:
 
-  * **Refinement.** Eiffel-style contravariant/covariant *refinement*
-    (`@pre_else` / `@post_then`) is a tracked follow-up; the immutable model is
-    forward-compatible with it.
+  * **Protocol refinement.** `@pre_weaken` / `@post_strengthen` currently refine
+    *behaviour* contracts only. Refining a protocol's contract per-implementation
+    is a tracked follow-up (protocol contracts are enforced centrally at the
+    dispatch boundary, which has no per-implementation hook today).
   * **Protocols — only dispatch is checked.** A direct call to a concrete
     implementation module (`Sized.List.size/1`) bypasses dispatch and is
     therefore *not* checked. Call through the protocol (`Sized.size/1`).
