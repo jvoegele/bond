@@ -57,7 +57,7 @@ stability guarantees in `guides/stability.md`.
       behaviour where the contract is declared, rather than surfacing as an
       opaque error in each implementing module.
 
-  See the [Contract Inheritance for Behaviours](guides/contract-inheritance.md)
+  See the [Contract Inheritance](guides/contract-inheritance.md#behaviours)
   guide.
 
 - **Contract inheritance for protocols (GitHub #15).** A `defprotocol` can
@@ -82,7 +82,7 @@ stability guarantees in `guides/stability.md`.
       call to a concrete implementation bypasses dispatch); `old/1` in a protocol
       `@post` and compile-time `:purge` of protocol contracts are not supported.
 
-  See the [Contract Inheritance for Protocols](guides/protocol-contracts.md)
+  See the [Contract Inheritance](guides/contract-inheritance.md#protocols)
   guide.
 
 ## [1.1.0] - 2026-06-05

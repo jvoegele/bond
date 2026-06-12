@@ -284,8 +284,9 @@ Passing `behaviours: [Ledger]` also emits `@behaviour Ledger` for you, so
 > compile error (use `check/1` in the body for implementation-specific
 > assertions). This keeps preconditions from being strengthened — which would
 > break substitutability — and reserves the syntax for future Eiffel-style
-> refinement. See the [Contract Inheritance for
-> Behaviours](guides/contract-inheritance.md) guide for the full rules.
+> refinement. See the [Contract
+> Inheritance](guides/contract-inheritance.md#behaviours) guide for the full
+> rules.
 
 ## Contract inheritance for protocols
 
@@ -320,8 +321,9 @@ and the error struct and telemetry carry `:source_protocol` and `:impl`.
 > Only calls through the protocol are checked; a direct call to a concrete
 > implementation (`Sized.List.size/1`) bypasses dispatch. Inheritance is
 > immutable in v1 (implementations cannot refine the contract), and `old/1` is
-> not supported in a protocol `@post`. See the [Contract Inheritance for
-> Protocols](guides/protocol-contracts.md) guide for the full rules.
+> not supported in a protocol `@post`. See the [Contract
+> Inheritance](guides/contract-inheritance.md#protocols) guide for the full
+> rules.
 
 ## Inline `check/1` assertions
 

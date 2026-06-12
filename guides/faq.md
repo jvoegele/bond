@@ -799,8 +799,8 @@ failed for call to BankAccount.withdraw/2`).
 Inherited contracts are immutable in v1 — an implementation can't modify or add
 to them, and attaching `@pre`/`@post` to an inherited operation is a compile
 error. Use `check/1` in the function body for an implementation-specific
-assertion. See the [Contract Inheritance for
-Behaviours](contract-inheritance.md) guide for the full rules.
+assertion. See the [Contract
+Inheritance](contract-inheritance.md#behaviours) guide for the full rules.
 
 > #### Behaviour-level invariants {: .info}
 >
