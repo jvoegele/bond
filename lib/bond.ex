@@ -194,6 +194,17 @@ defmodule Bond do
     register_pre_or_post(pre_or_post, expression, __CALLER__, meta)
   end
 
+  # `@pre_weaken` / `@post_strengthen` — Eiffel-style refinement of a contract inherited from a
+  # `Bond.Behaviour` callback or `Bond.Protocol` function (#16). Same single-arg / keyword-list
+  # shape as `@pre`/`@post`; the assertion is registered tagged with its refinement role so the
+  # inheritance merge *folds* it (precondition weakened with `or`, postcondition strengthened with
+  # `and`) instead of rejecting it. Plain `@pre`/`@post` on an inherited operation stays a compile
+  # error. Refinement expressions reference the implementation's own parameter names.
+  defmacro @{refinement, meta, [expression]}
+           when refinement in [:pre_weaken, :post_strengthen] do
+    register_refinement(refinement, expression, __CALLER__, meta)
+  end
+
   # The positional label forms `@pre <label>, <expr>` and `@pre <expr>, <label>` were removed
   # in Bond 1.0 in favour of the single keyword-list form, matching the `check/1`-only labelling
   # decided in 0.16.0. These two clauses match the exact removed shapes (atom/binary label before
@@ -221,7 +232,7 @@ defmodule Bond do
   # neither valid for the existing clauses, so it would otherwise fall through to Kernel's
   # `@/1` and die with an unhelpful arity error. Raise a clearer diagnostic here.
   defmacro @{pre_or_post, _meta, [_, _ | _] = args}
-           when pre_or_post in [:pre, :post] do
+           when pre_or_post in [:pre, :post, :pre_weaken, :post_strengthen] do
     raise CompileError,
       file: __CALLER__.file,
       line: __CALLER__.line,
@@ -314,6 +325,28 @@ defmodule Bond do
   end
 
   @doc """
+  Weaken an inherited precondition, the qualified-call equivalent of `@pre_weaken` (#16).
+
+  For modules that opt out of the `@`-prefixed syntax with `use Bond, at_annotations: false`.
+  The effective precondition becomes `inherited or pre_weaken`; see `Bond.Behaviour` for the
+  Eiffel-style refinement rules. Accepts a bare assertion or a keyword list of `label: assertion`
+  pairs, exactly like `Bond.pre/1`.
+  """
+  defmacro pre_weaken(expression) do
+    register_refinement(:pre_weaken, expression, __CALLER__, line: __CALLER__.line)
+  end
+
+  @doc """
+  Strengthen an inherited postcondition, the qualified-call equivalent of `@post_strengthen` (#16).
+
+  See `Bond.pre_weaken/1` and the `:at_annotations` option of `use Bond`. The effective
+  postcondition becomes `inherited and post_strengthen`.
+  """
+  defmacro post_strengthen(expression) do
+    register_refinement(:post_strengthen, expression, __CALLER__, line: __CALLER__.line)
+  end
+
+  @doc """
   Register an invariant as a fully-qualified call, the qualified-call equivalent of
   `@invariant`. Accepts a bare expression or a keyword list of `label: expression` pairs;
   expressions reference the implicit `subject` binding exactly as in the `@invariant` form.
@@ -402,6 +435,27 @@ defmodule Bond do
 
     :ok
   end
+
+  # Shared by the `@pre_weaken`/`@post_strengthen` clause and the qualified `Bond.pre_weaken/1` /
+  # `Bond.post_strengthen/1` macros. Registers each assertion tagged with its refinement role so
+  # `Bond.Compiler.merge_inherited_contract/2` folds it into the inherited contract. Mirrors
+  # `register_pre_or_post/4` but routes through `register_assertion/6`.
+  defp register_refinement(refinement, expression, caller, meta) do
+    kind = refinement_kind(refinement)
+
+    if Keyword.keyword?(expression) do
+      for {label, expr} <- expression do
+        Bond.Compiler.register_assertion(kind, expr, label, caller, meta, refinement)
+      end
+    else
+      Bond.Compiler.register_assertion(kind, expression, nil, caller, meta, refinement)
+    end
+
+    :ok
+  end
+
+  defp refinement_kind(:pre_weaken), do: :precondition
+  defp refinement_kind(:post_strengthen), do: :postcondition
 
   # Migration diagnostic for the positional `@pre`/`@post` label forms removed in Bond 1.0.
   defp positional_label_removed_message(pre_or_post) do
