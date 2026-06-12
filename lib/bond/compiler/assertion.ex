@@ -24,7 +24,14 @@ defmodule Bond.Compiler.Assertion do
     # declared directly on the function. Set by `Bond.Behaviour` when capturing callback
     # contracts; flows through to the assertion-failure metadata and error structs so a
     # violation can be attributed to the source behaviour.
-    :source_behaviour
+    :source_behaviour,
+    # The refinement role of an impl-authored assertion that refines an inherited contract:
+    # `:pre_weaken` (weakens the inherited precondition — combined with `or`) or
+    # `:post_strengthen` (strengthens the inherited postcondition — combined with `and`).
+    # `nil` for an ordinary `@pre`/`@post`. Set by `Bond.Compiler.register_assertion/6` from
+    # the `@pre_weaken`/`@post_strengthen` macros; consumed by `merge_inherited_contract/2` to
+    # partition impl assertions and fold them per the Eiffel variance rules (#16).
+    :refinement
   ]
 
   @type t :: t(Bond.assertion_kind())
@@ -37,7 +44,8 @@ defmodule Bond.Compiler.Assertion do
           kind: kind,
           definition_env: Macro.Env.t(),
           meta: list(),
-          source_behaviour: module() | nil
+          source_behaviour: module() | nil,
+          refinement: :pre_weaken | :post_strengthen | nil
         }
 
   @type function_info :: {atom(), non_neg_integer()}
@@ -77,6 +85,19 @@ defmodule Bond.Compiler.Assertion do
       definition_env: env,
       meta: meta
     }
+  end
+
+  @doc """
+  Tags an assertion with its refinement role (`:pre_weaken` or `:post_strengthen`).
+
+  Used by `Bond.Compiler.register_assertion/6` when an `@pre_weaken`/`@post_strengthen`
+  annotation is registered, so `merge_inherited_contract/2` can later partition the impl's own
+  assertions from the inherited contract and fold them per the Eiffel variance rules (#16).
+  """
+  @spec put_refinement(t(), :pre_weaken | :post_strengthen) :: t()
+  def put_refinement(%__MODULE__{} = assertion, refinement)
+      when refinement in [:pre_weaken, :post_strengthen] do
+    %{assertion | refinement: refinement}
   end
 
   @doc """
@@ -139,53 +160,65 @@ defmodule Bond.Compiler.Assertion do
   @spec assertions_body([t()], function_info(), module() | nil) :: Macro.t()
   def assertions_body(assertions, function_info, function_module \\ nil)
       when is_list(assertions) and is_tuple(function_info) do
-    assertions_eval =
-      for %Assertion{expression: expression, definition_env: assertion_env} = assertion <-
-            assertions do
-        assertion_info = %{
-          assertion_id: assertion.id,
-          kind: assertion.kind,
-          label: assertion.label,
-          expression: assertion.code,
-          file: assertion_env.file,
-          line: assertion_env.line,
-          # The MFA module is the module the function is *compiled into* (the implementer for
-          # inherited contracts), not where the assertion text was written. They coincide for
-          # contracts declared directly on the function, so `function_module` is only passed
-          # explicitly for inherited contracts; otherwise fall back to the assertion's env.
-          module: function_module || assertion_env.module,
-          function: function_info,
-          source_behaviour: assertion.source_behaviour
-        }
-
-        # Delegate the truthiness check and throw-on-failure to
-        # `Bond.Runtime.Eval.check_assertion/3`, where `result` is typed `term()`. Emitting
-        # `if expression do :ok else throw(...) end` directly here would let Dialyzer prove
-        # the falsy branch unreachable when the user's expression is statically `true`
-        # (e.g. `@pre is_binary(x)` on a `@spec`-narrowed argument), producing Pattern:
-        # `false`, Type: `true` warnings in downstream apps.
-        #
-        # The failure binding is passed as a 0-arity thunk, not an eager `binding()`. A bare
-        # `binding()` builds a keyword list of every variable in this defp's scope (the whole
-        # parameter list, plus `result` and every `old(...)` capture) on EVERY successful
-        # evaluation and discards it unless the assertion fails — ~8 ns per in-scope variable
-        # of pure waste on the hot path. Wrapping it in `fn -> binding() end` captures the
-        # variables cheaply (pointers, ~1 ns each) but defers the list construction to
-        # `check_assertion/3`'s failure clauses, which almost never run. Error contents are
-        # identical; see the bench `bench/runtime_check_overhead.exs` decomposition section.
-        quote do
-          Bond.Runtime.Eval.check_assertion(
-            unquote(expression),
-            unquote(Macro.escape(assertion_info)),
-            fn -> binding() end
-          )
-        end
-      end
-
     quote do
       import Bond.Predicates
 
-      (unquote_splicing(assertions_eval))
+      (unquote_splicing(assertions_eval_list(assertions, function_info, function_module)))
+    end
+  end
+
+  @doc """
+  Returns the ordered list of quoted `Bond.Runtime.Eval.check_assertion/3` calls — one per
+  assertion — that `assertions_body/3` splices into the lifted assertion defp.
+
+  Exposed separately so the refined-precondition builder (`pre_weaken_body/4`) can compose two
+  such lists (the inherited group and the impl's `@pre_weaken` group) into the `or`-combined
+  evaluation, each list retaining its own per-assertion identity, telemetry, Dialyzer-laundering,
+  and deferred failure binding.
+  """
+  @spec assertions_eval_list([t()], function_info(), module() | nil) :: [Macro.t()]
+  def assertions_eval_list(assertions, function_info, function_module \\ nil)
+      when is_list(assertions) and is_tuple(function_info) do
+    for %Assertion{expression: expression, definition_env: assertion_env} = assertion <-
+          assertions do
+      assertion_info = %{
+        assertion_id: assertion.id,
+        kind: assertion.kind,
+        label: assertion.label,
+        expression: assertion.code,
+        file: assertion_env.file,
+        line: assertion_env.line,
+        # The MFA module is the module the function is *compiled into* (the implementer for
+        # inherited contracts), not where the assertion text was written. They coincide for
+        # contracts declared directly on the function, so `function_module` is only passed
+        # explicitly for inherited contracts; otherwise fall back to the assertion's env.
+        module: function_module || assertion_env.module,
+        function: function_info,
+        source_behaviour: assertion.source_behaviour
+      }
+
+      # Delegate the truthiness check and throw-on-failure to
+      # `Bond.Runtime.Eval.check_assertion/3`, where `result` is typed `term()`. Emitting
+      # `if expression do :ok else throw(...) end` directly here would let Dialyzer prove
+      # the falsy branch unreachable when the user's expression is statically `true`
+      # (e.g. `@pre is_binary(x)` on a `@spec`-narrowed argument), producing Pattern:
+      # `false`, Type: `true` warnings in downstream apps.
+      #
+      # The failure binding is passed as a 0-arity thunk, not an eager `binding()`. A bare
+      # `binding()` builds a keyword list of every variable in this defp's scope (the whole
+      # parameter list, plus `result` and every `old(...)` capture) on EVERY successful
+      # evaluation and discards it unless the assertion fails — ~8 ns per in-scope variable
+      # of pure waste on the hot path. Wrapping it in `fn -> binding() end` captures the
+      # variables cheaply (pointers, ~1 ns each) but defers the list construction to
+      # `check_assertion/3`'s failure clauses, which almost never run. Error contents are
+      # identical; see the bench `bench/runtime_check_overhead.exs` decomposition section.
+      quote do
+        Bond.Runtime.Eval.check_assertion(
+          unquote(expression),
+          unquote(Macro.escape(assertion_info)),
+          fn -> binding() end
+        )
+      end
     end
   end
 
