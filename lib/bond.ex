@@ -47,6 +47,11 @@ defmodule Bond do
   @doc """
   `use Bond` enables `@pre`, `@post`, and `check/1` annotations in the using module.
 
+  When the module also inherits contracts (`use Bond, behaviours: […]`), `@pre_weaken` and
+  `@post_strengthen` are additionally available to *refine* an inherited contract — weakening a
+  precondition and strengthening a postcondition respectively, per Eiffel's behavioural-subtyping
+  rules. See `Bond.Behaviour`.
+
   ## Options
 
   Each of the following options is one of `true`, `false`, or `:purge`. See the "Conditional
