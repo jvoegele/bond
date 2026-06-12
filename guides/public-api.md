@@ -143,8 +143,9 @@ any `:overrides` entry that matches the module:
 
 Two modules let an abstraction declare contracts that every implementation
 enforces. Both are part of the public surface; the full rules are in the
-[Contract Inheritance for Behaviours](contract-inheritance.md) and [Contract
-Inheritance for Protocols](protocol-contracts.md) guides.
+[Contract Inheritance](contract-inheritance.md) guide (see
+[Behaviours](contract-inheritance.md#behaviours) and
+[Protocols](contract-inheritance.md#protocols)).
 
   * **`Bond.Behaviour`** — `use Bond.Behaviour` in a behaviour module enables
     `@pre`/`@post` immediately preceding each `@callback`. The accepted contract
