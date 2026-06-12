@@ -455,8 +455,17 @@ defmodule Bond.Compiler do
   end
 
   def register_assertion(kind, expression, label, env, meta) do
+    register_assertion(kind, expression, label, env, meta, nil)
+  end
+
+  @doc false
+  def register_assertion(kind, expression, label, env, meta, refinement)
+      when kind in [:precondition, :postcondition] do
     Assertion.validate_expression!(expression, env)
-    assertion = Assertion.new(kind, label, expression, env, meta)
+
+    assertion =
+      Assertion.new(kind, label, expression, env, meta)
+      |> maybe_put_refinement(refinement)
 
     fsm_event =
       case kind do
@@ -466,6 +475,11 @@ defmodule Bond.Compiler do
 
     apply(FSM, fsm_event, [fsm(env), assertion])
   end
+
+  defp maybe_put_refinement(assertion, nil), do: assertion
+
+  defp maybe_put_refinement(assertion, refinement),
+    do: Assertion.put_refinement(assertion, refinement)
 
   @doc false
   def register_invariant(expression, label, env, meta) do
