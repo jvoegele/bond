@@ -29,6 +29,16 @@ defmodule Bond.BehaviourInheritanceTest do
     @optional_callbacks optional_hook: 1
   end
 
+  # Regression (Photon dogfooding of #15/#13): a @post that binds a name inside a `<~` pattern,
+  # and references it from the pattern's `when` guard, must compile and enforce. The bound name
+  # is introduced by the match, not a callback argument.
+  defmodule Resolver do
+    use Bond.Behaviour
+
+    @post ok_string: ({:ok, path} when is_binary(path)) <~ result
+    @callback resolve(spec :: term) :: {:ok, String.t()} | {:error, term}
+  end
+
   # --- Implementations (the contract-inheriting side) ---
 
   defmodule BankAccount do
@@ -59,6 +69,15 @@ defmodule Bond.BehaviourInheritanceTest do
     # Implements only the required callback; the optional, contracted one is skipped.
     @impl true
     def greet(name), do: "Hello, #{name}!"
+  end
+
+  defmodule PathResolver do
+    use Bond, behaviours: [Resolver]
+
+    @impl true
+    def resolve(spec) do
+      if is_binary(spec), do: {:ok, spec}, else: {:error, :not_a_string}
+    end
   end
 
   describe "inherited preconditions" do
@@ -97,6 +116,19 @@ defmodule Bond.BehaviourInheritanceTest do
       assert error.source_behaviour == Ledger
       assert error.label == :non_negative
       assert Exception.message(error) =~ "postcondition (inherited from"
+    end
+  end
+
+  describe "`<~` pattern bindings in an inherited postcondition (Photon regression)" do
+    test "pass when the result matches the bound `<~` pattern" do
+      assert PathResolver.resolve("/etc/app") == {:ok, "/etc/app"}
+    end
+
+    test "fail with attribution when the result doesn't match the pattern" do
+      error = assert_raise Bond.PostconditionError, fn -> PathResolver.resolve(:nope) end
+
+      assert error.source_behaviour == Resolver
+      assert error.label == :ok_string
     end
   end
 
