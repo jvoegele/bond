@@ -800,9 +800,13 @@ By default an implementation inherits its contracts verbatim, and attaching a
 plain `@pre`/`@post` to an inherited operation is a compile error. An
 implementation may *deliberately* refine a behaviour's contract with
 `@pre_weaken` (weakens the precondition) or `@post_strengthen` (strengthens the
-postcondition) — Eiffel-style behavioural subtyping. Use `check/1` in the
-function body for an implementation-specific assertion independent of the
-contract. See the [Contract Inheritance](contract-inheritance.md#behaviours)
+postcondition) — Eiffel-style behavioural subtyping. Protocol implementations
+can do the same by adding `use Bond.Protocol.Impl` to the `defimpl` block, with
+the distinction that refinement expressions there reference the protocol's
+canonical argument names rather than the implementation's own parameter names.
+Use `check/1` in the function body for an implementation-specific assertion
+independent of the contract. See the
+[Contract Inheritance](contract-inheritance.md#refining-a-contract-pre_weaken-post_strengthen)
 guide for the full rules.
 
 > #### Behaviour-level invariants {: .info}

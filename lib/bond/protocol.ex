@@ -40,13 +40,18 @@ defmodule Bond.Protocol do
   Sized.size/1`, with `:source_protocol` and `:impl` on the error struct and the
   `[:bond, :assertion, :failure]` telemetry metadata.
 
+  ## Refinement (opt-in)
+
+  An implementation can refine its inherited contract by adding `use Bond.Protocol.Impl` to
+  the `defimpl` block. See `Bond.Protocol.Impl` for details. Plain `defimpl` blocks that do
+  not opt in are completely unaffected.
+
   ## Scope (v1)
 
-  Inherited contracts are immutable: implementations enforce the protocol's contracts verbatim
-  and cannot refine them (that is the refinement feature's job). Direct calls to a concrete
-  implementation module (`Sized.List.size/1`) bypass dispatch and are therefore *not* checked —
-  only calls through the protocol (`Sized.size/1`) are. `old/1` in a protocol `@post` and
-  compile-time `:purge` of protocol contracts are not supported in v1; runtime configuration
+  Direct calls to a concrete implementation module (`Sized.List.size/1`) bypass dispatch and
+  are therefore *not* checked — only calls through the protocol (`Sized.size/1`) are. `old/1`
+  in a protocol `@pre`/`@post` or in `@pre_weaken`/`@post_strengthen` is not supported;
+  compile-time `:purge` of protocol contracts is not supported in v1. Runtime configuration
   (`config :bond, …` and `Bond.Config`) applies as usual.
   """
 
@@ -148,8 +153,7 @@ defmodule Bond.Protocol do
         quote do
           @doc false
           def __bond_protocol_contract__(unquote(name), unquote(arity)) do
-            {unquote(Macro.escape(arg_names)),
-             unquote(Macro.escape(sanitized_pre)),
+            {unquote(Macro.escape(arg_names)), unquote(Macro.escape(sanitized_pre)),
              unquote(Macro.escape(sanitized_post))}
           end
         end

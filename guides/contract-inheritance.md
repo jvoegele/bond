@@ -259,14 +259,11 @@ end
 Helper functions and public functions *outside* the abstraction keep ordinary
 `@pre`/`@post`, and struct `@invariant`s compose untouched.
 
-Protocol implementations enforce the protocol's contracts verbatim — there is no
-per-implementation hook to refine them (see the scope notes below).
+### Refining a contract (`@pre_weaken` / `@post_strengthen`)
 
-### Refining a behaviour's contract (`@pre_weaken` / `@post_strengthen`)
-
-An implementation may deliberately *refine* a contract it inherits from a
-behaviour callback, following Eiffel's behavioural-subtyping rules. Two distinct
-annotations make the (counterintuitive) variance explicit:
+An implementation may deliberately *refine* a contract it inherits. Two distinct
+annotations make the (counterintuitive) variance explicit, following Eiffel's
+behavioural-subtyping rules:
 
   * `@pre_weaken` **weakens** the precondition — effective pre =
     `inherited or pre_weaken`. The implementation accepts everything the
@@ -278,8 +275,10 @@ annotations make the (counterintuitive) variance explicit:
 
 The distinct keywords are the teaching: `or` to *weaken* a precondition is
 exactly the Liskov-safe direction, even though it reads backwards at first.
-Unlike inherited contracts, refinement expressions reference the
-**implementation's own** parameter names:
+
+#### Behaviour refinement
+
+Refinement expressions reference the **implementation's own** parameter names:
 
 ```elixir
 defmodule SavingsAccount do
@@ -298,6 +297,39 @@ would strengthen). `@post_strengthen` may add a postcondition where the callback
 declared none. `old/1` is available in the inherited `@post` but not in
 `@post_strengthen`.
 
+#### Protocol refinement (opt-in)
+
+Protocol implementations can refine their inherited contracts by adding
+`use Bond.Protocol.Impl` to the `defimpl` block. Unlike behaviour refinement,
+protocol refinement expressions reference the **protocol's canonical argument
+names** (those declared in the protocol's own `def`), because the effective
+contract is evaluated once at the dispatch boundary rather than inside the
+implementation:
+
+```elixir
+defprotocol Account do
+  use Bond.Protocol
+
+  @pre positive_amount: amount > 0
+  @post non_negative: result >= 0
+  def withdraw(data, amount)
+end
+
+defimpl Account, for: SavingsAccount do
+  use Bond.Protocol.Impl
+
+  # 'amount' is the canonical name from Account's def — not the impl's parameter name.
+  @pre_weaken zero_ok: amount == 0
+  @post_strengthen even_result: rem(result, 2) == 0
+  def withdraw(acc, 0), do: acc.balance
+  def withdraw(acc, amt), do: acc.balance - amt
+end
+```
+
+`Bond.Protocol.Impl` is strictly opt-in — plain `defimpl` blocks are completely
+unaffected. `@pre_weaken` and `@post_strengthen` must precede the `def` they
+refine. `old/1` is not supported in protocol contracts (v1 restriction).
+
 ### Runtime configuration
 
 Inherited contracts honour the same runtime controls as ordinary contracts:
@@ -308,15 +340,12 @@ the contract-checking chain (`preconditions ≤ postconditions ≤ invariants`).
 
 The following are deliberately out of scope:
 
-  * **Protocol refinement.** `@pre_weaken` / `@post_strengthen` currently refine
-    *behaviour* contracts only. Refining a protocol's contract per-implementation
-    is a tracked follow-up (protocol contracts are enforced centrally at the
-    dispatch boundary, which has no per-implementation hook today).
   * **Protocols — only dispatch is checked.** A direct call to a concrete
     implementation module (`Sized.List.size/1`) bypasses dispatch and is
-    therefore *not* checked. Call through the protocol (`Sized.size/1`).
-  * **Protocols — `old/1` is not supported** in a protocol `@post`; the
-    dispatch wrapper does not snapshot entry state. Using it is a compile
-    error.
+    therefore *not* checked — including effective pre/post from `Bond.Protocol.Impl`.
+    Call through the protocol (`Sized.size/1`).
+  * **Protocols — `old/1` is not supported** in a protocol `@pre`/`@post` or in
+    `@pre_weaken`/`@post_strengthen`; the dispatch wrapper does not snapshot entry
+    state. Using it is a compile error.
   * **Protocols — compile-time `:purge`** of contracts is not supported; use
     runtime configuration to disable them.

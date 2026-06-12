@@ -29,6 +29,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   `@post_strengthen`. Qualified `Bond.pre_weaken/1` and `Bond.post_strengthen/1`
   are available for the `at_annotations: false` path.
 
+- **Protocol contract refinement via `Bond.Protocol.Impl` (GitHub #16, Phase B).**
+  A `defimpl` block may now opt in with `use Bond.Protocol.Impl` and use
+  `@pre_weaken`/`@post_strengthen` to refine the protocol's contracts. The same
+  Eiffel behavioural-subtyping rules apply (OR for pre, AND for post), enforced at
+  the dispatch boundary. Refinement expressions reference the **protocol's canonical
+  argument names** (declared in the protocol's own `def`). Plain `defimpl` blocks
+  that do not opt in are completely unaffected.
+
 ## [1.2.1] - 2026-06-12
 
 ### Fixed
