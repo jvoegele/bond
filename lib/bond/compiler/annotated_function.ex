@@ -391,7 +391,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
       if post_mode != :purge do
         OldExpression.precompile(annotated_function.postconditions)
       else
-        {[], %{}}
+        OldExpression.precompile([])
       end
 
     doc_asts = ContractDocs.doc_clauses(annotated_function, env, pre_mode, post_mode)
