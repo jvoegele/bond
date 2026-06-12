@@ -328,37 +328,9 @@ defmodule Bond.Compiler.AnnotatedFunction do
          inv_mode
        ) do
     first_clause = List.first(annotated_function.clauses)
-    function_info = {fun, arity}
+    env = first_clause.env
 
-    # Canonical positional names. For functions inheriting behaviour contracts the names are
-    # dictated by the callback (stored in `:canonical_names_override`), so there is nothing to
-    # negotiate across clauses — the agreement check is bypassed. Otherwise, require clause-name
-    # agreement only at positions whose names appear in some assertion's expression AST: trivial
-    # contracts (`@post is_boolean(result)`) don't constrain parameter naming; shape-dependent
-    # contracts referencing `x` only constrain the position bound to `x`.
-    canonical_names =
-      case annotated_function.canonical_names_override do
-        nil ->
-          referenced_names =
-            Clauses.referenced_param_names(
-              annotated_function.preconditions ++
-                annotated_function.postconditions ++ annotated_function.invariants,
-              annotated_function.clauses
-            )
-
-          {:ok, names} =
-            Clauses.assert_clauses_agree!(
-              annotated_function.clauses,
-              first_clause.env,
-              function_info,
-              referenced_names
-            )
-
-          names
-
-        override_names ->
-          override_names
-      end
+    canonical_names = resolve_canonical_names(annotated_function, {fun, arity})
 
     {postconditions, old_context} =
       if post_mode != :purge do
@@ -367,14 +339,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
         {[], %{}}
       end
 
-    old_pairs = OldExpression.pairs(old_context)
-    old_assignments = OldExpression.resolve(old_context)
-
-    pre_fn_name = lifted_fn_name(:preconditions, fun, arity)
-    post_fn_name = lifted_fn_name(:postconditions, fun, arity)
-    inv_fn_name = lifted_fn_name(:invariants, fun, arity)
-
-    doc_asts = ContractDocs.doc_clauses(annotated_function, first_clause.env, pre_mode, post_mode)
+    doc_asts = ContractDocs.doc_clauses(annotated_function, env, pre_mode, post_mode)
 
     wrapper_context = %{
       fun: fun,
@@ -384,43 +349,14 @@ defmodule Bond.Compiler.AnnotatedFunction do
       pre_mode: pre_mode,
       post_mode: post_mode,
       inv_mode: inv_mode,
-      pre_fn_name: pre_fn_name,
-      post_fn_name: post_fn_name,
-      inv_fn_name: inv_fn_name,
-      old_pairs: old_pairs,
-      old_assignments: old_assignments
+      pre_fn_name: lifted_fn_name(:preconditions, fun, arity),
+      post_fn_name: lifted_fn_name(:postconditions, fun, arity),
+      inv_fn_name: lifted_fn_name(:invariants, fun, arity),
+      old_pairs: OldExpression.pairs(old_context),
+      old_assignments: OldExpression.resolve(old_context)
     }
 
-    # Lifted-defp parameter strategy depends on whether the function has one
-    # clause or many.
-    #
-    #   * Single-clause: lifted defp's head reproduces the user's pattern, so
-    #     contracts can reference destructured names from the head (e.g.
-    #     `current_count` from `%__MODULE__{count: current_count} = state`).
-    #     The wrapper passes the canonical-named value; the defp re-binds via
-    #     its pattern.
-    #
-    #   * Multi-clause: lifted defp's head is just the canonical names as bare
-    #     vars. Contracts can only reference top-level names — they must apply
-    #     uniformly to every clause, so destructured-name access from any
-    #     individual clause is unavailable. Shape-dependent assertions use the
-    #     `~>` implication operator.
-    #
-    #   * Inherited contracts: the contract expressions reference the callback's argument
-    #     names, not the impl's parameter names, so the lifted defp must take the canonical
-    #     names as bare vars regardless of clause count — the same value the wrapper rebinds
-    #     and passes via the canonical name.
-    lifted_defp_params =
-      cond do
-        annotated_function.canonical_names_override != nil ->
-          Enum.map(canonical_names, &Macro.var(&1, nil))
-
-        match?([_single], annotated_function.clauses) ->
-          ClauseWrapper.strip_default_args(first_clause.params)
-
-        true ->
-          Enum.map(canonical_names, &Macro.var(&1, nil))
-      end
+    defp_params = lifted_defp_params(annotated_function, canonical_names, first_clause)
 
     wrapper_clauses =
       Enum.map(annotated_function.clauses, fn clause ->
@@ -428,48 +364,9 @@ defmodule Bond.Compiler.AnnotatedFunction do
       end)
 
     assertion_defs =
-      Enum.reject(
-        [
-          maybe_build_assertion_defp(
-            pre_fn_name,
-            lifted_defp_params,
-            [],
-            annotated_function.preconditions,
-            function_info,
-            struct_module,
-            first_clause.env,
-            pre_mode
-          ),
-          maybe_build_assertion_defp(
-            post_fn_name,
-            lifted_defp_params,
-            postcondition_extra_params(old_pairs),
-            postconditions,
-            function_info,
-            struct_module,
-            first_clause.env,
-            post_mode
-          ),
-          Invariants.build_lifted_defp(
-            inv_fn_name,
-            annotated_function.invariants,
-            function_info,
-            first_clause.env,
-            inv_mode
-          )
-        ],
-        &is_nil/1
-      )
-      # Each lifted-defp builder emits a `@dialyzer {:nowarn_function, ...}` attribute
-      # immediately followed by the `defp` — a two-statement `__block__`. Flatten those
-      # into individual top-level statements so the module body holds the attribute and
-      # the defp as siblings (rather than nested blocks).
-      |> Enum.flat_map(fn
-        {:__block__, _, stmts} -> stmts
-        other -> [other]
-      end)
+      build_assertion_defs(annotated_function, postconditions, defp_params, wrapper_context, env)
 
-    quote file: first_clause.env.file, line: first_clause.env.line do
+    quote file: env.file, line: env.line do
       defoverridable([{unquote(fun), unquote(arity)}])
 
       unquote_splicing(doc_asts)
@@ -478,6 +375,116 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
       unquote_splicing(assertion_defs)
     end
+  end
+
+  # Canonical positional names. For functions inheriting behaviour contracts the names are
+  # dictated by the callback (stored in `:canonical_names_override`), so there is nothing to
+  # negotiate across clauses — the agreement check is bypassed. Otherwise, require clause-name
+  # agreement only at positions whose names appear in some assertion's expression AST: trivial
+  # contracts (`@post is_boolean(result)`) don't constrain parameter naming; shape-dependent
+  # contracts referencing `x` only constrain the position bound to `x`.
+  defp resolve_canonical_names(
+         %__MODULE__{canonical_names_override: nil} = annotated_function,
+         function_info
+       ) do
+    first_clause = List.first(annotated_function.clauses)
+
+    referenced_names =
+      Clauses.referenced_param_names(
+        annotated_function.preconditions ++
+          annotated_function.postconditions ++ annotated_function.invariants,
+        annotated_function.clauses
+      )
+
+    {:ok, names} =
+      Clauses.assert_clauses_agree!(
+        annotated_function.clauses,
+        first_clause.env,
+        function_info,
+        referenced_names
+      )
+
+    names
+  end
+
+  defp resolve_canonical_names(%__MODULE__{canonical_names_override: override}, _function_info),
+    do: override
+
+  # Lifted-defp parameter strategy depends on whether the function has one clause or many.
+  #
+  #   * Single-clause: lifted defp's head reproduces the user's pattern, so contracts can
+  #     reference destructured names from the head (e.g. `current_count` from
+  #     `%__MODULE__{count: current_count} = state`). The wrapper passes the canonical-named
+  #     value; the defp re-binds via its pattern.
+  #
+  #   * Multi-clause: lifted defp's head is just the canonical names as bare vars. Contracts can
+  #     only reference top-level names — they must apply uniformly to every clause, so
+  #     destructured-name access from any individual clause is unavailable. Shape-dependent
+  #     assertions use the `~>` implication operator.
+  #
+  #   * Inherited contracts: the contract expressions reference the callback's argument names,
+  #     not the impl's parameter names, so the lifted defp must take the canonical names as bare
+  #     vars regardless of clause count — the same value the wrapper rebinds and passes via the
+  #     canonical name.
+  defp lifted_defp_params(
+         %__MODULE__{canonical_names_override: override},
+         canonical_names,
+         _first_clause
+       )
+       when not is_nil(override) do
+    Enum.map(canonical_names, &Macro.var(&1, nil))
+  end
+
+  defp lifted_defp_params(%__MODULE__{clauses: [_single]}, _canonical_names, first_clause) do
+    ClauseWrapper.strip_default_args(first_clause.params)
+  end
+
+  defp lifted_defp_params(_annotated_function, canonical_names, _first_clause) do
+    Enum.map(canonical_names, &Macro.var(&1, nil))
+  end
+
+  defp build_assertion_defs(annotated_function, postconditions, defp_params, wrapper_context, env) do
+    function_info = {wrapper_context.fun, wrapper_context.arity}
+    struct_module = wrapper_context.struct_module
+
+    [
+      maybe_build_assertion_defp(
+        wrapper_context.pre_fn_name,
+        defp_params,
+        [],
+        annotated_function.preconditions,
+        function_info,
+        struct_module,
+        env,
+        wrapper_context.pre_mode
+      ),
+      maybe_build_assertion_defp(
+        wrapper_context.post_fn_name,
+        defp_params,
+        postcondition_extra_params(wrapper_context.old_pairs),
+        postconditions,
+        function_info,
+        struct_module,
+        env,
+        wrapper_context.post_mode
+      ),
+      Invariants.build_lifted_defp(
+        wrapper_context.inv_fn_name,
+        annotated_function.invariants,
+        function_info,
+        env,
+        wrapper_context.inv_mode
+      )
+    ]
+    |> Enum.reject(&is_nil/1)
+    # Each lifted-defp builder emits a `@dialyzer {:nowarn_function, ...}` attribute immediately
+    # followed by the `defp` — a two-statement `__block__`. Flatten those into individual
+    # top-level statements so the module body holds the attribute and the defp as siblings
+    # (rather than nested blocks).
+    |> Enum.flat_map(fn
+      {:__block__, _, stmts} -> stmts
+      other -> [other]
+    end)
   end
 
   defp lifted_fn_name(kind, fun, arity) do
