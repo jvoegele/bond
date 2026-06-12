@@ -287,6 +287,58 @@ defmodule Bond.Runtime.Eval do
     evaluate_assertions(postconditions_fun)
   end
 
+  @doc """
+  Evaluates an Eiffel-style *weakened* precondition: the inherited precondition group OR the
+  implementation's `@pre_weaken` group (#16).
+
+  `inherited_fun` and `weaken_fun` are 0-arity thunks, each wrapping a raw
+  `Bond.Compiler.Assertion.assertions_body`-style sequence (a conjunction that throws
+  `{:assertion_failure, info}` on its first failing assertion). The inherited group is tried
+  first; if it passes, the precondition holds. Only if it *fails* (returns falsy) is the
+  weakening group tried — disjunction can only weaken, never strengthen, which is precisely the
+  Liskov-safe direction for preconditions. If neither group holds, a single combined
+  `{:assertion_failure, combined_info}` is thrown for the surrounding `evaluate_preconditions/1`
+  to turn into a `Bond.PreconditionError` (telemetry, stacktrace pruning, and recursion guard are
+  all shared with the ordinary path, since this runs inside the lifted precondition defp).
+
+  A group that *raises* (rather than returning falsy) propagates — the weakening alternative is
+  for when the inherited precondition is not *satisfied*, not for when a malformed assertion
+  crashes. Authors guard shape-dependent halves with the `~>` implication operator, exactly as
+  in multi-clause contracts.
+
+  The combined failure reuses the binding captured by the weakening group (impl-scoped, so the
+  reported variables are the ones the author named in `@pre_weaken`).
+  """
+  @spec evaluate_pre_weaken((-> term()), (-> term()), map()) :: term()
+  def evaluate_pre_weaken(inherited_fun, weaken_fun, combined_info)
+      when is_function(inherited_fun, 0) and is_function(weaken_fun, 0) and is_map(combined_info) do
+    case run_group(inherited_fun) do
+      :ok ->
+        :ok
+
+      {:failed, _inherited_info} ->
+        case run_group(weaken_fun) do
+          :ok ->
+            :ok
+
+          {:failed, weaken_info} ->
+            throw({:assertion_failure, Map.put(combined_info, :binding, weaken_info.binding)})
+        end
+    end
+  end
+
+  # Runs one assertion group's raw check sequence, converting its first-failure throw into a
+  # `{:failed, info}` tag rather than letting it propagate — so `evaluate_pre_weaken/3` can fall
+  # through to the other group. A group whose every assertion passes returns `:ok`. Only the
+  # `{:assertion_failure, _}` throw is caught; a genuine exception from a malformed assertion
+  # propagates unchanged.
+  defp run_group(group_fun) do
+    group_fun.()
+    :ok
+  catch
+    {:assertion_failure, info} -> {:failed, info}
+  end
+
   @spec evaluate_check(assertion_fun()) :: term()
   def evaluate_check(check_fun) when is_function(check_fun, 0) do
     evaluate_assertions(check_fun)
