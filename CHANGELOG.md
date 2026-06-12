@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Pattern-bound names are now allowed in protocol and behaviour contracts.** A
+  contract that binds a name inside a `<~` match pattern — e.g.
+  `@post ({:ok, path} when is_binary(path)) <~ result` — was incorrectly rejected
+  at compile time, with the reference validator treating the pattern-local `path`
+  as a reference to an undeclared argument. Such names are bound by the match (not
+  references to function arguments) and are now exempt from the validation. A
+  `when` guard on the pattern may still reference an outer name, and those
+  references continue to be validated (surfaced while dogfooding contract
+  inheritance).
+
 ## [1.2.0] - 2026-06-11
 
 Brings **contract inheritance** to Bond: a behaviour or a protocol declares
