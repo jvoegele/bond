@@ -49,6 +49,7 @@ defmodule Bond.Behaviour do
 
   alias Bond.Compiler.Assertion
   alias Bond.Compiler.Clauses
+  alias Bond.Compiler.EnvSnapshot
 
   @doc false
   defmacro __using__(_opts) do
@@ -295,27 +296,6 @@ defmodule Bond.Behaviour do
   defp collect_contracts(module) do
     (Module.get_attribute(module, :__bond_callback_contracts__) || [])
     |> Enum.reverse()
-    |> Map.new(fn {key, entry} -> {key, sanitize_entry(entry)} end)
-  end
-
-  # The contracts map is emitted into `__bond_contracts__/0` via `Macro.escape/1`. A live
-  # `Macro.Env` captured at the `@pre` site cannot be escaped — its `:lexical_tracker` is a
-  # pid, which has no quoted form. Reduce each assertion's `definition_env` to a fresh
-  # `Macro.Env` holding only the fields the downstream error machinery reads
-  # (file/line/module/function); everything else takes its escapable struct default.
-  defp sanitize_entry(%{preconditions: pre, postconditions: post} = entry) do
-    %{
-      entry
-      | preconditions: Enum.map(pre, &sanitize_assertion/1),
-        postconditions: Enum.map(post, &sanitize_assertion/1)
-    }
-  end
-
-  defp sanitize_assertion(%Assertion{definition_env: env} = assertion) do
-    %{assertion | definition_env: sanitize_env(env)}
-  end
-
-  defp sanitize_env(%Macro.Env{} = env) do
-    %Macro.Env{file: env.file, line: env.line, module: env.module, function: env.function}
+    |> Map.new(fn {key, entry} -> {key, EnvSnapshot.sanitize_contract_entry(entry)} end)
   end
 end
