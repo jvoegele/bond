@@ -1,0 +1,59 @@
+flowchart TD
+%% Mikado graph for Eiffel-style contract refinement (GitHub #16).
+%%
+%% An implementation may REFINE the contract it inherits from a Bond.Behaviour
+%% callback or a Bond.Protocol function, instead of inheriting it verbatim:
+%%   @pre_weaken      => effective pre  = inherited OR  weaken      (require else)
+%%   @post_strengthen => effective post = inherited AND strengthen  (ensure then)
+%% Refinement expressions reference the IMPL's own parameter names (locality +
+%% generated docs). Plain @pre/@post on an inherited op remains a compile error.
+%%
+%% Each numbered node is a commit-sized step. Arrows point from a goal to its
+%% prerequisites — leaves (green) have no further prerequisites and are safe to
+%% start with. Depth-first per Mikado: pick a leaf, finish it, commit, repeat.
+%% Every commit compiles and the suite stays green. Phase A (behaviours) lands
+%% before Phase B (protocols); A is independently shippable.
+
+    G(["**Goal**<br/>Impls can refine inherited contracts (#16)"])
+
+    %% --- Phase A: behaviour refinement (independently shippable) ---
+    GA(["**Goal A**<br/>Behaviour refinement"])
+    G --> GA
+
+    GA --> A7[A7. Behaviour tests + docs]
+    A7 --> A4[A4. merge gate: partition plain vs refinement, fold or error]
+    A7 --> A5[A5. dual-namespace codegen: pre_weaken_groups + post_strengthen, impl-name binding]
+    A7 --> A6[A6. eval.ex evaluate_pre_weaken/3 OR engine + combined failure]
+
+    A4 --> A1[A1. Assertion :refinement tag + assertions_eval_list/3]
+    A4 --> A3[A3. register_assertion/6 carries the tag]
+    A5 --> A1
+    A5 --> A4
+    A6 --> A1
+    A3 --> A2[A2. surface syntax @pre_weaken/@post_strengthen + register_refinement/4]
+    A2 --> A1
+
+    %% --- Phase B: protocol refinement (builds on A) ---
+    GB(["**Goal B**<br/>Protocol refinement"])
+    G --> GB
+    GB --> GA
+
+    GB --> B5[B5. protocol refinement tests + docs]
+    B5 --> B4[B4. refinement-aware dispatch wrapper: runtime impl lookup]
+    B4 --> B3[B3. impl-side folded effective-pre/post functions]
+    B3 --> B2[B2. protocol exposes __bond_protocol_contract__ reflection]
+    B3 --> B1[B1. Bond.Protocol.Impl: capture @pre_weaken/@post_strengthen in defimpl]
+    B3 --> A5
+    B3 --> A6
+    B1 --> A1
+
+    %% Commit 1 (this graph) is the root prerequisite of every leaf.
+    A1 --> S1[1. Mikado graph]
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S1 leaf;
+
+    style G fill:#90EE90
+    style GA fill:#90EE90
+    style GB fill:#90EE90
+    style S1 fill:#90EE90
