@@ -269,16 +269,62 @@ defmodule Bond.Compiler.Clauses do
   end
 
   @doc """
-  Returns the set of bare-variable names referenced anywhere in `ast`.
+  Returns the set of *free* bare-variable names referenced in `ast` — the variables that must
+  resolve to something outside the expression (a function argument, or `result` in a `@post`).
 
   A bare variable is `{name, meta, ctx}` with `name` and `ctx` both atoms; local and remote
   calls (whose third element is an argument list, e.g. `is_integer(x)` or `old(amount)`) are
   *not* themselves variables, though any bare variables nested in their arguments are collected.
-  Used by `Bond.Behaviour` to check that a callback contract references only names the callback
-  actually binds.
+
+  Names bound *within* the expression are excluded. The only binding form a Bond contract
+  expression introduces is the `<~` match operator (`Bond.Predicates.<~/2`), whose left-hand
+  pattern binds names locally — it expands to a `case` clause head. So in
+  `({:ok, path} when is_binary(path)) <~ result` the only free name is `result`; `path` is
+  bound by the pattern. A `when` guard on that pattern may still reference an outer name
+  (`({:ok, v} when v > limit) <~ result`), so guard references are *not* excluded — only the
+  pattern's own bindings are.
+
+  Used by `Bond.Protocol` and `Bond.Behaviour` to check that a contract references only names
+  the function actually binds (its arguments, plus `result` in a postcondition).
   """
   @spec expression_var_names(Macro.t()) :: MapSet.t(atom())
-  def expression_var_names(ast), do: collect_var_names(ast)
+  def expression_var_names(ast) do
+    MapSet.difference(collect_var_names(ast), match_pattern_bound_names(ast))
+  end
+
+  # Collects the names bound by the left-hand pattern of every `<~` match operator in `ast`
+  # (at any depth — e.g. nested inside a `~>` implication). For each `pattern <~ _expr`, only
+  # the pattern's variables are bound; if the pattern carries a `when` guard, the guard's
+  # references are excluded from the binding set so a guard reference to an outer name still
+  # surfaces as free in `expression_var_names/1`.
+  defp match_pattern_bound_names(ast) do
+    {_, patterns} =
+      Macro.prewalk(ast, [], fn
+        {:<~, _, [lhs, _rhs]} = node, acc -> {node, [pattern_of(lhs) | acc]}
+        node, acc -> {node, acc}
+      end)
+
+    Enum.reduce(patterns, MapSet.new(), fn pattern, acc ->
+      MapSet.union(acc, pattern_binding_names(pattern))
+    end)
+  end
+
+  # The binding side of a `<~` LHS: the pattern before any `when` guard, or the whole LHS when
+  # there is no guard.
+  defp pattern_of({:when, _, [pattern, _guard]}), do: pattern
+  defp pattern_of(pattern), do: pattern
+
+  # Variable names a pattern binds. Every bare variable in a pattern is a binding *except* a
+  # pinned `^var`, which is a reference to an outer value — neutralise pinned subtrees (replace
+  # them with a non-variable node) before collecting so the pinned name stays free.
+  defp pattern_binding_names(pattern) do
+    pattern
+    |> Macro.prewalk(fn
+      {:^, _, [_pinned]} -> {:__bond_pinned__, [], []}
+      other -> other
+    end)
+    |> collect_var_names()
+  end
 
   # Walks an AST collecting every bare-variable reference. A bare variable in
   # Elixir AST is `{name, _meta, ctx}` where both `name` and `ctx` are atoms

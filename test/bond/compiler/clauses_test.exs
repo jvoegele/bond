@@ -576,6 +576,43 @@ defmodule Bond.Compiler.ClausesTest do
     end
   end
 
+  describe "expression_var_names/1" do
+    test "collects every bare variable in an ordinary expression" do
+      expr = quote(do: balance + fee >= 0)
+      assert Clauses.expression_var_names(expr) == MapSet.new([:balance, :fee])
+    end
+
+    test "excludes a name bound by a `<~` pattern, keeps the matched-against name" do
+      expr = quote(do: {:ok, value} <~ result)
+      assert Clauses.expression_var_names(expr) == MapSet.new([:result])
+    end
+
+    test "excludes a `<~` pattern binding referenced by its own `when` guard" do
+      expr = quote(do: ({:ok, path} when is_binary(path)) <~ result)
+      assert Clauses.expression_var_names(expr) == MapSet.new([:result])
+    end
+
+    test "keeps a `when` guard reference to an outer name while excluding the pattern binding" do
+      expr = quote(do: ({:ok, v} when v > limit) <~ result)
+      assert Clauses.expression_var_names(expr) == MapSet.new([:limit, :result])
+    end
+
+    test "treats a pinned `^var` in a `<~` pattern as a free reference, not a binding" do
+      expr = quote(do: ^expected <~ result)
+      assert Clauses.expression_var_names(expr) == MapSet.new([:expected, :result])
+    end
+
+    test "finds bindings in a `<~` nested inside a `~>` implication" do
+      expr = quote(do: ok? ~> ({:ok, value} <~ result))
+      assert Clauses.expression_var_names(expr) == MapSet.new([:ok?, :result])
+    end
+
+    test "combines free names across the matched expression and the rest of the assertion" do
+      expr = quote(do: {:ok, value} <~ run(input) and result == fallback)
+      assert Clauses.expression_var_names(expr) == MapSet.new([:input, :result, :fallback])
+    end
+  end
+
   describe "underscore_prefix_unused/2" do
     test "leaves a bare variable alone when it's in the used set" do
       pattern = quote(do: x)
