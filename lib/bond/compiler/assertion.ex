@@ -223,6 +223,103 @@ defmodule Bond.Compiler.Assertion do
   end
 
   @doc """
+  Builds the lifted precondition defp body for a *weakened* (refined) precondition (#16):
+  `inherited OR @pre_weaken`.
+
+  The inherited group and the impl's weakening group each become a 0-arity thunk wrapping their
+  own `assertions_eval_list/3` conjunction; `Bond.Runtime.Eval.evaluate_pre_weaken/3` tries the
+  inherited group first and only falls through to the weakening group if it fails. `weaken_prelude`
+  is a list of `impl_name = canonical_name` assignments (built by `Bond.Compiler.AnnotatedFunction`)
+  that bind the implementation's parameter names — which the `@pre_weaken` expressions reference —
+  to the canonical (callback) values the defp receives.
+  """
+  @spec pre_weaken_body([t()], [t()], [Macro.t()], function_info(), module() | nil) :: Macro.t()
+  def pre_weaken_body(inherited, weaken, weaken_prelude, function_info, function_module \\ nil)
+      when is_list(inherited) and is_list(weaken) and is_list(weaken_prelude) and
+             is_tuple(function_info) do
+    inherited_eval = assertions_eval_list(inherited, function_info, function_module)
+    weaken_eval = assertions_eval_list(weaken, function_info, function_module)
+    combined_info = pre_weaken_combined_info(inherited, weaken, function_info, function_module)
+
+    quote do
+      import Bond.Predicates
+
+      (unquote_splicing(weaken_prelude))
+
+      Bond.Runtime.Eval.evaluate_pre_weaken(
+        fn -> (unquote_splicing(inherited_eval)) end,
+        fn -> (unquote_splicing(weaken_eval)) end,
+        unquote(Macro.escape(combined_info))
+      )
+    end
+  end
+
+  @doc """
+  Builds the lifted postcondition defp body for a *strengthened* (refined) postcondition (#16):
+  `inherited AND @post_strengthen`.
+
+  Strengthening is plain conjunction, so the inherited group and the impl's strengthening group are
+  evaluated in sequence (each throws on its first failing assertion). `strengthen_prelude` binds the
+  implementation's parameter names referenced by the `@post_strengthen` expressions, exactly as for
+  `pre_weaken_body/5`.
+  """
+  @spec post_strengthen_body([t()], [t()], [Macro.t()], function_info(), module() | nil) ::
+          Macro.t()
+  def post_strengthen_body(
+        inherited,
+        strengthen,
+        strengthen_prelude,
+        function_info,
+        function_module \\ nil
+      )
+      when is_list(inherited) and is_list(strengthen) and is_list(strengthen_prelude) and
+             is_tuple(function_info) do
+    inherited_eval = assertions_eval_list(inherited, function_info, function_module)
+    strengthen_eval = assertions_eval_list(strengthen, function_info, function_module)
+
+    quote do
+      import Bond.Predicates
+
+      (unquote_splicing(strengthen_prelude))
+
+      (unquote_splicing(inherited_eval))
+
+      (unquote_splicing(strengthen_eval))
+    end
+  end
+
+  # The single combined failure info for a weakened precondition where BOTH the inherited group and
+  # the weakening group failed. Shaped like an ordinary precondition `assertion_info` so
+  # `Bond.Runtime.Eval.evaluate_assertions/2` raises a `Bond.PreconditionError` unchanged. The
+  # rendered expression shows both halves; attribution falls back to the inherited group's
+  # `source_behaviour` so the message reads "(inherited from …)". `:binding` is added at runtime by
+  # `evaluate_pre_weaken/3` from the weakening group's failure.
+  defp pre_weaken_combined_info(inherited, weaken, function_info, function_module) do
+    anchor = List.first(inherited) || List.first(weaken)
+
+    inh_codes = inherited |> Enum.map(& &1.code) |> Enum.join(" and ")
+    weaken_codes = weaken |> Enum.map(& &1.code) |> Enum.join(" and ")
+
+    source_behaviour =
+      case inherited do
+        [%__MODULE__{source_behaviour: sb} | _] -> sb
+        _ -> nil
+      end
+
+    %{
+      assertion_id: generate_unique_id(),
+      kind: :precondition,
+      label: :refined_precondition,
+      expression: "(#{inh_codes}) or (#{weaken_codes})",
+      file: anchor.definition_env.file,
+      line: anchor.definition_env.line,
+      module: function_module || anchor.definition_env.module,
+      function: function_info,
+      source_behaviour: source_behaviour
+    }
+  end
+
+  @doc """
   Returns a quoted block intended to be used as the body of the lifted private function
   that evaluates module-scoped `@invariant`s.
 
