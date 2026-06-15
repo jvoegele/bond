@@ -212,9 +212,11 @@ config :bond,
 - **`:purge`** — not compiled at all. Zero overhead. No contract docs.
 
 When compiled with `true` or `false`, contracts can be flipped at runtime
-via `Application.put_env(:bond, :preconditions, false | true)` — no
-recompilation needed. `:purge` is the only setting with no runtime presence
-(the code isn't there).
+via `Bond.Config` — `Bond.Config.disable(:preconditions)` /
+`Bond.Config.enable(:preconditions)`, no recompilation needed. (Setting
+`Application.put_env(:bond, …)` after the first contracted call has no
+effect — the runtime state is cached; use `Bond.Config`.) `:purge` is the
+only setting with no runtime presence (the code isn't there).
 
 For finer control, the `:overrides` config lets you set per-module rules.
 See the `Bond` moduledoc's "Conditional compilation" and "Per-module

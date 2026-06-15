@@ -107,10 +107,10 @@ Each contract kind is measured in three modes:
   * **`false`** — wrapper compiled in but defaults to skip; runtime
     config can flip it back on without recompiling.
 
-The runtime check for `false` reads `Application.get_env/3` on every
-call. The runtime check for `true` reads the same env on every call,
-but with the default `true` value; it then evaluates the contract
-expression.
+The runtime check for `false` reads a single `:persistent_term` entry on
+every call (seeded from application env on first use; see `Bond.Config`).
+The runtime check for `true` reads the same entry on every call, resolves
+to the default `true` value, and then evaluates the contract expression.
 
 ### Baseline (no Bond)
 

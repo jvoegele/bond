@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Documentation: corrected stale runtime-toggle guidance.** The FAQ, getting-started
+  guide, and overhead guide still described the pre-1.1.0 contract gate
+  (`Application.get_env/3` / `Application.put_env/3` per call). Since 1.1.0 the gate
+  reads a single `:persistent_term` entry and the runtime on/off API is `Bond.Config`
+  (`enable/1`, `disable/1`, `put/2`, `reset/0`); `Application.put_env/3` is no longer a
+  live toggle once the modes term has been seeded. Docs now point at `Bond.Config` and
+  describe the `:persistent_term` gate.
+
 ## [1.3.0] - 2026-06-15
 
 Stable release of **Eiffel-style contract refinement** (`@pre_weaken` /

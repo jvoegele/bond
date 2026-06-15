@@ -491,7 +491,7 @@ defmodule Bond do
   #     the wrapped expression is not evaluated at runtime.
   #   * `true` / `false` — call `build_inline_ast` with the compile-time-resolved mode to
   #     produce the call(s) to `Bond.Runtime.Eval.evaluate_check/2`. The runtime guard
-  #     (`Application.get_env/3` defaulting to the compile-time mode) lives inside `Eval`.
+  #     (a `:persistent_term` read defaulting to the compile-time mode) lives inside `Eval`.
   defp build_check(module, build_inline_ast) do
     case checks_mode(module) do
       :purge -> :ok

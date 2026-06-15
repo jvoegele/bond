@@ -46,17 +46,29 @@ compile-time overhead is ~10 ms per module that uses contracts.
 
 Yes — that's what `true` and `false` (as distinct from `:purge`) give you.
 When a kind is compiled with `true` or `false`, the override has a runtime
-guard:
+guard. Flip it with `Bond.Config`:
 
 ```elixir
 # In IEx or a remote console:
-Application.put_env(:bond, :preconditions, false)  # dormant
-Application.put_env(:bond, :preconditions, true)   # active again
+Bond.Config.disable(:preconditions)  # dormant
+Bond.Config.enable(:preconditions)   # active again
+
+Bond.Config.put(:postconditions, false)  # set a kind explicitly
+Bond.Config.all()                         # inspect the effective state
 ```
 
-The runtime check is a single `Application.get_env/3` lookup per call. For
-inner-loop hot paths, `:purge` is still the right choice — runtime toggle
-costs a tiny lookup; `:purge` costs nothing.
+The runtime check is a single lock-free `:persistent_term` read (~6 ns) —
+about 5× cheaper than the `Application.get_env/3` lookup it replaced in
+1.1.0. For inner-loop hot paths, `:purge` is still the right choice — the
+runtime toggle costs a tiny read; `:purge` costs nothing.
+
+> #### `Application.put_env` is not a live toggle {: .warning}
+>
+> The runtime state is seeded from application env on the *first* contracted
+> call, then cached in `:persistent_term`. Calling
+> `Application.put_env(:bond, :preconditions, false)` after that point has no
+> effect. Use `Bond.Config` (which updates the cache directly), or
+> `Bond.Config.reset/0` to re-seed from current application env.
 
 ## Can I disable contracts for one specific module?
 
@@ -275,7 +287,7 @@ Concretely:
 - **Compile-time:** if you `:purge` a lower kind, you must `:purge`
   every higher kind too. `config :bond, preconditions: :purge` while
   leaving `:postconditions: true` is a compile error.
-- **Runtime:** if you `Application.put_env(:bond, :preconditions, false)`,
+- **Runtime:** if you `Bond.Config.disable(:preconditions)`,
   postconditions and invariants are also skipped automatically. Bond
   emits a one-time `Logger.warning` per process per (higher, lower)
   pair so you know it happened.
@@ -285,7 +297,7 @@ sanity assertion, not a contract with a caller.
 
 If you genuinely want to skip a higher kind's *evaluation* without
 removing the code, use `false` instead of `:purge` (compiled in,
-runtime-disabled by default; flippable via `Application.put_env/3`).
+runtime-disabled by default; flippable via `Bond.Config`).
 
 ## How do I disable a single failing contract while debugging?
 
@@ -303,10 +315,11 @@ rather than resolve them. For debugging, pick whichever of these fits:
    wrappable in a conditional and is the right home for an assertion
    you want to gate on runtime state (e.g. a feature flag) rather than
    on contract policy.
-3. **Disable the kind globally for the relevant environment.** If you're
-   investigating a precondition storm in dev, `config :bond,
-   preconditions: false` in `config/dev.exs` skips all preconditions at
-   runtime without recompiling consumers. Heavy-handed but cheap. The
+3. **Disable the kind globally.** If you're investigating a precondition
+   storm in dev, `config :bond, preconditions: false` in `config/dev.exs`
+   skips all preconditions from boot, without recompiling consumers; or
+   call `Bond.Config.disable(:preconditions)` for a live toggle in the
+   current session (e.g. from an IEx console). Heavy-handed but cheap. The
    chain rule (preconditions ≤ postconditions ≤ invariants) means
    disabling preconditions also skips the higher kinds; see "Why can't
    I have postconditions on while preconditions are off?" for why.
