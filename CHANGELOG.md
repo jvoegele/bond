@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-06-15
+
+Stable release of **Eiffel-style contract refinement** (`@pre_weaken` /
+`@post_strengthen`), promoted from `1.3.0-rc.1` after dogfooding in a downstream
+application. No functional changes since the release candidate; the refinement
+syntax for both behaviour and protocol implementations is now covered by Bond's
+[stability guarantees](guides/stability.md). See the `1.3.0-rc.1` notes below for
+the full feature description.
+
 ## [1.3.0-rc.1] - 2026-06-15
 
 Release candidate for 1.3.0. This release adds **Eiffel-style contract
