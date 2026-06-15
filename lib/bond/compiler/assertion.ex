@@ -228,23 +228,19 @@ defmodule Bond.Compiler.Assertion do
 
   The inherited group and the impl's weakening group each become a 0-arity thunk wrapping their
   own `assertions_eval_list/3` conjunction; `Bond.Runtime.Eval.evaluate_pre_weaken/3` tries the
-  inherited group first and only falls through to the weakening group if it fails. `weaken_prelude`
-  is a list of `impl_name = canonical_name` assignments (built by `Bond.Compiler.AnnotatedFunction`)
-  that bind the implementation's parameter names — which the `@pre_weaken` expressions reference —
-  to the canonical (callback) values the defp receives.
+  inherited group first and only falls through to the weakening group if it fails. Both groups
+  reference the abstraction's canonical argument names — the same names the lifted defp binds as
+  its parameters — so no name-binding prelude is needed.
   """
-  @spec pre_weaken_body([t()], [t()], [Macro.t()], function_info(), module() | nil) :: Macro.t()
-  def pre_weaken_body(inherited, weaken, weaken_prelude, function_info, function_module \\ nil)
-      when is_list(inherited) and is_list(weaken) and is_list(weaken_prelude) and
-             is_tuple(function_info) do
+  @spec pre_weaken_body([t()], [t()], function_info(), module() | nil) :: Macro.t()
+  def pre_weaken_body(inherited, weaken, function_info, function_module \\ nil)
+      when is_list(inherited) and is_list(weaken) and is_tuple(function_info) do
     inherited_eval = assertions_eval_list(inherited, function_info, function_module)
     weaken_eval = assertions_eval_list(weaken, function_info, function_module)
     combined_info = pre_weaken_combined_info(inherited, weaken, function_info, function_module)
 
     quote do
       import Bond.Predicates
-
-      (unquote_splicing(weaken_prelude))
 
       Bond.Runtime.Eval.evaluate_pre_weaken(
         fn -> (unquote_splicing(inherited_eval)) end,
@@ -259,28 +255,17 @@ defmodule Bond.Compiler.Assertion do
   `inherited AND @post_strengthen`.
 
   Strengthening is plain conjunction, so the inherited group and the impl's strengthening group are
-  evaluated in sequence (each throws on its first failing assertion). `strengthen_prelude` binds the
-  implementation's parameter names referenced by the `@post_strengthen` expressions, exactly as for
-  `pre_weaken_body/5`.
+  evaluated in sequence (each throws on its first failing assertion). Both groups reference the
+  abstraction's canonical argument names (and `result`), exactly as for `pre_weaken_body/4`.
   """
-  @spec post_strengthen_body([t()], [t()], [Macro.t()], function_info(), module() | nil) ::
-          Macro.t()
-  def post_strengthen_body(
-        inherited,
-        strengthen,
-        strengthen_prelude,
-        function_info,
-        function_module \\ nil
-      )
-      when is_list(inherited) and is_list(strengthen) and is_list(strengthen_prelude) and
-             is_tuple(function_info) do
+  @spec post_strengthen_body([t()], [t()], function_info(), module() | nil) :: Macro.t()
+  def post_strengthen_body(inherited, strengthen, function_info, function_module \\ nil)
+      when is_list(inherited) and is_list(strengthen) and is_tuple(function_info) do
     inherited_eval = assertions_eval_list(inherited, function_info, function_module)
     strengthen_eval = assertions_eval_list(strengthen, function_info, function_module)
 
     quote do
       import Bond.Predicates
-
-      (unquote_splicing(strengthen_prelude))
 
       (unquote_splicing(inherited_eval))
 

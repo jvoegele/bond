@@ -51,15 +51,17 @@ defmodule Bond.Behaviour do
       `inherited and post_strengthen`: callers get at least the abstract guarantee, and *more*.
       (Postconditions may only strengthen — covariance.)
 
-  Unlike inherited contracts, refinement expressions reference the **implementation's own**
-  parameter names (so they read like, and document like, an ordinary `@pre`/`@post` on the
-  function).
+  Refinement expressions reference the **callback's** argument names — the same vocabulary as the
+  inherited contract they amend — not the implementation's own parameter names. The implementation
+  may still name its parameters however it likes; the refinement just binds by the callback's
+  names. (Protocol refinement via `Bond.Protocol.Impl` follows the identical rule.)
 
       defmodule SavingsAccount do
-        use Bond, behaviours: [Ledger]
+        use Bond, behaviours: [Ledger]   # callback: withdraw(balance, amount)
 
+        # 'amount' is Ledger's callback argument name, even though this clause names it 'amt'.
         @impl true
-        @pre_weaken small_withdrawal: amt == 0        # effective pre  = Ledger's OR this
+        @pre_weaken small_withdrawal: amount == 0     # effective pre  = Ledger's OR this
         @post_strengthen audited: log_exists?(result) # effective post = Ledger's AND this
         def withdraw(bal, amt), do: ...
       end

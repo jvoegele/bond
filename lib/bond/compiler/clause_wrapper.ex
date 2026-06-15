@@ -49,9 +49,7 @@ defmodule Bond.Compiler.ClauseWrapper do
           required(:post_fn_name) => atom(),
           required(:inv_fn_name) => atom(),
           required(:old_pairs) => list(),
-          required(:old_assignments) => [Macro.t()],
-          required(:weaken_prelude) => [Macro.t()],
-          required(:strengthen_prelude) => [Macro.t()]
+          required(:old_assignments) => [Macro.t()]
         }
 
   @doc """

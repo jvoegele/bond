@@ -29,6 +29,8 @@ defmodule Bond.Compiler do
   require Bond.Compiler.CompileStateFSM, as: FSM
   alias Bond.Compiler.ContractDocs
   alias Bond.Compiler.FunctionDefinition
+  alias Bond.Compiler.InheritedContracts
+  alias Bond.Compiler.InheritedContracts.Context
 
   # Functions Elixir auto-generates as a side effect of constructs like `defstruct` and
   # `defexception`. These show up via `@on_definition` and must not be tracked as user
@@ -410,6 +412,14 @@ defmodule Bond.Compiler do
 
         reject_old_in_strengthen!(strengthen_post, annotated_function)
 
+        validate_refinement_references!(
+          weaken_pre,
+          strengthen_post,
+          key,
+          names,
+          annotated_function
+        )
+
         annotated_function
         |> AnnotatedFunction.replace_preconditions(inherited_pre)
         |> AnnotatedFunction.replace_postconditions(inherited_post)
@@ -447,6 +457,50 @@ defmodule Bond.Compiler do
       end)
 
     found?
+  end
+
+  # `@pre_weaken`/`@post_strengthen` reference the abstraction's canonical argument names — the same
+  # names the inherited contract uses — so validate them against those names (plus `result` in the
+  # strengthening postcondition). Caught here, a typo points at the refinement; left to the codegen
+  # it would surface as an opaque "undefined variable" inside the generated lifted defp. Shares the
+  # protocol path's `InheritedContracts.validate_referenced_names!` so both flavours diagnose
+  # bad references identically.
+  defp validate_refinement_references!([], [], _key, _names, _annotated_function), do: :ok
+
+  defp validate_refinement_references!(
+         weaken_pre,
+         strengthen_post,
+         key,
+         names,
+         annotated_function
+       ) do
+    [clause | _] = annotated_function.clauses
+
+    InheritedContracts.validate_referenced_names!(
+      refinement_ctx(),
+      weaken_pre,
+      strengthen_post,
+      key,
+      names,
+      clause.env
+    )
+  end
+
+  # The few `Context` fields that shape the unknown-reference diagnostic for a behaviour-impl
+  # refinement. `reject_old` stays `false`: `old/1` in `@post_strengthen` is rejected separately by
+  # `reject_old_in_strengthen!/2`, and the inherited `@post` may legitimately use it. The pending
+  # keys are required by the struct but unused by `validate_referenced_names!`.
+  defp refinement_ctx do
+    %Context{
+      noun: "callback",
+      contract_subject: "behaviour implementation",
+      reference_scope: "the callback's named arguments",
+      pending_pre_key: :__bond_pending_pre__,
+      pending_post_key: :__bond_pending_post__,
+      stamp_source_behaviour: false,
+      reject_old: false,
+      arg_naming_hint?: false
+    }
   end
 
   defp inherited_violation_file(%AnnotatedFunction{clauses: [clause | _]}), do: clause.env.file

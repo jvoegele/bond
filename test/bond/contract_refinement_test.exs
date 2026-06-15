@@ -4,7 +4,9 @@ defmodule Bond.ContractRefinementTest do
   # Eiffel-style refinement of inherited behaviour contracts (#16):
   #   @pre_weaken      => effective pre  = inherited OR  weaken      (require else)
   #   @post_strengthen => effective post = inherited AND strengthen  (ensure then)
-  # Refinement expressions reference the IMPLEMENTATION's own parameter names.
+  # Refinement expressions reference the ABSTRACTION's canonical argument names (those declared on
+  # the behaviour callback) — the same vocabulary as the inherited contract, and identical to the
+  # rule for protocol refinement.
 
   # --- Behaviours (the contract-declaring side) ---
 
@@ -46,10 +48,10 @@ defmodule Bond.ContractRefinementTest do
   defmodule ZeroOkAccount do
     use Bond, behaviours: [Ledger]
 
-    # Parameters named differently from the callback (bal/amt vs balance/amount) to exercise the
-    # impl-name binding in the refinement.
+    # Parameters named differently from the callback (bal/amt vs balance/amount): the refinement
+    # still references the callback's canonical name `amount`, not the impl's `amt`.
     @impl true
-    @pre_weaken zero_ok: amt == 0
+    @pre_weaken zero_ok: amount == 0
     def withdraw(bal, amt), do: bal - amt
   end
 
@@ -65,7 +67,7 @@ defmodule Bond.ContractRefinementTest do
     use Bond, behaviours: [Ledger]
 
     @impl true
-    @pre_weaken zero_ok: amt == 0
+    @pre_weaken zero_ok: amount == 0
     @post_strengthen even_result: rem(result, 2) == 0
     def withdraw(bal, amt), do: bal - amt
   end
@@ -74,7 +76,7 @@ defmodule Bond.ContractRefinementTest do
     use Bond, behaviours: [Counter]
 
     @impl true
-    @pre_weaken allow_neg_one: n == -1
+    @pre_weaken allow_neg_one: count == -1
     def bump(0), do: 0
     def bump(n), do: n + 1
   end
@@ -108,13 +110,14 @@ defmodule Bond.ContractRefinementTest do
       message = Exception.message(error)
       assert message =~ "precondition (inherited from Bond.ContractRefinementTest.Ledger)"
       assert message =~ "ZeroOkAccount.withdraw/2"
-      # The rendered assertion shows both folded halves.
-      assert message =~ "(amount > 0) or (amt == 0)"
+      # The rendered assertion shows both folded halves, both in canonical vocabulary.
+      assert message =~ "(amount > 0) or (amount == 0)"
     end
 
     test "the combined failure carries the weakening group's binding" do
       error = assert_raise Bond.PreconditionError, fn -> ZeroOkAccount.withdraw(100, -5) end
-      assert error.binding[:amt] == -5
+      # The lifted defp binds the canonical name `amount`, regardless of the impl's `amt`.
+      assert error.binding[:amount] == -5
     end
   end
 
@@ -160,14 +163,34 @@ defmodule Bond.ContractRefinementTest do
   end
 
   describe "multi-clause implementations" do
-    test "a refinement referencing an agreed position works across clauses" do
+    test "a refinement applies uniformly across clauses" do
       assert MultiBump.bump(5) == 6
-      # count >= 0 fails for -1, but the impl weakened it to also accept n == -1.
+      # count >= 0 fails for -1, but the impl weakened it to also accept count == -1.
       assert MultiBump.bump(-1) == 0
     end
 
     test "fails when neither the inherited nor the weakening precondition holds" do
       assert_raise Bond.PreconditionError, fn -> MultiBump.bump(-2) end
+    end
+
+    test "clauses with divergent parameter names compile, since the refinement uses canonical names" do
+      # Before canonicalization this was a compile error: the refinement bound an impl parameter
+      # name and the clauses had to agree on it. Now the refinement references the callback's
+      # canonical `count`, so the clauses are free to name (or omit) their positions however they
+      # like.
+      defmodule DivergentBump do
+        use Bond, behaviours: [Counter]
+
+        @impl true
+        @pre_weaken allow_neg_one: count == -1
+        def bump(0), do: 0
+        def bump(n) when n > 0, do: n + 1
+        def bump(m), do: m * 2
+      end
+
+      assert DivergentBump.bump(5) == 6
+      assert DivergentBump.bump(-1) == -2
+      assert_raise Bond.PreconditionError, fn -> DivergentBump.bump(-2) end
     end
   end
 
@@ -247,36 +270,24 @@ defmodule Bond.ContractRefinementTest do
       end
     end
 
-    test "a refinement parameter name that collides with another callback argument errors" do
-      assert_raise CompileError, ~r/collides|shadow|also an argument name/, fn ->
-        Code.compile_string("""
-        defmodule Bond.ContractRefinementTest.CollisionViolator do
-          use Bond, behaviours: [Bond.ContractRefinementTest.Ledger]
+    test "a refinement that references an unknown name errors against the refinement" do
+      # `qty` is neither a callback argument (balance, amount) nor `result`. Caught at the impl's
+      # compile time with a Bond-shaped message rather than an opaque "undefined variable".
+      error =
+        assert_raise CompileError, fn ->
+          Code.compile_string("""
+          defmodule Bond.ContractRefinementTest.UnknownRefName do
+            use Bond, behaviours: [Bond.ContractRefinementTest.Ledger]
 
-          # callback args are (balance, amount); the impl swaps the names, then a refinement
-          # references `balance` — which is also the callback's name at position 0.
-          @impl true
-          @pre_weaken balance == 0
-          def withdraw(amount, balance), do: amount - balance
+            @impl true
+            @pre_weaken qty == 0
+            def withdraw(balance, amount), do: balance - amount
+          end
+          """)
         end
-        """)
-      end
-    end
 
-    test "multi-clause disagreement at a refinement-referenced position errors" do
-      assert_raise CompileError, ~r/consistent top-level parameter names/, fn ->
-        Code.compile_string("""
-        defmodule Bond.ContractRefinementTest.DisagreeViolator do
-          use Bond, behaviours: [Bond.ContractRefinementTest.Counter]
-
-          @impl true
-          @pre_weaken n == -1
-          def bump(0), do: 0
-          def bump(n), do: n + 1
-          def bump(m) when m > 100, do: m
-        end
-        """)
-      end
+      assert error.description =~ "qty"
+      assert error.description =~ "not a callback argument"
     end
   end
 
@@ -286,7 +297,7 @@ defmodule Bond.ContractRefinementTest do
         use Bond, behaviours: [Ledger]
 
         @impl true
-        @pre_weaken amt == 0
+        @pre_weaken amount == 0
         def withdraw(bal, amt), do: bal - amt
       end
 

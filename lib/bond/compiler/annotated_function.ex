@@ -48,8 +48,9 @@ defmodule Bond.Compiler.AnnotatedFunction do
             # *refines* an inherited contract: `@pre_weaken` weakens the inherited precondition
             # (effective pre = inherited OR pre_weaken) and `@post_strengthen` strengthens the
             # inherited postcondition (effective post = inherited AND post_strengthen). Their
-            # expressions reference the implementation's own parameter names; `preconditions` /
-            # `postconditions` hold the inherited (canonical-named) assertions they fold against.
+            # expressions reference the abstraction's canonical argument names (the same names the
+            # inherited contract uses), so they fold against the inherited assertions in
+            # `preconditions` / `postconditions` without any name rebinding.
             pre_weaken_assertions: [],
             post_strengthen_assertions: []
 
@@ -159,7 +160,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
   @doc """
   Sets the impl's `@pre_weaken` / `@post_strengthen` refinement assertions (#16). These reference
-  the implementation's own parameter names and fold against the inherited contract at codegen.
+  the abstraction's canonical argument names and fold against the inherited contract at codegen.
   """
   def put_pre_weaken(%__MODULE__{} = annotated_function, assertions) when is_list(assertions),
     do: %{annotated_function | pre_weaken_assertions: assertions}
@@ -396,9 +397,6 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
     doc_asts = ContractDocs.doc_clauses(annotated_function, env, pre_mode, post_mode)
 
-    {weaken_prelude, strengthen_prelude} =
-      refinement_preludes(annotated_function, canonical_names, env, {fun, arity})
-
     wrapper_context = %{
       fun: fun,
       arity: arity,
@@ -411,9 +409,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
       post_fn_name: lifted_fn_name(:postconditions, fun, arity),
       inv_fn_name: lifted_fn_name(:invariants, fun, arity),
       old_pairs: OldExpression.pairs(old_context),
-      old_assignments: OldExpression.resolve(old_context),
-      weaken_prelude: weaken_prelude,
-      strengthen_prelude: strengthen_prelude
+      old_assignments: OldExpression.resolve(old_context)
     }
 
     defp_params = lifted_defp_params(annotated_function, canonical_names, first_clause)
@@ -585,14 +581,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
   end
 
   defp build_pre_defp(%__MODULE__{} = af, defp_params, info, module, env, wc) do
-    body =
-      Assertion.pre_weaken_body(
-        af.preconditions,
-        af.pre_weaken_assertions,
-        wc.weaken_prelude,
-        info,
-        module
-      )
+    body = Assertion.pre_weaken_body(af.preconditions, af.pre_weaken_assertions, info, module)
 
     build_lifted_defp_with_body(wc.pre_fn_name, defp_params, body, env)
   end
@@ -629,7 +618,6 @@ defmodule Bond.Compiler.AnnotatedFunction do
       Assertion.post_strengthen_body(
         postconditions,
         af.post_strengthen_assertions,
-        wc.strengthen_prelude,
         info,
         module
       )
@@ -650,78 +638,6 @@ defmodule Bond.Compiler.AnnotatedFunction do
         unquote(body)
       end
     end
-  end
-
-  # Builds the `impl_name = canonical_name` assignment preludes for a refining function (#16). The
-  # lifted assertion defps take the inherited contract's *canonical* (callback) names as their
-  # parameters, but `@pre_weaken`/`@post_strengthen` expressions reference the implementation's OWN
-  # parameter names; for each position a refinement references, bind the impl name to the canonical
-  # value so the refinement evaluates correctly. Returns `{weaken_prelude, strengthen_prelude}` —
-  # assignment-AST lists spliced into the precondition and postcondition defps; both empty for a
-  # non-refining function.
-  defp refinement_preludes(%__MODULE__{} = af, canonical_names, env, function_info) do
-    if af.pre_weaken_assertions == [] and af.post_strengthen_assertions == [] do
-      {[], []}
-    else
-      all = af.pre_weaken_assertions ++ af.post_strengthen_assertions
-      referenced_any = Clauses.referenced_param_names(all, af.clauses)
-
-      {:ok, impl_names} =
-        Clauses.assert_clauses_agree!(af.clauses, env, function_info, referenced_any)
-
-      canonical_set = MapSet.new(canonical_names)
-
-      {
-        group_prelude(
-          af.pre_weaken_assertions,
-          af,
-          impl_names,
-          canonical_names,
-          canonical_set,
-          env
-        ),
-        group_prelude(
-          af.post_strengthen_assertions,
-          af,
-          impl_names,
-          canonical_names,
-          canonical_set,
-          env
-        )
-      }
-    end
-  end
-
-  defp group_prelude([], _af, _impl_names, _canonical_names, _canonical_set, _env), do: []
-
-  defp group_prelude(group, af, impl_names, canonical_names, canonical_set, env) do
-    referenced = Clauses.referenced_param_names(group, af.clauses)
-
-    bindings =
-      impl_names
-      |> Enum.zip(canonical_names)
-      |> Enum.filter(fn {impl_name, _canonical} -> MapSet.member?(referenced, impl_name) end)
-      |> Enum.reject(fn {impl_name, canonical} -> impl_name == canonical end)
-
-    Enum.each(bindings, fn {impl_name, _canonical} ->
-      if MapSet.member?(canonical_set, impl_name) do
-        raise CompileError,
-          file: env.file,
-          line: env.line,
-          description: refinement_name_collision_message(impl_name, {af.fun, af.arity})
-      end
-    end)
-
-    for {impl_name, canonical} <- bindings do
-      quote do: unquote(Macro.var(impl_name, nil)) = unquote(Macro.var(canonical, nil))
-    end
-  end
-
-  defp refinement_name_collision_message(impl_name, {fun, arity}) do
-    "Bond: the refinement on `#{fun}/#{arity}` uses the parameter name `#{impl_name}`, which is " <>
-      "also an argument name of the inherited contract at a different position. Rename the " <>
-      "implementation's parameter so refinement (`@pre_weaken`/`@post_strengthen`) bindings do " <>
-      "not shadow the inherited contract's arguments."
   end
 
   # The `:purge` mode is intercepted by `build_pre_defp/6` / `build_post_defp/7` before reaching

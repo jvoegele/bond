@@ -204,7 +204,8 @@ defmodule Bond do
   # shape as `@pre`/`@post`; the assertion is registered tagged with its refinement role so the
   # inheritance merge *folds* it (precondition weakened with `or`, postcondition strengthened with
   # `and`) instead of rejecting it. Plain `@pre`/`@post` on an inherited operation stays a compile
-  # error. Refinement expressions reference the implementation's own parameter names.
+  # error. Refinement expressions reference the abstraction's canonical argument names (the
+  # callback's or protocol function's), the same vocabulary as the inherited contract.
   defmacro @{refinement, meta, [expression]}
            when refinement in [:pre_weaken, :post_strengthen] do
     register_refinement(refinement, expression, __CALLER__, meta)

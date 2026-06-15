@@ -102,7 +102,10 @@ defmodule Bond.Compiler.InheritedContracts do
       "postcondition"
     )
 
-    if ctx.reject_old, do: reject_old!(post, {name, arity}, env)
+    if ctx.reject_old do
+      reject_old!(pre, {name, arity}, env)
+      reject_old!(post, {name, arity}, env)
+    end
 
     :ok
   end
@@ -177,17 +180,19 @@ defmodule Bond.Compiler.InheritedContracts do
   # `old/1` captures a value at function entry for use in a postcondition. The protocol dispatch
   # wrapper does not snapshot entry state (a v1 non-goal), so reject `old(...)` with a clear error
   # rather than letting it surface as an "undefined function old/1" deep in generated code.
+  # Called for both pre and post so @pre_weaken old(...) is also caught with a clear message.
   @doc false
-  def reject_old!(post, {name, arity}, env) do
-    for %Assertion{expression: expression} = assertion <- post do
+  def reject_old!(assertions, {name, arity}, env) do
+    for %Assertion{expression: expression, kind: kind} = assertion <- assertions do
       if uses_old?(expression) do
+        kind_str = if kind == :postcondition, do: "postcondition", else: "precondition"
+
         raise CompileError,
           file: env.file,
           line: assertion.definition_env.line || env.line,
           description:
-            "Bond: the postcondition on `#{name}/#{arity}` uses `old/1`, which is not supported " <>
-              "in protocol contracts (v1). A protocol `@post` may reference only the function's " <>
-              "arguments and `result`."
+            "Bond: the #{kind_str} on `#{name}/#{arity}` uses `old/1`, which is not supported " <>
+              "in protocol contracts (v1)."
       end
     end
 

@@ -168,10 +168,12 @@ annotations (Eiffel-style behavioural subtyping):
     postcondition (effective post = `inherited and post_strengthen`).
 
 They accept the same bare/labelled forms as `@pre`/`@post`, and their
-expressions reference the implementation's own parameter names (plus `result` for
-`@post_strengthen`). The qualified `Bond.pre_weaken/1` / `Bond.post_strengthen/1`
-forms serve the `at_annotations: false` path. Refining a *protocol* contract is
-not yet supported.
+expressions reference the abstraction's canonical argument names — the callback's
+or protocol function's (plus `result` for `@post_strengthen`) — not the
+implementation's own parameter names. The qualified `Bond.pre_weaken/1` /
+`Bond.post_strengthen/1` forms serve the `at_annotations: false` path. Refining a
+*protocol* contract uses the same annotations inside a `defimpl` that does
+`use Bond.Protocol.Impl`.
 
 The *fact* that the documented compile-time rules fire (e.g. a plain
 `@pre`/`@post` on an inherited operation is rejected; `@pre_weaken` requires an
