@@ -814,3 +814,46 @@ guide for the full rules.
 > This applies to `@pre`/`@post` on `@callback`s. Struct `@invariant`s remain
 > scoped to the struct's own module and compose with inherited contracts
 > independently.
+
+## Why didn't my `@post_strengthen` fire — the violation blames a different function?
+
+Because some contract closer to the value caught it first. Bond contracts
+compose and are *fail-fast*: each function enforces its own `@pre`/`@post`, and
+the first one to fail raises and short-circuits everything after it. For the
+**postconditions of nested calls**, the inner callee returns — and its `@post`
+is checked — before control returns to the outer function, so an inner
+postcondition runs *before* an outer `@post`/`@post_strengthen`:
+
+```elixir
+defmodule CognitoSource do
+  use Bond, behaviours: [TokenSource]   # callback: fetch(source) :: Token.t
+
+  # Strengthens the inherited @post to also require a non-empty token and positive TTL.
+  @impl true
+  @post_strengthen non_empty_positive: result.access_token != "" and result.expires_in > 0
+  def fetch(source) do
+    %Token{access_token: raw_token(source), expires_in: normalize_expires_in(raw_ttl(source))}
+  end
+
+  @post positive_integer: result > 0
+  defp normalize_expires_in(ttl), do: max(ttl, 0)
+end
+```
+
+Feeding a `ttl` of `0` here does **not** trip `:non_empty_positive` — it trips
+`normalize_expires_in/1`'s own `@post positive_integer`, because that private
+function returns (and is checked) first. To exercise the refinement, use a value
+that satisfies every inner contract but fails the strengthened rule — e.g. an
+empty `access_token`, which has the right *shape* but fails the *non-empty* check
+in `fetch/1`'s strengthened postcondition.
+
+This is not refinement-specific — it's how layered contracts have always
+composed. Note the asymmetry: **preconditions** are checked outer-first (the
+caller's `@pre` runs before the inner call is made), **postconditions**
+inner-first. When debugging a refinement that seems inert, check whether an inner
+contract is rejecting the value before it ever reaches the outer one.
+
+(The same composition holds for a protocol implementation refining via
+`use Bond.Protocol.Impl`; just note that a plain `@post` on a private helper is
+only enforced in a module that does `use Bond` — `Bond.Protocol.Impl` installs
+the refinement hooks only, not the ordinary `@pre`/`@post` machinery.)
