@@ -276,16 +276,22 @@ behavioural-subtyping rules:
 The distinct keywords are the teaching: `or` to *weaken* a precondition is
 exactly the Liskov-safe direction, even though it reads backwards at first.
 
-#### Behaviour refinement
+In both flavours, refinement expressions reference the **abstraction's** argument
+names — the callback's or the protocol function's — not the implementation's own
+parameter names. A refinement amends the inherited contract, so it speaks the
+inherited contract's vocabulary. (Your implementation is still free to name its
+own parameters whatever it likes; the refinement just doesn't use those names.)
 
-Refinement expressions reference the **implementation's own** parameter names:
+#### Behaviour refinement
 
 ```elixir
 defmodule SavingsAccount do
-  use Bond, behaviours: [Ledger]
+  use Bond, behaviours: [Ledger]   # callback: withdraw(balance, amount)
 
+  # 'amount' is Ledger's callback argument name — even though this clause names
+  # its second parameter 'amt'.
   @impl true
-  @pre_weaken small_withdrawal: amt == 0        # effective pre  = Ledger's OR this
+  @pre_weaken small_withdrawal: amount == 0     # effective pre  = Ledger's OR this
   @post_strengthen audited: log_exists?(result) # effective post = Ledger's AND this
   def withdraw(bal, amt), do: ...
 end
@@ -295,16 +301,17 @@ A refinement only applies to a function that inherits a contract. `@pre_weaken`
 requires an inherited precondition to weaken — you may not *introduce* one (that
 would strengthen). `@post_strengthen` may add a postcondition where the callback
 declared none. `old/1` is available in the inherited `@post` but not in
-`@post_strengthen`.
+`@post_strengthen`. Because refinements bind by the callback's names rather than
+the clause's, a multi-clause implementation may name (or destructure) its
+positions however each clause likes.
 
 #### Protocol refinement (opt-in)
 
 Protocol implementations can refine their inherited contracts by adding
-`use Bond.Protocol.Impl` to the `defimpl` block. Unlike behaviour refinement,
-protocol refinement expressions reference the **protocol's canonical argument
-names** (those declared in the protocol's own `def`), because the effective
-contract is evaluated once at the dispatch boundary rather than inside the
-implementation:
+`use Bond.Protocol.Impl` to the `defimpl` block. The same naming rule applies —
+refinement expressions reference the protocol function's canonical argument
+names — which is doubly natural here, since the effective contract is evaluated
+once at the dispatch boundary, before any implementation clause is selected:
 
 ```elixir
 defprotocol Account do

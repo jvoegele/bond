@@ -157,7 +157,7 @@ defmodule Bond.Compiler.ProtocolWrapper do
     pre_stmt =
       if pre_weaken != [] do
         body =
-          Assertion.pre_weaken_body(inherited_pre, pre_weaken, [], function_info, function_module)
+          Assertion.pre_weaken_body(inherited_pre, pre_weaken, function_info, function_module)
 
         quote file: env.file, line: env.line do
           @dialyzer {:nowarn_function, [{unquote(eff_pre), unquote(arity)}]}
@@ -174,7 +174,6 @@ defmodule Bond.Compiler.ProtocolWrapper do
           Assertion.post_strengthen_body(
             inherited_post,
             post_strengthen,
-            [],
             function_info,
             function_module
           )
