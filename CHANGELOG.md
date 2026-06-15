@@ -5,7 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.3.0-rc.1] - 2026-06-15
+
+Release candidate for 1.3.0. This release adds **Eiffel-style contract
+refinement** (`@pre_weaken` / `@post_strengthen`) for both behaviour and protocol
+implementations — the largest addition to Bond's contract-inheritance model since
+it was introduced in 1.2.0, and entirely additive (no breaking changes).
+
+It is published as a release candidate so the new refinement syntax can get
+real-world exposure before it is frozen under Bond's
+[stability guarantees](guides/stability.md). The surface is complete and tested;
+feedback on the keywords and semantics is welcome via
+[GitHub issues](https://github.com/jvoegele/bond/issues). To try it:
+`{:bond, "~> 1.3.0-rc.1"}`.
 
 ### Added
 
