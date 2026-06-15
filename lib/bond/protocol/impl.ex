@@ -44,9 +44,9 @@ defmodule Bond.Protocol.Impl do
   Implementations that do **not** `use Bond.Protocol.Impl` are completely unaffected.
   """
 
-  alias Bond.Compiler.Assertion
   alias Bond.Compiler.InheritedContracts
   alias Bond.Compiler.InheritedContracts.Context
+  alias Bond.Compiler.ProtocolWrapper
 
   # Module-attribute keys stored as inline atom literals because the impl module has a shadowed
   # `@/1` macro — using `@name value` syntax inside __using__ would conflict. Same pattern as
@@ -171,46 +171,17 @@ defmodule Bond.Protocol.Impl do
       env
     )
 
-    function_info = {name, arity}
-    arg_vars = Enum.map(canonical_arg_names, &Macro.var(&1, nil))
-    result_var = Macro.var(:result, nil)
-    eff_pre_fn = :"__bond_effective_pre__#{name}_#{arity}__"
-    eff_post_fn = :"__bond_effective_post__#{name}_#{arity}__"
-
-    pre_stmt =
-      if pre_weaken != [] do
-        body = Assertion.pre_weaken_body(inherited_pre, pre_weaken, [], function_info, module)
-
-        quote file: env.file, line: env.line do
-          @dialyzer {:nowarn_function, [{unquote(eff_pre_fn), unquote(arity)}]}
-          @doc false
-          def unquote(eff_pre_fn)(unquote_splicing(arg_vars)) do
-            unquote(body)
-          end
-        end
-      end
-
-    post_stmt =
-      if post_strengthen != [] do
-        body =
-          Assertion.post_strengthen_body(
-            inherited_post,
-            post_strengthen,
-            [],
-            function_info,
-            module
-          )
-
-        quote file: env.file, line: env.line do
-          @dialyzer {:nowarn_function, [{unquote(eff_post_fn), unquote(arity + 1)}]}
-          @doc false
-          def unquote(eff_post_fn)(unquote_splicing(arg_vars), unquote(result_var)) do
-            unquote(body)
-          end
-        end
-      end
-
-    [pre_stmt, post_stmt] |> Enum.reject(&is_nil/1)
+    ProtocolWrapper.build_effective_fns(
+      name,
+      arity,
+      canonical_arg_names,
+      inherited_pre,
+      inherited_post,
+      pre_weaken,
+      post_strengthen,
+      module,
+      env
+    )
   end
 
   defp fetch_protocol_contract!(protocol, impl_module, name, arity, env) do
