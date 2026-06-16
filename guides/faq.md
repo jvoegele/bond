@@ -566,23 +566,29 @@ def parse(input) when is_list(input), do: :other
 ```
 
 Contracts must apply uniformly across clauses, so **all clauses must agree
-on the top-level parameter name at each position** when Bond is wrapping
-the function. The wrapper uses that name when it calls `super` and when
-it passes arguments to the lifted contract defps — the names referenced
-in your assertion expressions are the canonical names.
+on the top-level parameter name at each position a contract references**
+(see ["Naming consistency is only required where contracts depend on
+it"](#naming-consistency-is-only-required-where-contracts-depend-on-it)
+below — positions no contract mentions are free to differ). The wrapper
+uses the agreed name when it calls `super` and when it passes arguments to
+the lifted contract defps — the names referenced in your assertion
+expressions are the canonical names.
 
-Heterogeneous naming raises a `CompileError`:
+When a contract references a position whose clauses disagree on the
+top-level name, Bond raises a `CompileError`:
 
 ```elixir
 defmodule MyMod do
   use Bond
 
-  @pre conn != nil
+  @pre g != nil          # references position 1 (`g`)
   def lookup(conn, %Game{} = g, %GameFilm{} = f), do: ...
   def lookup(conn, league, conference) when is_binary(league), do: ...
-  #             ^^^^^^                 ^^^^^^^^^^
-  # CompileError: positions 1 and 2 disagree on top-level names
-  # (`g` vs `league`, `f` vs `conference`)
+  #                ^^^^^^
+  # CompileError: position 1 disagrees on top-level names (`g` vs `league`).
+  # The `@pre` references position 1, so the clauses must agree there.
+  # (Position 2 also disagrees — `f` vs `conference` — but no contract
+  # references it, so Bond doesn't enforce agreement at that position.)
 end
 ```
 
@@ -591,7 +597,7 @@ usually a readability improvement too, since the original names described
 one shape but the function accepts multiple:
 
 ```elixir
-@pre conn != nil
+@pre resource != nil
 def lookup(conn, %Game{} = resource, %GameFilm{} = scope), do: ...
 def lookup(conn, resource, scope) when is_binary(resource), do: ...
 ```
