@@ -221,5 +221,38 @@ defmodule Bond.QuantifiedAssertionsTest do
 
       assert Exception.message(error) =~ "forall/2 expects a generator"
     end
+
+    test "for-style multiple generators raise a clear error pointing at nesting" do
+      error =
+        assert_raise ArgumentError, fn ->
+          Code.eval_string("""
+          defmodule Bond.QuantifiedAssertionsTest.MultiGen do
+            use Bond
+            @pre bad: forall(x <- xs, y <- ys, x < y)
+            def f(xs, ys), do: {xs, ys}
+          end
+          """)
+        end
+
+      message = Exception.message(error)
+      assert message =~ "forall/3 is not supported"
+      assert message =~ "do not accept multiple generators or filters"
+      assert message =~ "forall(x <- xs, forall(y <- ys, predicate))"
+    end
+
+    test "exists with multiple generators raises the same shape of error" do
+      error =
+        assert_raise ArgumentError, fn ->
+          Code.eval_string("""
+          defmodule Bond.QuantifiedAssertionsTest.MultiGenExists do
+            use Bond
+            @pre bad: exists(x <- xs, y <- ys, x < y)
+            def f(xs, ys), do: {xs, ys}
+          end
+          """)
+        end
+
+      assert Exception.message(error) =~ "exists/3 is not supported"
+    end
   end
 end

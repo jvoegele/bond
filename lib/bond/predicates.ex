@@ -247,6 +247,12 @@ defmodule Bond.Predicates do
             "got: #{Macro.to_string(generator)}"
   end
 
+  # Catch `for`-style misuse — multiple generators and/or filters — which would otherwise
+  # surface as an inscrutable "undefined variable" error. Bond quantifiers are single
+  # generator + single predicate by design; nesting expresses the Cartesian case.
+  defmacro forall(_a, _b, _c), do: quantifier_arity_error!(:forall, 3)
+  defmacro forall(_a, _b, _c, _d), do: quantifier_arity_error!(:forall, 4)
+
   @doc """
   Existential quantifier: asserts that a predicate holds for **at least one** element of an
   enumerable.
@@ -290,5 +296,22 @@ defmodule Bond.Predicates do
     raise ArgumentError,
           "exists/2 expects a generator `pattern <- enumerable` as its first argument, " <>
             "got: #{Macro.to_string(generator)}"
+  end
+
+  # See the corresponding `forall/3`,`forall/4` clauses.
+  defmacro exists(_a, _b, _c), do: quantifier_arity_error!(:exists, 3)
+  defmacro exists(_a, _b, _c, _d), do: quantifier_arity_error!(:exists, 4)
+
+  # Shared compile-time diagnostic for `for`-style multi-generator/filter misuse of a
+  # quantifier. Runs at macro-expansion time (in the already-compiled `Bond.Predicates`), so it
+  # can call this private helper directly.
+  @spec quantifier_arity_error!(:forall | :exists, pos_integer()) :: no_return()
+  defp quantifier_arity_error!(name, arity) do
+    raise ArgumentError,
+          "#{name}/#{arity} is not supported — #{name} takes exactly one generator and one " <>
+            "predicate: `#{name}(pattern <- enumerable, predicate)`. Unlike a `for` " <>
+            "comprehension (or StreamData's `check all`), Bond quantifiers do not accept " <>
+            "multiple generators or filters. To quantify over more than one collection, nest " <>
+            "quantifiers: `#{name}(x <- xs, #{name}(y <- ys, predicate))`."
   end
 end

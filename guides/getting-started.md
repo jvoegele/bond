@@ -162,11 +162,30 @@ asserting a function returns a sorted list:
 def sort(list), do: Enum.sort(list)
 ```
 
+### Not a `for` comprehension (or a property generator)
+
+The `pattern <- enumerable` syntax is borrowed from `for` comprehensions —
+and looks like StreamData's `check all` / `gen all` — but the resemblance
+is only skin-deep. Two differences worth internalising:
+
+- The right-hand side of `<-` is a **plain `Enumerable`** (a list, range,
+  map, stream…), not a StreamData generator. The closest analogues are
+  `Enum.all?/2` and `Enum.any?/2`, not `for` or property testing.
+- The trailing expression is the **predicate being asserted**, *not a
+  filter*. In `check all x <- list, x > 0 do … end`, the `x > 0` clause
+  *discards* non-matching values; in `forall(x <- list, x > 0)` it is the
+  thing that must hold for every element. There is no `do` block.
+
+So read `forall(x <- items, x > 0)` as the logical statement "for all `x`
+in `items`, `x > 0`" — not "for the `x` in `items` where `x > 0`".
+
 ### Limitations
 
 - Each quantifier takes **one generator and one predicate**; there is no
   multi-generator or filter syntax as in a `for` comprehension. Nest a
-  quantifier inside another for a Cartesian assertion.
+  quantifier inside another for a Cartesian assertion. (A `for`-style
+  multi-generator call raises a clear compile-time error pointing you at
+  nesting.)
 - When several quantifiers appear in one assertion — including **nested**
   ones — the element-level `counterexample:` line reflects the outermost
   (last-evaluated) quantifier to fail. For a single, bare quantifier it is
