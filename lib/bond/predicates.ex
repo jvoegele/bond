@@ -249,7 +249,10 @@ defmodule Bond.Predicates do
 
   # Catch `for`-style misuse — multiple generators and/or filters — which would otherwise
   # surface as an inscrutable "undefined variable" error. Bond quantifiers are single
-  # generator + single predicate by design; nesting expresses the Cartesian case.
+  # generator + single predicate by design; nesting expresses the Cartesian case. Each clause
+  # always raises, so Dialyzer reports the generated `MACRO-forall`/`MACRO-exists` functions as
+  # having no local return — true and intended. Elixir forbids an inline `@dialyzer` attribute
+  # on a macro, so this is suppressed in `.dialyzer_ignore.exs`.
   defmacro forall(_a, _b, _c), do: quantifier_arity_error!(:forall, 3)
   defmacro forall(_a, _b, _c, _d), do: quantifier_arity_error!(:forall, 4)
 

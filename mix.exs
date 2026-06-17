@@ -12,7 +12,11 @@ defmodule Bond.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      dialyzer: [plt_local_path: "priv/plts", plt_add_apps: [:stream_data, :mix, :ex_unit]],
+      dialyzer: [
+        plt_local_path: "priv/plts",
+        plt_add_apps: [:stream_data, :mix, :ex_unit],
+        ignore_warnings: ".dialyzer_ignore.exs"
+      ],
       test_coverage: [tool: ExCoveralls],
 
       # Hex
