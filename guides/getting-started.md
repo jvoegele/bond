@@ -105,6 +105,127 @@ expressions. Two operators are especially useful in contracts:
 
 See `Bond.Predicates` for the complete list.
 
+## Quantified assertions
+
+When a contract needs to assert something about *every* element of a
+collection — or that *some* element exists — reach for the `forall` and
+`exists` macros. They use comprehension-style generator syntax:
+
+```elixir
+defmodule Stats do
+  use Bond
+
+  @pre all_positive: forall(x <- samples, x > 0)
+  def geometric_mean(samples) do
+    nth_root(Enum.product(samples), length(samples))
+  end
+
+  @pre has_admin: exists(u <- users, u.role == :admin)
+  def authorize(users), do: # ...
+end
+```
+
+You could already write these with `Enum.all?/2` and `Enum.any?/2`, but
+when one fails Bond can only tell you the *whole* expression was false.
+`forall`/`exists` capture **which element** broke the contract:
+
+```
+** (Bond.PreconditionError) precondition failed for call to Stats.geometric_mean/1
+|   label: :all_positive
+|   assertion: forall(x <- samples, x > 0)
+|   counterexample: element at index 3 (-2) does not satisfy `x > 0`
+|   binding: [samples: [5, 2, 8, -2]]
+```
+
+`exists` instead reports that no element satisfied the predicate:
+
+```
+|   assertion: exists(u <- users, u.role == :admin)
+|   counterexample: no element of `users` satisfies `u.role == :admin` (3 elements)
+```
+
+Both forms:
+
+- **short-circuit** — `forall` stops at the first violation, `exists` at
+  the first witness;
+- return ordinary booleans, so they **compose** with `and`, `or`, `not`,
+  and `~>`;
+- work in `@pre`, `@post` (including quantifying over `result`),
+  `@invariant`, and `Bond.check/1`.
+
+A `@post` that quantifies over the result reads naturally — for example,
+asserting a function returns a sorted list:
+
+```elixir
+@post sorted: forall(i <- 0..(length(result) - 2)//1,
+                     Enum.at(result, i) <= Enum.at(result, i + 1))
+def sort(list), do: Enum.sort(list)
+```
+
+### Not a `for` comprehension (or a property generator)
+
+The `pattern <- enumerable` syntax is borrowed from `for` comprehensions —
+and looks like StreamData's `check all` / `gen all` — but the resemblance
+is only skin-deep. Two differences worth internalising:
+
+- The right-hand side of `<-` is a **plain `Enumerable`** (a list, range,
+  map, stream…), not a StreamData generator. The closest analogues are
+  `Enum.all?/2` and `Enum.any?/2`, not `for` or property testing.
+- The trailing expression is the **predicate being asserted**, *not a
+  filter*. In `check all x <- list, x > 0 do … end`, the `x > 0` clause
+  *discards* non-matching values; in `forall(x <- list, x > 0)` it is the
+  thing that must hold for every element. There is no `do` block.
+
+So read `forall(x <- items, x > 0)` as the logical statement "for all `x`
+in `items`, `x > 0`" — not "for the `x` in `items` where `x > 0`".
+
+### Limitations
+
+- Each quantifier takes **one generator and one predicate**; there is no
+  multi-generator or filter syntax as in a `for` comprehension. Nest a
+  quantifier inside another for a Cartesian assertion. (A `for`-style
+  multi-generator call raises a clear compile-time error pointing you at
+  nesting.)
+- When several quantifiers appear in one assertion — including **nested**
+  ones — the element-level `counterexample:` line reflects the outermost
+  (last-evaluated) quantifier to fail. For a single, bare quantifier it is
+  exact. The plain truthy/falsy verdict is always correct regardless.
+
+### Large collections, streams, and side effects
+
+A quantifier **enumerates the collection** — once, lazily, stopping at the
+first violation (`forall`) or first witness (`exists`). Keep three things
+in mind:
+
+- **Cost is `O(n)`.** Quantifying over a large collection on a hot path
+  adds a full (short-circuited) traversal to every call, just like
+  `Enum.all?/2` would. This is exactly what Bond's runtime gate is for —
+  disable the kind in production (`config :bond, postconditions: false`, or
+  `Bond.Config` at runtime; see
+  [Disabling contracts in production](#disabling-contracts-in-production))
+  so the traversal never runs there.
+
+- **Assertions must be side-effect-free — and enumerating a lazy stream is
+  a side effect.** A `@post` that quantifies over a stream `result` (or a
+  `@pre` over a stream argument) will *enumerate that stream* to check the
+  predicate. For a pure, re-enumerable stream that merely **doubles the
+  work** — the stream runs once for the contract and again for the caller.
+  But for a stream backed by a **one-shot or effectful source** —
+  `IO.stream/2` over stdin, an `Ecto.Repo.stream` cursor, a socket via
+  `Stream.resource/3` — the contract's enumeration consumes or re-fires the
+  resource, corrupting what the caller receives. **Don't quantify over an
+  effectful stream.** If the producer is finite and pure and you really
+  want to assert over it, materialise it explicitly —
+  `forall(x <- Enum.to_list(result), …)` — so the cost and the single
+  enumeration are visible at the call site.
+
+- **Never quantify over an infinite stream.** `forall` returns only when an
+  element *fails*, and `exists` only when one *succeeds* — so an
+  all-passing `forall` (or a no-match `exists`) over `Stream.cycle/1`,
+  `Stream.iterate/2`, etc. never terminates. Bond can't detect this
+  (a finite and an infinite stream have the same type); it's on you to
+  quantify only over bounded collections.
+
 ## `old` expressions in postconditions
 
 For functions that mutate state, a postcondition often needs to compare

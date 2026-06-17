@@ -198,4 +198,123 @@ defmodule Bond.Predicates do
   def __opaque__(value) do
     :persistent_term.get(:__bond_opaque_neutralize__, value)
   end
+
+  @doc """
+  Universal quantifier: asserts that a predicate holds for **every** element of an enumerable.
+
+  Written with comprehension-style generator syntax — `forall(pattern <- enumerable, predicate)`
+  — it reads "for all `pattern` in `enumerable`, `predicate`". It is equivalent in truth value
+  to `Enum.all?(enumerable, fn pattern -> predicate end)`, but on failure Bond reports **which
+  element violated the predicate** and its zero-based index, rather than only that the whole
+  expression was false:
+
+      precondition all_positive failed for call to M.scale/1
+      |   assertion: forall(x <- items, x > 0)
+      |   counterexample: element at index 3 (-2) does not satisfy `x > 0`
+
+  Evaluation **short-circuits** at the first violating element. An empty enumerable is vacuously
+  `true`. A predicate that raises (rather than returning falsy) propagates — guard
+  shape-dependent predicates with `~>`, exactly as in multi-clause contracts.
+
+  `forall`/`exists` return ordinary booleans, so they compose with `and`, `or`, `not`, `~>`,
+  and `|||`. When several quantifiers appear in one assertion (including nested ones), the
+  element-level detail reflects the *last* quantifier to fail; for a bare quantifier it is
+  exact.
+
+  ## Examples
+
+      iex> import Bond.Predicates
+      iex> forall(x <- [1, 2, 3], x > 0)
+      true
+      iex> forall(x <- [1, -2, 3], x > 0)
+      false
+      iex> forall(x <- [], x > 0)
+      true
+  """
+  defmacro forall({:<-, _, [pattern, enum]}, predicate) do
+    quote do
+      Bond.Runtime.Quantifier.forall(
+        unquote(enum),
+        fn unquote(pattern) -> unquote(predicate) end,
+        unquote(Macro.to_string(predicate))
+      )
+    end
+  end
+
+  defmacro forall(generator, _predicate) do
+    raise ArgumentError,
+          "forall/2 expects a generator `pattern <- enumerable` as its first argument, " <>
+            "got: #{Macro.to_string(generator)}"
+  end
+
+  # Catch `for`-style misuse — multiple generators and/or filters — which would otherwise
+  # surface as an inscrutable "undefined variable" error. Bond quantifiers are single
+  # generator + single predicate by design; nesting expresses the Cartesian case. Each clause
+  # always raises, so Dialyzer reports the generated `MACRO-forall`/`MACRO-exists` functions as
+  # having no local return — true and intended. Elixir forbids an inline `@dialyzer` attribute
+  # on a macro, so this is suppressed in `.dialyzer_ignore.exs`.
+  defmacro forall(_a, _b, _c), do: quantifier_arity_error!(:forall, 3)
+  defmacro forall(_a, _b, _c, _d), do: quantifier_arity_error!(:forall, 4)
+
+  @doc """
+  Existential quantifier: asserts that a predicate holds for **at least one** element of an
+  enumerable.
+
+  Written `exists(pattern <- enumerable, predicate)` — "there exists a `pattern` in
+  `enumerable` such that `predicate`". Equivalent in truth value to
+  `Enum.any?(enumerable, fn pattern -> predicate end)`. Evaluation **short-circuits** at the
+  first satisfying element.
+
+  Unlike `forall/2`, a failure has no single offending element, so the diagnostic reports that
+  no element satisfied the predicate, along with the number of elements checked:
+
+      precondition has_admin failed for call to M.authorize/1
+      |   assertion: exists(u <- users, u.role == :admin)
+      |   counterexample: no element of `users` satisfies `u.role == :admin` (3 elements)
+
+  An empty enumerable is `false` (no witness exists).
+
+  ## Examples
+
+      iex> import Bond.Predicates
+      iex> exists(x <- [1, 2, 3], x > 2)
+      true
+      iex> exists(x <- [1, 2, 3], x > 5)
+      false
+      iex> exists(x <- [], x > 0)
+      false
+  """
+  defmacro exists({:<-, _, [pattern, enum]}, predicate) do
+    quote do
+      Bond.Runtime.Quantifier.exists(
+        unquote(enum),
+        fn unquote(pattern) -> unquote(predicate) end,
+        unquote(Macro.to_string(predicate)),
+        unquote(Macro.to_string(enum))
+      )
+    end
+  end
+
+  defmacro exists(generator, _predicate) do
+    raise ArgumentError,
+          "exists/2 expects a generator `pattern <- enumerable` as its first argument, " <>
+            "got: #{Macro.to_string(generator)}"
+  end
+
+  # See the corresponding `forall/3`,`forall/4` clauses.
+  defmacro exists(_a, _b, _c), do: quantifier_arity_error!(:exists, 3)
+  defmacro exists(_a, _b, _c, _d), do: quantifier_arity_error!(:exists, 4)
+
+  # Shared compile-time diagnostic for `for`-style multi-generator/filter misuse of a
+  # quantifier. Runs at macro-expansion time (in the already-compiled `Bond.Predicates`), so it
+  # can call this private helper directly.
+  @spec quantifier_arity_error!(:forall | :exists, pos_integer()) :: no_return()
+  defp quantifier_arity_error!(name, arity) do
+    raise ArgumentError,
+          "#{name}/#{arity} is not supported — #{name} takes exactly one generator and one " <>
+            "predicate: `#{name}(pattern <- enumerable, predicate)`. Unlike a `for` " <>
+            "comprehension (or StreamData's `check all`), Bond quantifiers do not accept " <>
+            "multiple generators or filters. To quantify over more than one collection, nest " <>
+            "quantifiers: `#{name}(x <- xs, #{name}(y <- ys, predicate))`."
+  end
 end
