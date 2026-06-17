@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Quantified assertions: `forall` / `exists` with element-level failure diagnostics**
+  ([#32](https://github.com/jvoegele/bond/issues/32)). Two new macros in `Bond.Predicates`
+  (auto-imported into every assertion) express universal and existential quantification with
+  comprehension-style generator syntax:
+
+  ```elixir
+  @pre all_positive: forall(x <- items, x > 0)
+  @pre has_admin: exists(u <- users, u.role == :admin)
+  @post sorted: forall(i <- 0..(length(result) - 2)//1,
+                       Enum.at(result, i) <= Enum.at(result, i + 1))
+  ```
+
+  Unlike `Enum.all?/2` / `Enum.any?/2`, a failure reports **which** element violated the
+  predicate and its index, rather than only that the whole expression was false:
+
+  ```
+  |   assertion: forall(x <- items, x > 0)
+  |   counterexample: element at index 3 (-2) does not satisfy `x > 0`
+  ```
+
+  Both short-circuit (at the first violation / first witness), return ordinary booleans so
+  they compose with `and` / `or` / `not` / `~>`, and work in `@pre`, `@post` (including over
+  `result`), `@invariant`, and `Bond.check/1`. The element detail also rides along in the
+  `[:bond, :assertion, :failure]` telemetry metadata under `:quantifier`. See the
+  [Quantified assertions](guides/getting-started.md#quantified-assertions) guide for the
+  documented limitations (nested quantifiers report the outermost element; a single
+  generator per quantifier).
+
 ### Fixed
 
 - **Documentation: corrected stale runtime-toggle guidance.** The FAQ, getting-started

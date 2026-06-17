@@ -252,7 +252,14 @@ defmodule Bond.Runtime.Eval do
   def check_assertion(nil, assertion_info, binding_fun),
     do: assertion_failure(assertion_info, binding_fun.())
 
-  def check_assertion(_result, _assertion_info, _binding_fun), do: :ok
+  # Success clause also clears the quantifier side channel: a `forall`/`exists` whose `false`
+  # was absorbed into a truthy result (`not forall(...)`, `forall(...) or other`) would
+  # otherwise leave stale element detail that a *later* assertion's failure would mis-report.
+  # See `Bond.Runtime.Quantifier`.
+  def check_assertion(_result, _assertion_info, _binding_fun) do
+    Bond.Runtime.Quantifier.clear()
+    :ok
+  end
 
   @doc """
   Variant of `check_assertion/3` for `Bond.check/1` calls: returns the assertion's value on
@@ -270,10 +277,21 @@ defmodule Bond.Runtime.Eval do
   def check_value(nil, assertion_info, binding_fun),
     do: assertion_failure(assertion_info, binding_fun.())
 
-  def check_value(value, _assertion_info, _binding_fun), do: value
+  # See `check_assertion/3`'s success clause — clear the quantifier side channel on the
+  # passing path so absorbed quantifier failures can't leak into a later assertion.
+  def check_value(value, _assertion_info, _binding_fun) do
+    Bond.Runtime.Quantifier.clear()
+    value
+  end
 
   @spec assertion_failure(map(), keyword()) :: no_return()
   defp assertion_failure(assertion_info, binding) do
+    assertion_info =
+      case Bond.Runtime.Quantifier.pop() do
+        nil -> assertion_info
+        detail -> Map.put(assertion_info, :quantifier, detail)
+      end
+
     throw({:assertion_failure, Map.put(assertion_info, :binding, Enum.sort(binding))})
   end
 

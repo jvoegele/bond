@@ -105,6 +105,73 @@ expressions. Two operators are especially useful in contracts:
 
 See `Bond.Predicates` for the complete list.
 
+## Quantified assertions
+
+When a contract needs to assert something about *every* element of a
+collection — or that *some* element exists — reach for the `forall` and
+`exists` macros. They use comprehension-style generator syntax:
+
+```elixir
+defmodule Stats do
+  use Bond
+
+  @pre all_positive: forall(x <- samples, x > 0)
+  def geometric_mean(samples) do
+    nth_root(Enum.product(samples), length(samples))
+  end
+
+  @pre has_admin: exists(u <- users, u.role == :admin)
+  def authorize(users), do: # ...
+end
+```
+
+You could already write these with `Enum.all?/2` and `Enum.any?/2`, but
+when one fails Bond can only tell you the *whole* expression was false.
+`forall`/`exists` capture **which element** broke the contract:
+
+```
+** (Bond.PreconditionError) precondition failed for call to Stats.geometric_mean/1
+|   label: :all_positive
+|   assertion: forall(x <- samples, x > 0)
+|   counterexample: element at index 3 (-2) does not satisfy `x > 0`
+|   binding: [samples: [5, 2, 8, -2]]
+```
+
+`exists` instead reports that no element satisfied the predicate:
+
+```
+|   assertion: exists(u <- users, u.role == :admin)
+|   counterexample: no element of `users` satisfies `u.role == :admin` (3 elements)
+```
+
+Both forms:
+
+- **short-circuit** — `forall` stops at the first violation, `exists` at
+  the first witness;
+- return ordinary booleans, so they **compose** with `and`, `or`, `not`,
+  and `~>`;
+- work in `@pre`, `@post` (including quantifying over `result`),
+  `@invariant`, and `Bond.check/1`.
+
+A `@post` that quantifies over the result reads naturally — for example,
+asserting a function returns a sorted list:
+
+```elixir
+@post sorted: forall(i <- 0..(length(result) - 2)//1,
+                     Enum.at(result, i) <= Enum.at(result, i + 1))
+def sort(list), do: Enum.sort(list)
+```
+
+### Limitations
+
+- Each quantifier takes **one generator and one predicate**; there is no
+  multi-generator or filter syntax as in a `for` comprehension. Nest a
+  quantifier inside another for a Cartesian assertion.
+- When several quantifiers appear in one assertion — including **nested**
+  ones — the element-level `counterexample:` line reflects the outermost
+  (last-evaluated) quantifier to fail. For a single, bare quantifier it is
+  exact. The plain truthy/falsy verdict is always correct regardless.
+
 ## `old` expressions in postconditions
 
 For functions that mutate state, a postcondition often needs to compare

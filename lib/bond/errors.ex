@@ -13,7 +13,8 @@ defmodule Bond.AssertionError do
         :binding,
         :source_behaviour,
         :source_protocol,
-        :impl
+        :impl,
+        :quantifier
       ]
 
       @typedoc """
@@ -25,6 +26,9 @@ defmodule Bond.AssertionError do
       `:source_protocol` is the protocol module a contract was declared on (see `Bond.Protocol`),
       or `nil`; when set, `:impl` is the implementation module the failing call resolved to (or
       `nil` if none could be resolved).
+
+      `:quantifier` carries element-level failure detail when the assertion used `forall`/`exists`
+      (see `Bond.Predicates`), or `nil` otherwise.
       """
       @type t :: %__MODULE__{
               label: Bond.assertion_label(),
@@ -36,7 +40,8 @@ defmodule Bond.AssertionError do
               binding: keyword(),
               source_behaviour: module() | nil,
               source_protocol: module() | nil,
-              impl: module() | nil
+              impl: module() | nil,
+              quantifier: map() | nil
             }
 
       @impl Exception
@@ -92,14 +97,43 @@ defmodule Bond.AssertionError do
       end
 
     location_line = if location, do: "|   at: #{location}\n", else: ""
+    counterexample_line = format_counterexample(Map.get(error, :quantifier))
 
     """
     #{headline}
     #{location_line}|   label: #{inspect(error.label)}
     |   assertion: #{error.expression}
-    |   binding: #{format_binding(error.binding)}
+    #{counterexample_line}|   binding: #{format_binding(error.binding)}
     """
   end
+
+  # Renders the element-level `counterexample:` line for a quantified assertion (`forall`/
+  # `exists`), or `""` for an ordinary assertion. `forall` names the offending element and its
+  # zero-based index; `exists` reports that no element satisfied the predicate, with the count.
+  defp format_counterexample(nil), do: ""
+
+  defp format_counterexample(%{
+         quantifier: :forall,
+         element: element,
+         index: index,
+         predicate: predicate
+       }) do
+    "|   counterexample: element at index #{index} (#{inspect(element)}) does not satisfy " <>
+      "`#{predicate}`\n"
+  end
+
+  defp format_counterexample(%{
+         quantifier: :exists,
+         predicate: predicate,
+         count: count,
+         enum_code: enum_code
+       }) do
+    "|   counterexample: no element of `#{enum_code}` satisfies `#{predicate}` " <>
+      "(#{count} #{pluralize(count, "element")})\n"
+  end
+
+  defp pluralize(1, word), do: word
+  defp pluralize(_count, word), do: word <> "s"
 
   # The binding can include arbitrary user values — large structs, deep maps, big lists. Use
   # `inspect/2` with conservative `limit`/`printable_limit` defaults so the failure message

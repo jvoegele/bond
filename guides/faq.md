@@ -876,3 +876,33 @@ contract is rejecting the value before it ever reaches the outer one.
 `use Bond.Protocol.Impl`; just note that a plain `@post` on a private helper is
 only enforced in a module that does `use Bond` — `Bond.Protocol.Impl` installs
 the refinement hooks only, not the ordinary `@pre`/`@post` machinery.)
+
+## Why does my nested `forall` report the row instead of the failing inner element?
+
+The `forall`/`exists` quantifiers (see the
+[Quantified assertions](getting-started.md#quantified-assertions) guide) capture
+the offending element through a single per-process side channel that Bond reads
+when the assertion fails. That channel holds **one** failure at a time, so when
+quantifiers nest, the *outermost* (last-evaluated) failure wins:
+
+```elixir
+@pre all_positive: forall(row <- matrix, forall(c <- row, c > 0))
+```
+
+Given `[[1, 2], [3, -4]]`, the inner `forall` records `-4`, but then the outer
+`forall` sees that row fail and overwrites the detail with the row itself:
+
+```
+|   counterexample: element at index 1 ([3, -4]) does not satisfy `forall(c <- row, c > 0)`
+```
+
+The **truthy/falsy verdict is always correct** — only the element-level
+`counterexample:` line is best-effort under nesting. The same applies when two
+quantifiers sit side by side in one assertion (e.g. joined by `and`): the line
+reflects whichever ran last. For a single, bare quantifier — the common case —
+the reported element and index are exact.
+
+If you need the precise inner element, split the check into a named inner
+predicate or assert the inner `forall` on its own (for example in a `@pre` over
+each row in a multi-clause helper), so each quantifier owns its own failure
+message.
