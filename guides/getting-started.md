@@ -191,6 +191,41 @@ in `items`, `x > 0`" — not "for the `x` in `items` where `x > 0`".
   (last-evaluated) quantifier to fail. For a single, bare quantifier it is
   exact. The plain truthy/falsy verdict is always correct regardless.
 
+### Large collections, streams, and side effects
+
+A quantifier **enumerates the collection** — once, lazily, stopping at the
+first violation (`forall`) or first witness (`exists`). Keep three things
+in mind:
+
+- **Cost is `O(n)`.** Quantifying over a large collection on a hot path
+  adds a full (short-circuited) traversal to every call, just like
+  `Enum.all?/2` would. This is exactly what Bond's runtime gate is for —
+  disable the kind in production (`config :bond, postconditions: false`, or
+  `Bond.Config` at runtime; see
+  [Disabling contracts in production](#disabling-contracts-in-production))
+  so the traversal never runs there.
+
+- **Assertions must be side-effect-free — and enumerating a lazy stream is
+  a side effect.** A `@post` that quantifies over a stream `result` (or a
+  `@pre` over a stream argument) will *enumerate that stream* to check the
+  predicate. For a pure, re-enumerable stream that merely **doubles the
+  work** — the stream runs once for the contract and again for the caller.
+  But for a stream backed by a **one-shot or effectful source** —
+  `IO.stream/2` over stdin, an `Ecto.Repo.stream` cursor, a socket via
+  `Stream.resource/3` — the contract's enumeration consumes or re-fires the
+  resource, corrupting what the caller receives. **Don't quantify over an
+  effectful stream.** If the producer is finite and pure and you really
+  want to assert over it, materialise it explicitly —
+  `forall(x <- Enum.to_list(result), …)` — so the cost and the single
+  enumeration are visible at the call site.
+
+- **Never quantify over an infinite stream.** `forall` returns only when an
+  element *fails*, and `exists` only when one *succeeds* — so an
+  all-passing `forall` (or a no-match `exists`) over `Stream.cycle/1`,
+  `Stream.iterate/2`, etc. never terminates. Bond can't detect this
+  (a finite and an infinite stream have the same type); it's on you to
+  quantify only over bounded collections.
+
 ## `old` expressions in postconditions
 
 For functions that mutate state, a postcondition often needs to compare

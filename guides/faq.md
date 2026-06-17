@@ -906,3 +906,49 @@ If you need the precise inner element, split the check into a named inner
 predicate or assert the inner `forall` on its own (for example in a `@pre` over
 each row in a multi-clause helper), so each quantifier owns its own failure
 message.
+
+## Can I use `forall`/`exists` on a stream or a very large collection?
+
+A quantifier enumerates the collection (once, short-circuiting at the first
+violation or witness). That's fine for a bounded, materialised collection — a
+list, map, `MapSet`, or finite range — but there are three cases to watch, and
+Bond deliberately leaves them to you rather than second-guessing your
+enumerable at runtime:
+
+**Large collections.** The traversal is `O(n)` on every contracted call, just
+like `Enum.all?/2`. If that's too much on a hot path, disable the kind in
+production with the runtime gate — `config :bond, postconditions: false` or
+`Bond.Config.disable/1` — so it never runs there. (See
+[Will contracts slow down my production code?](#will-contracts-slow-down-my-production-code)
+above.)
+
+**Effectful streams — don't.** Bond assertions must be side-effect-free, and
+*enumerating a lazy stream is a side effect*. A `@post` that quantifies over a
+stream `result` (or a `@pre` over a stream argument) enumerates it to check the
+predicate:
+
+```elixir
+# DON'T: the @post enumerates `result`, advancing/consuming the stream
+@post nonempty_lines: forall(line <- result, line != "")
+def read_lines(path), do: File.stream!(path)
+```
+
+For a **pure, re-enumerable** stream this merely doubles the work (the stream
+runs once for the contract and again for the caller). For a stream over a
+**one-shot or effectful source** — stdin via `IO.stream/2`, an
+`Ecto.Repo.stream` cursor, a socket — the contract's enumeration consumes or
+re-fires the resource, corrupting what the caller gets. If the producer is
+finite and pure and you genuinely want to assert over it, materialise it at the
+call site:
+
+```elixir
+# OK: enumeration is explicit, happens once, and the cost is visible
+@post nonempty_lines: forall(line <- result, line != "")
+def read_lines(path), do: File.read!(path) |> String.split("\n")
+```
+
+**Infinite streams — never.** `forall` returns only when an element *fails* and
+`exists` only when one *succeeds*, so an all-passing `forall` (or no-match
+`exists`) over `Stream.cycle/1` / `Stream.iterate/2` never terminates. A finite
+and an infinite stream share the same type, so Bond can't catch this for you —
+quantify only over bounded collections.
