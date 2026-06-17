@@ -1,6 +1,14 @@
 defmodule Bond.Predicates do
   @moduledoc """
-  Predicate functions and operators that are useful in assertions and contract specifications.
+  Functions, operators, and quantifiers for building the boolean expressions used in
+  contracts and assertions.
+
+  Despite the name, this module is broader than a list of predicates: it provides the
+  toolkit for *constructing* predicate expressions — boolean-valued helper functions
+  (`xor/2`, `implies?/2`), logical connectives (`|||`, `~>`), a pattern-match operator
+  (`<~`), and the quantifiers `forall/2` and `exists/2`. Every construct here evaluates
+  to a boolean, so each can stand on its own as the predicate of an assertion or be
+  combined into a larger one.
 
   This module is automatically imported for all assertion expressions, specifically in
   preconditions defined with `@pre`, postconditions defined with `@post`, and in uses of
