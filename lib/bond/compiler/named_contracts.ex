@@ -201,6 +201,117 @@ defmodule Bond.Compiler.NamedContracts do
 
   defp statement_line(_other, env), do: env.line
 
+  # --- flatten / include expansion (#40 composition) ---
+
+  @doc """
+  Returns the module's named contracts with all `include` directives expanded, as a flattened
+  `{name, arity} => %{arg_names, preconditions, postconditions}` map (no `:includes`).
+
+  Each include is resolved (local from this module's registry, remote from the other module's
+  already-flattened `__bond_named_contracts__/0`), its parameters substituted by the host's argument
+  expressions, and the resulting assertions spliced into the host (included clauses first, then the
+  host's own). Local include cycles are detected and raised; cross-module cycles surface earlier as
+  Elixir compile-dependency cycles. Diamonds are not deduplicated (a repeated clause is harmless —
+  pure, and failures short-circuit). Computed at `__before_compile__` and used for both the emitted
+  reflection and apply-time resolution.
+  """
+  @spec flatten(module()) :: %{optional({atom(), arity()}) => map()}
+  def flatten(module) do
+    raw = module |> registry() |> Map.new()
+    Map.new(raw, fn {key, _entry} -> {key, flatten_entry(key, raw, [])} end)
+  end
+
+  defp flatten_entry(key, raw, path) do
+    if key in path do
+      raise CompileError, description: cycle_message(key, path)
+    end
+
+    entry = Map.fetch!(raw, key)
+
+    {included_pre, included_post} =
+      Enum.reduce(entry.includes, {[], []}, fn directive, {pre_acc, post_acc} ->
+        {pre, post} = expand_include(directive, raw, [key | path])
+        {pre_acc ++ pre, post_acc ++ post}
+      end)
+
+    %{
+      arg_names: entry.arg_names,
+      preconditions: included_pre ++ entry.preconditions,
+      postconditions: included_post ++ entry.postconditions
+    }
+  end
+
+  defp expand_include(%{ref: ref, args: args, env: env}, raw, path) do
+    flat = resolve_include(ref, raw, path, env)
+    bindings = Map.new(Enum.zip(flat.arg_names, args))
+    {substitute(flat.preconditions, bindings), substitute(flat.postconditions, bindings)}
+  end
+
+  # Local include: resolve from this module's registry and flatten it recursively (threading the
+  # path so a cycle through it is caught). Arity is folded into the {name, arity} key, so an
+  # arity mismatch surfaces as "no such contract name/arity (available: …)".
+  defp resolve_include({:local, name, arity}, raw, path, env) do
+    key = {name, arity}
+
+    if Map.has_key?(raw, key) do
+      flatten_entry(key, raw, path)
+    else
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description: unknown_include_message(name, arity, Map.keys(raw), nil)
+    end
+  end
+
+  # Remote include: the other module's reflection is already flattened, so read it directly. Forces
+  # the cross-module compile dependency (and, transitively, cycle detection) via Code.ensure_compiled!.
+  defp resolve_include({:remote, module, name, arity}, _raw, _path, env) do
+    Code.ensure_compiled!(module)
+
+    unless function_exported?(module, :__bond_named_contracts__, 0) do
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description:
+          "Bond: include #{inspect(module)}.#{name} — #{inspect(module)} defines no named " <>
+            "contracts (no `defcontract`, or it does not `use Bond`)."
+    end
+
+    registry = module.__bond_named_contracts__()
+
+    case Map.fetch(registry, {name, arity}) do
+      {:ok, entry} ->
+        entry
+
+      :error ->
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description: unknown_include_message(name, arity, Map.keys(registry), module)
+    end
+  end
+
+  defp cycle_message(key, path) do
+    chain =
+      (Enum.reverse(path) ++ [key])
+      |> Enum.map_join(" -> ", fn {n, a} -> "#{n}/#{a}" end)
+
+    "Bond: defcontract include cycle detected (#{chain}). A contract cannot include itself, " <>
+      "directly or transitively."
+  end
+
+  defp unknown_include_message(name, arity, available_keys, module) do
+    where = if module, do: "in #{inspect(module)}", else: "in this module"
+
+    available =
+      available_keys |> Enum.sort() |> Enum.map_join(", ", fn {n, a} -> "#{n}/#{a}" end)
+
+    available_phrase =
+      if available == "", do: "it defines no named contracts", else: "available: #{available}"
+
+    "Bond: include #{name}/#{arity} — no such contract #{where} (#{available_phrase})."
+  end
+
   # --- substitution engine (#40 composition) ---
 
   @doc """
@@ -276,7 +387,7 @@ defmodule Bond.Compiler.NamedContracts do
 
   # Each `include` argument is substituted into the included contract's assertions, so it must
   # reference only THIS contract's declared arguments (the names in scope when the host is applied).
-  defp validate_include_args!(includes, host_name, host_arg_names, env) do
+  defp validate_include_args!(includes, host_name, host_arg_names, _env) do
     allowed = MapSet.new(host_arg_names)
 
     for %{args: args, env: include_env} <- includes, arg <- args do

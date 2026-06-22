@@ -352,17 +352,21 @@ defmodule Bond.Compiler do
     moduledoc_invariants_ast =
       build_moduledoc_invariants_ast(invariants, env.module, config[:invariants] || true)
 
+    # Flatten this module's named contracts (expand `include` directives) once: used for both the
+    # emitted reflection and apply-time local resolution.
+    named = NamedContracts.flatten(env.module)
+
     contract_overrides =
       fsm(env)
       |> FSM.annotated_functions()
       |> Enum.map(&merge_inherited_contract(&1, inherited))
-      |> Enum.map(&merge_applied_contract(&1, inherited))
+      |> Enum.map(&merge_applied_contract(&1, inherited, named))
       |> Enum.map(&AnnotatedFunction.put_invariants(&1, invariants))
       |> Enum.filter(&AnnotatedFunction.override?/1)
       |> Enum.map(&AnnotatedFunction.apply_contract(&1, config))
       |> Enum.reject(&is_nil/1)
 
-    named_contracts_ast = build_named_contracts_reflection(env.module)
+    named_contracts_ast = build_named_contracts_reflection(named)
 
     extras = Enum.reject([named_contracts_ast, moduledoc_invariants_ast], &is_nil/1)
     extras ++ contract_overrides
@@ -374,23 +378,17 @@ defmodule Bond.Compiler do
   # each captured assertion is reduced to an escapable snapshot first. Modules with no named
   # contracts emit nothing; `@apply_contract` resolution guards remote reads with
   # `function_exported?/3`.
-  defp build_named_contracts_reflection(module) do
-    case NamedContracts.registry(module) do
-      [] ->
+  defp build_named_contracts_reflection(named) do
+    case named do
+      empty when map_size(empty) == 0 ->
         nil
 
       entries ->
         contracts =
           Map.new(entries, fn {key, entry} ->
-            # Emit only the reflected shape — `:includes` is internal and (once S5 lands) already
-            # flattened into pre/post; it also carries live envs that can't be escaped.
-            reflected = %{
-              arg_names: entry.arg_names,
-              preconditions: entry.preconditions,
-              postconditions: entry.postconditions
-            }
-
-            {key, EnvSnapshot.sanitize_contract_entry(reflected)}
+            # `entry` is already the flattened {arg_names, preconditions, postconditions} shape
+            # (includes expanded into pre/post); just snapshot the assertions' live envs.
+            {key, EnvSnapshot.sanitize_contract_entry(entry)}
           end)
 
         quote do
@@ -477,9 +475,14 @@ defmodule Bond.Compiler do
   # the v1 non-goals explicit compile errors. The fold itself is identical in spirit to inheriting
   # a behaviour contract verbatim — replace the function's pre/post with the contract's and rebind
   # parameters to the contract's canonical argument names positionally.
-  defp merge_applied_contract(%AnnotatedFunction{applied_contracts: []} = af, _inherited), do: af
+  defp merge_applied_contract(%AnnotatedFunction{applied_contracts: []} = af, _inherited, _named),
+    do: af
 
-  defp merge_applied_contract(%AnnotatedFunction{applied_contracts: applied} = af, inherited) do
+  defp merge_applied_contract(
+         %AnnotatedFunction{applied_contracts: applied} = af,
+         inherited,
+         named
+       ) do
     key = {af.fun, af.arity}
     [%{env: apply_env} | _] = applied
 
@@ -506,7 +509,7 @@ defmodule Bond.Compiler do
     end
 
     [%{ref: ref}] = applied
-    {contract_module, name, entry} = resolve_applied_ref(ref, key, af, apply_env)
+    {contract_module, name, entry} = resolve_applied_ref(ref, key, af, named, apply_env)
 
     {plain_pre, weaken_pre} = partition_refinements(af.preconditions)
     {plain_post, strengthen_post} = partition_refinements(af.postconditions)
@@ -578,14 +581,17 @@ defmodule Bond.Compiler do
     }
   end
 
-  defp resolve_applied_ref({:local, name}, {_fun, arity}, %AnnotatedFunction{module: module}, env) do
-    module
-    |> NamedContracts.registry()
-    |> Map.new()
-    |> fetch_applied_entry(name, arity, module, env)
+  defp resolve_applied_ref(
+         {:local, name},
+         {_fun, arity},
+         %AnnotatedFunction{module: module},
+         named,
+         env
+       ) do
+    fetch_applied_entry(named, name, arity, module, env)
   end
 
-  defp resolve_applied_ref({:remote, contract_module, name}, {_fun, arity}, _af, env) do
+  defp resolve_applied_ref({:remote, contract_module, name}, {_fun, arity}, _af, _named, env) do
     Code.ensure_compiled!(contract_module)
 
     unless function_exported?(contract_module, :__bond_named_contracts__, 0) do

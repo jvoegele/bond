@@ -94,6 +94,122 @@ defmodule Bond.NamedContractsTest do
     end
   end
 
+  describe "composition enforcement (#40)" do
+    test "included clauses are enforced, with expression args and substituted-form messages" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.Order do
+          use Bond
+          defcontract positive(x), do: (@pre x > 0)
+          defcontract in_range(v, lo, hi), do: (@pre lo <= v and v <= hi)
+
+          defcontract order(item) do
+            include positive(item.quantity)
+            include in_range(item.discount, 0, 100)
+            @post priced: result.total >= 0
+          end
+
+          @apply_contract :order
+          def place(it), do: %{total: it.quantity * 10}
+        end
+        """)
+
+      assert mod.place(%{quantity: 2, discount: 10}) == %{total: 20}
+
+      error =
+        assert_raise Bond.PreconditionError, fn -> mod.place(%{quantity: 0, discount: 10}) end
+
+      # Attributed to the APPLIED contract, rendered in its substituted form.
+      assert Exception.message(error) =~ "from contract :order"
+      assert Exception.message(error) =~ "item.quantity > 0"
+
+      assert_raise Bond.PreconditionError, fn -> mod.place(%{quantity: 2, discount: 250}) end
+    end
+
+    test "cross-module include is enforced" do
+      compile!("""
+      defmodule Bond.NamedContractsTest.ComposeLib do
+        use Bond
+        defcontract nonneg(x), do: (@pre x >= 0)
+      end
+      """)
+
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.ComposeConsumer do
+          use Bond
+          defcontract amt(a) do
+            include Bond.NamedContractsTest.ComposeLib.nonneg(a)
+          end
+          @apply_contract :amt
+          def f(n), do: n
+        end
+        """)
+
+      assert mod.f(5) == 5
+      assert_raise Bond.PreconditionError, fn -> mod.f(-1) end
+    end
+
+    test "transitive composition (a includes b includes c)" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.Transitive do
+          use Bond
+          defcontract c(x), do: (@pre x > 0)
+          defcontract b(x) do include c(x) end
+          defcontract a(x) do include b(x) end
+          @apply_contract :a
+          def f(n), do: n
+        end
+        """)
+
+      assert mod.f(3) == 3
+      assert_raise Bond.PreconditionError, fn -> mod.f(0) end
+    end
+
+    test "a diamond shares a base without dedup and fails once" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.Diamond do
+          use Bond
+          defcontract d(x), do: (@pre x > 0)
+          defcontract b(x) do include d(x) end
+          defcontract cc(x) do include d(x) end
+          defcontract a(x) do include b(x); include cc(x) end
+          @apply_contract :a
+          def f(n), do: n
+        end
+        """)
+
+      assert mod.f(5) == 5
+      assert_raise Bond.PreconditionError, fn -> mod.f(0) end
+    end
+
+    test "an include cycle is rejected" do
+      assert_raise CompileError, ~r/include cycle detected/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.Cycle do
+          use Bond
+          defcontract a(x) do include b(x) end
+          defcontract b(x) do include a(x) end
+        end
+        """)
+      end
+    end
+
+    test "an unknown include lists available contracts" do
+      assert_raise CompileError, ~r|include nope/1 — no such contract in this module|, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.UnknownInclude do
+          use Bond
+          defcontract real(x), do: (@pre x > 0)
+          defcontract c(x) do include nope(x) end
+        end
+        """)
+      end
+    end
+  end
+
   describe "include capture (#40)" do
     test "local, remote, and includes-only forms compile; reflection strips includes" do
       compile!("""
