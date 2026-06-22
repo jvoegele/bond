@@ -638,6 +638,43 @@ defmodule Bond.Compiler do
     do: Assertion.put_refinement(assertion, refinement)
 
   @doc false
+  # Records one or more `@apply_contract` references against the next function definition. Each
+  # reference normalises to `{:local, name}` or `{:remote, module, name}` (the module alias is
+  # expanded in the caller's context now, establishing the compile-time dependency for the
+  # cross-module read that resolution performs at `__before_compile__`). Arity is not known here;
+  # it comes from the function the references attach to.
+  def register_apply_contract(expression, %Macro.Env{} = env, meta) do
+    line = Keyword.get(meta, :line, env.line)
+
+    expression
+    |> normalize_apply_contract_list()
+    |> Enum.each(fn ref_ast ->
+      ref = parse_apply_contract_ref(ref_ast, env)
+      FSM.apply_contract_def(fsm(env), %{ref: ref, line: line, env: env})
+    end)
+
+    :ok
+  end
+
+  defp normalize_apply_contract_list(list) when is_list(list), do: list
+  defp normalize_apply_contract_list(single), do: [single]
+
+  defp parse_apply_contract_ref(name, _env) when is_atom(name), do: {:local, name}
+
+  defp parse_apply_contract_ref({module_ast, name}, env) when is_atom(name) do
+    {:remote, Macro.expand(module_ast, env), name}
+  end
+
+  defp parse_apply_contract_ref(other, env) do
+    raise CompileError,
+      file: env.file,
+      line: env.line,
+      description:
+        "Bond: @apply_contract expects a contract name (`:withdrawal`), a `{Module, :name}` " <>
+          "pair, or a list of these. Got: `#{Macro.to_string(other)}`."
+  end
+
+  @doc false
   def register_invariant(expression, label, env, meta) do
     Assertion.validate_expression!(expression, env)
     # Strip the hygiene context off every reference to `subject` so they resolve to the

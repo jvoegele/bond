@@ -25,6 +25,10 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
             postcondition_defs: [],
             invariant_defs: [],
             doc_attributes: [],
+            # Named contracts applied via `@apply_contract` (#35), pending for the next function
+            # definition exactly like preconditions. Each item is `%{ref: ref, line: line,
+            # env: env}`; flushed by line into the matching AnnotatedFunction.
+            apply_contract_defs: [],
             functions_with_contracts: [],
             # Contracts inherited from behaviours via `use Bond, behaviours: […]`, keyed by
             # `{name, arity}`. Registered once at the implementer's `use` expansion and merged
@@ -86,6 +90,14 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
   def handle_event(:cast, {:postcondition_def, postcondition_def}, state, data)
       when state in [:no_contracts_pending, :contracts_pending] do
     new_data = update_in(data.postcondition_defs, &[postcondition_def | &1])
+    {:next_state, :contracts_pending, new_data}
+  end
+
+  # Applied named contracts are per-function like preconditions: they move the FSM into
+  # :contracts_pending so the next function definition absorbs them (line-split).
+  def handle_event(:cast, {:apply_contract_def, item}, state, data)
+      when state in [:no_contracts_pending, :contracts_pending] do
+    new_data = update_in(data.apply_contract_defs, &[item | &1])
     {:next_state, :contracts_pending, new_data}
   end
 
@@ -209,18 +221,23 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
     {applicable_docs, remaining_docs} =
       split_doc_attrs_by_line(data.doc_attributes, function_line)
 
+    {applicable_applied, remaining_applied} =
+      split_applied_by_line(data.apply_contract_defs, function_line)
+
     annotated_function =
       function_def
       |> AnnotatedFunction.new()
       |> AnnotatedFunction.put_preconditions(Enum.reverse(applicable_pre))
       |> AnnotatedFunction.put_postconditions(Enum.reverse(applicable_post))
       |> AnnotatedFunction.put_doc_attributes(Enum.reverse(applicable_docs))
+      |> AnnotatedFunction.put_applied_contracts(Enum.reverse(applicable_applied))
 
     new_data =
       data
       |> Map.put(:precondition_defs, remaining_pre)
       |> Map.put(:postcondition_defs, remaining_post)
       |> Map.put(:doc_attributes, remaining_docs)
+      |> Map.put(:apply_contract_defs, remaining_applied)
       |> push_annotated_function(annotated_function)
 
     next_state = if has_pending?(new_data), do: :contracts_pending, else: :no_contracts_pending
@@ -233,7 +250,8 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
     contracts_between_clauses? =
       Enum.any?(data.precondition_defs, &assertion_below_line?(&1, function_line)) or
         Enum.any?(data.postcondition_defs, &assertion_below_line?(&1, function_line)) or
-        Enum.any?(data.doc_attributes, &doc_attr_below_line?(&1, function_line))
+        Enum.any?(data.doc_attributes, &doc_attr_below_line?(&1, function_line)) or
+        Enum.any?(data.apply_contract_defs, &applied_below_line?(&1, function_line))
 
     if contracts_between_clauses? do
       error =
@@ -267,6 +285,12 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
     Enum.split_with(items, &doc_attr_below_line?(&1, line))
   end
 
+  defp split_applied_by_line(items, line) do
+    Enum.split_with(items, &applied_below_line?(&1, line))
+  end
+
+  defp applied_below_line?(%{line: applied_line}, line), do: applied_line < line
+
   defp assertion_below_line?(%Bond.Compiler.Assertion{} = a, line) do
     assertion_line(a) < line
   end
@@ -280,7 +304,8 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
   end
 
   defp has_pending?(data) do
-    data.precondition_defs != [] or data.postcondition_defs != [] or data.doc_attributes != []
+    data.precondition_defs != [] or data.postcondition_defs != [] or
+      data.doc_attributes != [] or data.apply_contract_defs != []
   end
 
   defp last_annotated_function(%{annotated_function_stack: stack} = _data) do
@@ -347,7 +372,13 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
   end
 
   defp clear_pending_contracts(data) do
-    %{data | precondition_defs: [], postcondition_defs: [], doc_attributes: []}
+    %{
+      data
+      | precondition_defs: [],
+        postcondition_defs: [],
+        doc_attributes: [],
+        apply_contract_defs: []
+    }
   end
 
   defp clear_pending_doc_attributes(data) do

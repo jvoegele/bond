@@ -299,6 +299,26 @@ defmodule Bond do
     :ok
   end
 
+  # `@apply_contract <ref-or-list>` — apply one or more reusable named contracts (`defcontract`)
+  # to the next function. A `ref` is `:name` (a contract defined in this module) or
+  # `{Module, :name}` (a contract in another module, read via its `__bond_named_contracts__/0`
+  # reflection). The contract's pre/postconditions are attached to the function and its parameters
+  # are rebound to the contract's canonical names positionally, exactly like an inherited
+  # behaviour contract. The applying function's arity selects the overload. See `defcontract`.
+  defmacro @{:apply_contract, meta, [expression]} do
+    Bond.Compiler.register_apply_contract(expression, __CALLER__, meta)
+  end
+
+  defmacro @{:apply_contract, _meta, [_, _ | _]} do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description:
+        "@apply_contract accepts a single argument — a contract name (`:withdrawal`), a " <>
+          "`{Module, :name}` pair, or a list of these (`@apply_contract [:a, {Mod, :b}]`). " <>
+          "To apply several, pass them in a list."
+  end
+
   defmacro @attr do
     # Forward any other module attributes that are not `@pre` or `@post` to `Kernel.@/1`
     quote do

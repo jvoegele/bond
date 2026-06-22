@@ -114,6 +114,105 @@ defmodule Bond.NamedContractsTest do
     end
   end
 
+  describe "@apply_contract capture" do
+    test "applying a local contract compiles and the function works for valid input" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.ApplyLocal do
+          use Bond
+
+          defcontract positive(x) do
+            @pre x > 0
+          end
+
+          @apply_contract :positive
+          def double(n), do: n * 2
+        end
+        """)
+
+      assert mod.double(5) == 10
+    end
+
+    test "list and {Module, :name} forms compile" do
+      compile!("""
+      defmodule Bond.NamedContractsTest.ApplyLib do
+        use Bond
+        defcontract a(x) do
+          @pre x > 0
+        end
+      end
+      """)
+
+      assert [{_, _} | _] =
+               compile!("""
+               defmodule Bond.NamedContractsTest.ApplyList do
+                 use Bond
+
+                 @apply_contract [:local_one, {Bond.NamedContractsTest.ApplyLib, :a}]
+                 def g(n), do: n
+
+                 defcontract local_one(x) do
+                   @pre x != 0
+                 end
+               end
+               """)
+    end
+
+    test "a dangling @apply_contract with no following def is rejected" do
+      assert_raise CompileError, ~r/do not precede a function/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.Dangling do
+          use Bond
+          defcontract p(x) do
+            @pre x > 0
+          end
+          @apply_contract :p
+        end
+        """)
+      end
+    end
+
+    test "@apply_contract between clauses is rejected" do
+      assert_raise CompileError, ~r/in between clauses/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.BetweenClauses do
+          use Bond
+          defcontract p(x) do
+            @pre x > 0
+          end
+          def h(1), do: :one
+          @apply_contract :p
+          def h(2), do: :two
+        end
+        """)
+      end
+    end
+
+    test "an invalid reference is rejected" do
+      assert_raise CompileError, ~r/expects a contract name/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.BadRef do
+          use Bond
+          @apply_contract 123
+          def k(x), do: x
+        end
+        """)
+      end
+    end
+
+    test "the comma (multi-arg) form is rejected" do
+      assert_raise CompileError, ~r/accepts a single argument/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.CommaForm do
+          use Bond
+          @apply_contract :a, :b
+          def k(x), do: x
+        end
+        """)
+      end
+    end
+  end
+
   describe "source_contract attribution" do
     test "a cross-module contract is named module.contract" do
       error = %Bond.PreconditionError{
