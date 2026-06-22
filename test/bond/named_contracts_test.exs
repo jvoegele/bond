@@ -415,23 +415,55 @@ defmodule Bond.NamedContractsTest do
     end
   end
 
-  describe "@apply_contract resolution diagnostics" do
-    test "applying with its own @pre is rejected" do
-      assert_raise CompileError, ~r/also declares its own/, fn ->
+  describe "@apply_contract extension (additive own clauses, #40)" do
+    test "own @pre/@post are conjoined with the applied contract and attributed to the function" do
+      [{mod, _} | _] =
         compile!("""
-        defmodule Bond.NamedContractsTest.OwnPre do
+        defmodule Bond.NamedContractsTest.Extended do
           use Bond
-          defcontract p(x) do
-            @pre x > 0
+          defcontract withdrawal(account, amount) do
+            @pre positive: amount > 0
           end
-          @apply_contract :p
-          @pre x < 100
-          def f(x), do: x
+          @apply_contract :withdrawal
+          @pre whole: amount == trunc(amount)
+          def withdraw(acct, amt), do: %{acct | balance: acct.balance - amt}
+        end
+        """)
+
+      assert mod.withdraw(%{balance: 100}, 30) == %{balance: 70}
+
+      # The applied contract's own precondition still fires, attributed to the contract.
+      contract_error =
+        assert_raise Bond.PreconditionError, fn -> mod.withdraw(%{balance: 100}, -5) end
+
+      assert Exception.message(contract_error) =~ "from contract :withdrawal"
+
+      # The added precondition fires, attributed to the function (no "from contract").
+      added_error =
+        assert_raise Bond.PreconditionError, fn -> mod.withdraw(%{balance: 100}, 3.5) end
+
+      refute Exception.message(added_error) =~ "from contract"
+      assert Exception.message(added_error) =~ "Bond.NamedContractsTest.Extended.withdraw/2"
+    end
+
+    test "an added clause referencing a function param name (not canonical) is rejected" do
+      assert_raise CompileError, ~r/not a contract argument/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.AddedImplName do
+          use Bond
+          defcontract w(account, amount) do
+            @pre amount > 0
+          end
+          @apply_contract :w
+          @pre amt > 0
+          def withdraw(acct, amt), do: acct
         end
         """)
       end
     end
+  end
 
+  describe "@apply_contract resolution diagnostics" do
     test "applying alongside behaviour inheritance is rejected" do
       compile!("""
       defmodule Bond.NamedContractsTest.Charger do

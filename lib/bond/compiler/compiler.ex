@@ -505,19 +505,9 @@ defmodule Bond.Compiler do
 
     label = contract_label(contract_module, name, af.module)
 
-    # v1 non-goal: an applied contract is enforced as-is — no own plain @pre/@post alongside it
-    # (that would need the dual-namespace machinery #16 retired).
-    if plain_pre != [] or plain_post != [] do
-      raise CompileError,
-        file: apply_env.file,
-        line: apply_env.line,
-        description:
-          "Bond: #{mfa(af)} applies the named contract #{label} and also declares its own " <>
-            "@pre/@post. An applied contract is enforced as-is (v1); put function-specific " <>
-            "assertions in the body with Bond.check/1, or add them to the contract."
-    end
-
-    # v1 non-goal: refining an applied contract (@pre_weaken/@post_strengthen).
+    # Deferred (#40): refining an applied contract with @pre_weaken/@post_strengthen (the OR/weaken
+    # case). Additive plain @pre/@post (below) covers the common "also require X" need; weakening
+    # stays a compile error for now.
     if weaken_pre != [] or strengthen_post != [] do
       raise CompileError,
         file: apply_env.file,
@@ -527,14 +517,57 @@ defmodule Bond.Compiler do
             "@pre_weaken/@post_strengthen. Refining a named contract is not supported (v1)."
     end
 
+    # #40 Option A: the function's own plain @pre/@post ADD to the applied contract (conjunction).
+    # They evaluate in the lifted assertion defp, which is parameterised by the contract's canonical
+    # argument names — so they must reference those names, not the function's own parameters. Validate
+    # that here (a clear error beats an "undefined variable" deep in generated code), then append them
+    # UNSTAMPED so a failure attributes to the function itself, not the contract.
+    validate_applied_extension_refs!(
+      plain_pre,
+      plain_post,
+      {af.fun, af.arity},
+      entry.arg_names,
+      apply_env
+    )
+
     source = {contract_module, name}
 
     af
-    |> AnnotatedFunction.replace_preconditions(stamp_source_contract(entry.preconditions, source))
+    |> AnnotatedFunction.replace_preconditions(
+      stamp_source_contract(entry.preconditions, source) ++ plain_pre
+    )
     |> AnnotatedFunction.replace_postconditions(
-      stamp_source_contract(entry.postconditions, source)
+      stamp_source_contract(entry.postconditions, source) ++ plain_post
     )
     |> AnnotatedFunction.put_canonical_override(entry.arg_names)
+  end
+
+  defp validate_applied_extension_refs!([], [], _key, _arg_names, _env), do: :ok
+
+  defp validate_applied_extension_refs!(plain_pre, plain_post, key, arg_names, env) do
+    InheritedContracts.validate_referenced_names!(
+      applied_extension_ctx(),
+      plain_pre,
+      plain_post,
+      key,
+      arg_names,
+      env
+    )
+  end
+
+  # Reference-validation context for plain @pre/@post added alongside an @apply_contract (#40). Uses
+  # only the diagnostic-wording fields and `reject_old` (false: `old/1` is fine in an added @post,
+  # same as on any ordinary function); the pending-key fields are required by the struct but unused.
+  defp applied_extension_ctx do
+    %Context{
+      noun: "contract",
+      contract_subject: "function applying a named contract",
+      reference_scope: "the applied contract's argument names",
+      pending_pre_key: :__bond_applied_extension_pending_pre__,
+      pending_post_key: :__bond_applied_extension_pending_post__,
+      reject_old: false,
+      arg_naming_hint?: false
+    }
   end
 
   defp resolve_applied_ref({:local, name}, {_fun, arity}, %AnnotatedFunction{module: module}, env) do
