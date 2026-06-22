@@ -56,6 +56,64 @@ defmodule Bond.NamedContractsTest do
     end
   end
 
+  describe "__bond_named_contracts__/0 reflection" do
+    test "exposes captured contracts keyed by {name, arity}" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.MoneyReflect do
+          use Bond
+
+          defcontract withdrawal(account, amount) do
+            @pre sufficient: amount <= account.balance
+            @post non_negative: result.balance >= 0
+          end
+
+          defcontract withdrawal(account) do
+            @pre present: account != nil
+          end
+        end
+        """)
+
+      contracts = mod.__bond_named_contracts__()
+      assert Enum.sort(Map.keys(contracts)) == [{:withdrawal, 1}, {:withdrawal, 2}]
+
+      entry = contracts[{:withdrawal, 2}]
+      assert entry.arg_names == [:account, :amount]
+      assert [%{label: :sufficient, code: "amount <= account.balance"}] = entry.preconditions
+      assert [%{label: :non_negative}] = entry.postconditions
+    end
+
+    test "the captured definition_env is escapable (reduced to a plain snapshot)" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.EnvSnapshotCheck do
+          use Bond
+
+          defcontract positive(amount) do
+            @pre amount > 0
+          end
+        end
+        """)
+
+      env = hd(mod.__bond_named_contracts__()[{:positive, 1}].preconditions).definition_env
+      # A live env's :lexical_tracker is a pid and cannot be escaped; the snapshot nils it.
+      assert env.lexical_tracker == nil
+      assert is_binary(env.file)
+    end
+
+    test "a module with no defcontract does not export the reflection" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.NoNamedContracts do
+          use Bond
+          def identity(x), do: x
+        end
+        """)
+
+      refute function_exported?(mod, :__bond_named_contracts__, 0)
+    end
+  end
+
   describe "defcontract diagnostics" do
     test "empty body" do
       assert_raise CompileError, ~r/declares no @pre\/@post/, fn ->

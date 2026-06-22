@@ -28,9 +28,11 @@ defmodule Bond.Compiler do
   # the gen_statem and its callback module are on disk before they are started.
   require Bond.Compiler.CompileStateFSM, as: FSM
   alias Bond.Compiler.ContractDocs
+  alias Bond.Compiler.EnvSnapshot
   alias Bond.Compiler.FunctionDefinition
   alias Bond.Compiler.InheritedContracts
   alias Bond.Compiler.InheritedContracts.Context
+  alias Bond.Compiler.NamedContracts
 
   # Functions Elixir auto-generates as a side effect of constructs like `defstruct` and
   # `defexception`. These show up via `@on_definition` and must not be tracked as user
@@ -359,9 +361,33 @@ defmodule Bond.Compiler do
       |> Enum.map(&AnnotatedFunction.apply_contract(&1, config))
       |> Enum.reject(&is_nil/1)
 
-    case moduledoc_invariants_ast do
-      nil -> contract_overrides
-      ast -> [ast | contract_overrides]
+    named_contracts_ast = build_named_contracts_reflection(env.module)
+
+    extras = Enum.reject([named_contracts_ast, moduledoc_invariants_ast], &is_nil/1)
+    extras ++ contract_overrides
+  end
+
+  # Emits the `__bond_named_contracts__/0` reflection for a module that declared `defcontract`s,
+  # so other modules can read them at their own compile time via `@apply_contract {Mod, :name}`
+  # (the same role `__bond_contracts__/0` plays for `Bond.Behaviour`). The live `Macro.Env` on
+  # each captured assertion is reduced to an escapable snapshot first. Modules with no named
+  # contracts emit nothing; `@apply_contract` resolution guards remote reads with
+  # `function_exported?/3`.
+  defp build_named_contracts_reflection(module) do
+    case NamedContracts.registry(module) do
+      [] ->
+        nil
+
+      entries ->
+        contracts =
+          Map.new(entries, fn {key, entry} ->
+            {key, EnvSnapshot.sanitize_contract_entry(entry)}
+          end)
+
+        quote do
+          @doc false
+          def __bond_named_contracts__, do: unquote(Macro.escape(contracts))
+        end
     end
   end
 
