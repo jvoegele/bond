@@ -180,6 +180,35 @@ The *fact* that the documented compile-time rules fire (e.g. a plain
 inherited precondition; a contract may reference only declared names) is part of
 the public surface; the exact wording of those diagnostics is not.
 
+## Reusable named contracts
+
+A bundle of `@pre`/`@post` declared once and applied to many functions. The full
+rules are in the [Reusable Contracts](reusable-contracts.md) guide.
+
+  * **`defcontract name(arg1, …) do … end`** — a macro available after
+    `use Bond` (in either `:at_annotations` mode). Declares a contract identified
+    by `{name, arity}`; the head's parameter list supplies the canonical argument
+    names and order. The body accepts only `@pre`/`@post` (the same bare/labelled
+    forms as `@pre`/`@post`); expressions reference the declared arguments and
+    `result`/`old/1` in a `@post`. Same name at different arities are distinct
+    contracts.
+  * **`@apply_contract :name`** / **`@apply_contract {Module, :name}`** — applies
+    a named contract (local or cross-module) to the next function, immediately
+    preceding it like `@pre`. The function's parameters rebind positionally to the
+    contract's canonical names; the function's arity selects the overload.
+    Requires Bond's `@` syntax (unavailable under `at_annotations: false`).
+
+By design, v1 applies a single contract per function and treats it like inheriting
+a contract verbatim: an applied contract cannot be combined with own `@pre`/`@post`,
+with behaviour/protocol inheritance, with another applied contract, or be refined.
+The *fact* that these rules fire at compile time is part of the public surface; the
+diagnostic wording is not.
+
+`use Bond.Behaviour`'s `__bond_contracts__/0` has a named-contract counterpart,
+`__bond_named_contracts__/0`, generated on a module that declares `defcontract`s.
+It is an internal reflection hook read by `@apply_contract {Module, …}` at the
+applying module's compile time; you should not call it directly.
+
 ## `Bond.Predicates`
 
 When called directly (i.e. not through `use Bond`), `Bond.Predicates`
@@ -234,7 +263,8 @@ Bond emits exactly one telemetry event:
     (keyword list of variables in scope at the assertion site). For inherited
     contracts the metadata also carries `:source_behaviour` (the originating
     `Bond.Behaviour`) or `:source_protocol` and `:impl` (the originating
-    `Bond.Protocol` and the resolved implementation module).
+    `Bond.Protocol` and the resolved implementation module); for an applied named
+    contract it carries `:source_contract` (the originating `{module, name}`).
 
 The event is published *before* the corresponding error struct is raised, so
 telemetry handlers see every assertion failure even when an upstream
@@ -266,6 +296,8 @@ Public fields on every error struct:
     on (`Bond.Protocol`), or `nil`.
   * `:impl` — `module() | nil`. When `:source_protocol` is set, the
     implementation the failing call resolved to (or `nil` if unresolved).
+  * `:source_contract` — `{module(), name :: atom()} | nil`. The named contract
+    (`defcontract`/`@apply_contract`) an applied assertion came from, or `nil`.
 
 The `Exception.message/1` format is rendered by `Bond.AssertionError.message/2`
 and is human-readable — the exact text is *not* part of the public surface

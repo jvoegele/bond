@@ -775,6 +775,31 @@ so it shows the expanded expression too. A single macro can emit several
 `@pre`/`@post` lines, which lets you abstract over a *group* of labelled
 predicates at once.
 
+### First-class: a named contract with `defcontract`
+
+When the thing you want to share is a *whole agreement* — several
+`@pre`/`@post` that always travel together — `defcontract` is the
+first-class form of the macro pattern above. Declare it once, apply it with
+`@apply_contract`:
+
+```elixir
+defcontract recipient(to) do
+  @pre valid: is_binary(to) and String.contains?(to, "@")
+end
+
+@apply_contract :recipient
+def send(email), do: email
+```
+
+Unlike a hand-rolled macro, a named contract validates its references at
+definition time, binds to the function **positionally** (so it isn't tied to
+one parameter name), and attributes failures to the contract by name
+(`from contract :recipient`). It can also live in another module and be
+applied as `@apply_contract {Contracts, :recipient}`. See the
+[Reusable Contracts](reusable-contracts.md) guide. Reach for a
+macro instead only when the assertions must be *computed* (the example above
+varies the variable name); reach for `defcontract` to share a fixed bundle.
+
 ### Caveat: the predicate macro's module must `use Bond`
 
 This is macro hygiene. The `@` inside `Contracts`'s `quote` resolves in

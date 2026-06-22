@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Reusable named contracts: `defcontract` / `@apply_contract`**
+  ([#35](https://github.com/jvoegele/bond/issues/35)). Declare a bundle of
+  `@pre`/`@post` once, under a name, and apply it to many functions — in the same
+  module or across modules:
+
+  ```elixir
+  defmodule Money do
+    use Bond
+
+    defcontract withdrawal(account, amount) do
+      @pre positive: amount > 0
+      @pre sufficient: amount <= account.balance
+      @post non_negative: result.balance >= 0
+    end
+  end
+
+  defmodule Account do
+    use Bond
+
+    @apply_contract {Money, :withdrawal}
+    def withdraw(acct, amt), do: %{acct | balance: acct.balance - amt}
+  end
+  ```
+
+  The contract's head supplies canonical argument names; an applying function's
+  parameters rebind to them **positionally** (so it may name them differently),
+  exactly as an implementation inherits a `Bond.Behaviour` callback's contract.
+  Contracts are keyed by `{name, arity}`, so the same name at different arities are
+  distinct overloads, selected by the applying function's arity. A violation is
+  attributed to its source — `precondition (from contract Money.withdrawal)
+  failed …` — and the originating `{module, name}` is exposed as the new
+  `:source_contract` field on the error structs and in the
+  `[:bond, :assertion, :failure]` telemetry metadata.
+
+  v1 deliberately mirrors inheriting a single contract verbatim: one applied
+  contract per function, no own `@pre`/`@post` alongside it, no combining with
+  behaviour/protocol inheritance, and no refinement — each reported as a clear
+  compile error. See the [Reusable Contracts](guides/reusable-contracts.md) guide.
+
 ## [1.4.0] - 2026-06-17
 
 ### Added
