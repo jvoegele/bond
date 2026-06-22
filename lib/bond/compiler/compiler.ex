@@ -352,17 +352,21 @@ defmodule Bond.Compiler do
     moduledoc_invariants_ast =
       build_moduledoc_invariants_ast(invariants, env.module, config[:invariants] || true)
 
+    # Flatten this module's named contracts (expand `include` directives) once: used for both the
+    # emitted reflection and apply-time local resolution.
+    named = NamedContracts.flatten(env.module)
+
     contract_overrides =
       fsm(env)
       |> FSM.annotated_functions()
       |> Enum.map(&merge_inherited_contract(&1, inherited))
-      |> Enum.map(&merge_applied_contract(&1, inherited))
+      |> Enum.map(&merge_applied_contract(&1, inherited, named))
       |> Enum.map(&AnnotatedFunction.put_invariants(&1, invariants))
       |> Enum.filter(&AnnotatedFunction.override?/1)
       |> Enum.map(&AnnotatedFunction.apply_contract(&1, config))
       |> Enum.reject(&is_nil/1)
 
-    named_contracts_ast = build_named_contracts_reflection(env.module)
+    named_contracts_ast = build_named_contracts_reflection(named)
 
     extras = Enum.reject([named_contracts_ast, moduledoc_invariants_ast], &is_nil/1)
     extras ++ contract_overrides
@@ -374,14 +378,16 @@ defmodule Bond.Compiler do
   # each captured assertion is reduced to an escapable snapshot first. Modules with no named
   # contracts emit nothing; `@apply_contract` resolution guards remote reads with
   # `function_exported?/3`.
-  defp build_named_contracts_reflection(module) do
-    case NamedContracts.registry(module) do
-      [] ->
+  defp build_named_contracts_reflection(named) do
+    case named do
+      empty when map_size(empty) == 0 ->
         nil
 
       entries ->
         contracts =
           Map.new(entries, fn {key, entry} ->
+            # `entry` is already the flattened {arg_names, preconditions, postconditions} shape
+            # (includes expanded into pre/post); just snapshot the assertions' live envs.
             {key, EnvSnapshot.sanitize_contract_entry(entry)}
           end)
 
@@ -469,9 +475,14 @@ defmodule Bond.Compiler do
   # the v1 non-goals explicit compile errors. The fold itself is identical in spirit to inheriting
   # a behaviour contract verbatim — replace the function's pre/post with the contract's and rebind
   # parameters to the contract's canonical argument names positionally.
-  defp merge_applied_contract(%AnnotatedFunction{applied_contracts: []} = af, _inherited), do: af
+  defp merge_applied_contract(%AnnotatedFunction{applied_contracts: []} = af, _inherited, _named),
+    do: af
 
-  defp merge_applied_contract(%AnnotatedFunction{applied_contracts: applied} = af, inherited) do
+  defp merge_applied_contract(
+         %AnnotatedFunction{applied_contracts: applied} = af,
+         inherited,
+         named
+       ) do
     key = {af.fun, af.arity}
     [%{env: apply_env} | _] = applied
 
@@ -498,26 +509,16 @@ defmodule Bond.Compiler do
     end
 
     [%{ref: ref}] = applied
-    {contract_module, name, entry} = resolve_applied_ref(ref, key, af, apply_env)
+    {contract_module, name, entry} = resolve_applied_ref(ref, key, af, named, apply_env)
 
     {plain_pre, weaken_pre} = partition_refinements(af.preconditions)
     {plain_post, strengthen_post} = partition_refinements(af.postconditions)
 
     label = contract_label(contract_module, name, af.module)
 
-    # v1 non-goal: an applied contract is enforced as-is — no own plain @pre/@post alongside it
-    # (that would need the dual-namespace machinery #16 retired).
-    if plain_pre != [] or plain_post != [] do
-      raise CompileError,
-        file: apply_env.file,
-        line: apply_env.line,
-        description:
-          "Bond: #{mfa(af)} applies the named contract #{label} and also declares its own " <>
-            "@pre/@post. An applied contract is enforced as-is (v1); put function-specific " <>
-            "assertions in the body with Bond.check/1, or add them to the contract."
-    end
-
-    # v1 non-goal: refining an applied contract (@pre_weaken/@post_strengthen).
+    # Deferred (#40): refining an applied contract with @pre_weaken/@post_strengthen (the OR/weaken
+    # case). Additive plain @pre/@post (below) covers the common "also require X" need; weakening
+    # stays a compile error for now.
     if weaken_pre != [] or strengthen_post != [] do
       raise CompileError,
         file: apply_env.file,
@@ -527,24 +528,70 @@ defmodule Bond.Compiler do
             "@pre_weaken/@post_strengthen. Refining a named contract is not supported (v1)."
     end
 
+    # #40 Option A: the function's own plain @pre/@post ADD to the applied contract (conjunction).
+    # They evaluate in the lifted assertion defp, which is parameterised by the contract's canonical
+    # argument names — so they must reference those names, not the function's own parameters. Validate
+    # that here (a clear error beats an "undefined variable" deep in generated code), then append them
+    # UNSTAMPED so a failure attributes to the function itself, not the contract.
+    validate_applied_extension_refs!(
+      plain_pre,
+      plain_post,
+      {af.fun, af.arity},
+      entry.arg_names,
+      apply_env
+    )
+
     source = {contract_module, name}
 
     af
-    |> AnnotatedFunction.replace_preconditions(stamp_source_contract(entry.preconditions, source))
+    |> AnnotatedFunction.replace_preconditions(
+      stamp_source_contract(entry.preconditions, source) ++ plain_pre
+    )
     |> AnnotatedFunction.replace_postconditions(
-      stamp_source_contract(entry.postconditions, source)
+      stamp_source_contract(entry.postconditions, source) ++ plain_post
     )
     |> AnnotatedFunction.put_canonical_override(entry.arg_names)
   end
 
-  defp resolve_applied_ref({:local, name}, {_fun, arity}, %AnnotatedFunction{module: module}, env) do
-    module
-    |> NamedContracts.registry()
-    |> Map.new()
-    |> fetch_applied_entry(name, arity, module, env)
+  defp validate_applied_extension_refs!([], [], _key, _arg_names, _env), do: :ok
+
+  defp validate_applied_extension_refs!(plain_pre, plain_post, key, arg_names, env) do
+    InheritedContracts.validate_referenced_names!(
+      applied_extension_ctx(),
+      plain_pre,
+      plain_post,
+      key,
+      arg_names,
+      env
+    )
   end
 
-  defp resolve_applied_ref({:remote, contract_module, name}, {_fun, arity}, _af, env) do
+  # Reference-validation context for plain @pre/@post added alongside an @apply_contract (#40). Uses
+  # only the diagnostic-wording fields and `reject_old` (false: `old/1` is fine in an added @post,
+  # same as on any ordinary function); the pending-key fields are required by the struct but unused.
+  defp applied_extension_ctx do
+    %Context{
+      noun: "contract",
+      contract_subject: "function applying a named contract",
+      reference_scope: "the applied contract's argument names",
+      pending_pre_key: :__bond_applied_extension_pending_pre__,
+      pending_post_key: :__bond_applied_extension_pending_post__,
+      reject_old: false,
+      arg_naming_hint?: false
+    }
+  end
+
+  defp resolve_applied_ref(
+         {:local, name},
+         {_fun, arity},
+         %AnnotatedFunction{module: module},
+         named,
+         env
+       ) do
+    fetch_applied_entry(named, name, arity, module, env)
+  end
+
+  defp resolve_applied_ref({:remote, contract_module, name}, {_fun, arity}, _af, _named, env) do
     Code.ensure_compiled!(contract_module)
 
     unless function_exported?(contract_module, :__bond_named_contracts__, 0) do

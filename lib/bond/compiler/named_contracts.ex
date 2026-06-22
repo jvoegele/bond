@@ -26,6 +26,7 @@ defmodule Bond.Compiler.NamedContracts do
   """
 
   alias Bond.Compiler.Assertion
+  alias Bond.Compiler.Clauses
   alias Bond.Compiler.InheritedContracts
   alias Bond.Compiler.InheritedContracts.Context
 
@@ -48,18 +49,19 @@ defmodule Bond.Compiler.NamedContracts do
   @spec define(Macro.t(), Macro.t(), Macro.Env.t()) :: :ok
   def define(head, block, %Macro.Env{} = env) do
     {name, arity, arg_names} = parse_head(head, env)
-    {pre, post} = capture_assertions(block, env)
+    {pre, post, includes} = capture_body(block, env)
 
-    if pre == [] and post == [] do
+    if pre == [] and post == [] and includes == [] do
       raise CompileError,
         file: env.file,
         line: env.line,
         description:
-          "Bond: defcontract #{name}/#{arity} declares no @pre/@post. A named contract must " <>
-            "declare at least one precondition or postcondition."
+          "Bond: defcontract #{name}/#{arity} declares nothing. A named contract must declare " <>
+            "at least one @pre, @post, or include."
     end
 
     InheritedContracts.validate_referenced_names!(ctx(), pre, post, {name, arity}, arg_names, env)
+    validate_include_args!(includes, name, arg_names, env)
 
     register(
       env.module,
@@ -67,7 +69,8 @@ defmodule Bond.Compiler.NamedContracts do
       %{
         arg_names: arg_names,
         preconditions: pre,
-        postconditions: post
+        postconditions: post,
+        includes: includes
       },
       env
     )
@@ -128,13 +131,14 @@ defmodule Bond.Compiler.NamedContracts do
 
   # --- body capture ---
 
-  defp capture_assertions(block, env) do
+  defp capture_body(block, env) do
     block
     |> block_statements()
-    |> Enum.reduce({[], []}, fn statement, {pre, post} ->
+    |> Enum.reduce({[], [], []}, fn statement, {pre, post, includes} ->
       case classify_statement(statement, env) do
-        {:precondition, assertions} -> {pre ++ assertions, post}
-        {:postcondition, assertions} -> {pre, post ++ assertions}
+        {:precondition, assertions} -> {pre ++ assertions, post, includes}
+        {:postcondition, assertions} -> {pre, post ++ assertions, includes}
+        {:include, directive} -> {pre, post, includes ++ [directive]}
       end
     end)
   end
@@ -148,6 +152,12 @@ defmodule Bond.Compiler.NamedContracts do
        when kind in [:pre, :post] do
     assertion_kind = if kind == :pre, do: :precondition, else: :postcondition
     {assertion_kind, build_assertions(assertion_kind, expression, env, kmeta)}
+  end
+
+  # `include name(args)` / `include Module.name(args)` — compose another contract's clauses into
+  # this one (#40). Captured raw here; resolved, substituted, and flattened at __before_compile__.
+  defp classify_statement({:include, _meta, [call]}, env) do
+    {:include, parse_include(call, env)}
   end
 
   # `@pre`/`@post` with 2+ args — the bare-mixed-with-labelled trip, same as the `use Bond`
@@ -190,6 +200,220 @@ defmodule Bond.Compiler.NamedContracts do
     do: Keyword.get(meta, :line, env.line)
 
   defp statement_line(_other, env), do: env.line
+
+  # --- flatten / include expansion (#40 composition) ---
+
+  @doc """
+  Returns the module's named contracts with all `include` directives expanded, as a flattened
+  `{name, arity} => %{arg_names, preconditions, postconditions}` map (no `:includes`).
+
+  Each include is resolved (local from this module's registry, remote from the other module's
+  already-flattened `__bond_named_contracts__/0`), its parameters substituted by the host's argument
+  expressions, and the resulting assertions spliced into the host (included clauses first, then the
+  host's own). Local include cycles are detected and raised; cross-module cycles surface earlier as
+  Elixir compile-dependency cycles. Diamonds are not deduplicated (a repeated clause is harmless —
+  pure, and failures short-circuit). Computed at `__before_compile__` and used for both the emitted
+  reflection and apply-time resolution.
+  """
+  @spec flatten(module()) :: %{optional({atom(), arity()}) => map()}
+  def flatten(module) do
+    raw = module |> registry() |> Map.new()
+    Map.new(raw, fn {key, _entry} -> {key, flatten_entry(key, raw, [])} end)
+  end
+
+  defp flatten_entry(key, raw, path) do
+    if key in path do
+      raise CompileError, description: cycle_message(key, path)
+    end
+
+    entry = Map.fetch!(raw, key)
+
+    {included_pre, included_post} =
+      Enum.reduce(entry.includes, {[], []}, fn directive, {pre_acc, post_acc} ->
+        {pre, post} = expand_include(directive, raw, [key | path])
+        {pre_acc ++ pre, post_acc ++ post}
+      end)
+
+    %{
+      arg_names: entry.arg_names,
+      preconditions: included_pre ++ entry.preconditions,
+      postconditions: included_post ++ entry.postconditions
+    }
+  end
+
+  defp expand_include(%{ref: ref, args: args, env: env}, raw, path) do
+    flat = resolve_include(ref, raw, path, env)
+    bindings = Map.new(Enum.zip(flat.arg_names, args))
+    {substitute(flat.preconditions, bindings), substitute(flat.postconditions, bindings)}
+  end
+
+  # Local include: resolve from this module's registry and flatten it recursively (threading the
+  # path so a cycle through it is caught). Arity is folded into the {name, arity} key, so an
+  # arity mismatch surfaces as "no such contract name/arity (available: …)".
+  defp resolve_include({:local, name, arity}, raw, path, env) do
+    key = {name, arity}
+
+    if Map.has_key?(raw, key) do
+      flatten_entry(key, raw, path)
+    else
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description: unknown_include_message(name, arity, Map.keys(raw), nil)
+    end
+  end
+
+  # Remote include: the other module's reflection is already flattened, so read it directly. Forces
+  # the cross-module compile dependency (and, transitively, cycle detection) via Code.ensure_compiled!.
+  defp resolve_include({:remote, module, name, arity}, _raw, _path, env) do
+    Code.ensure_compiled!(module)
+
+    unless function_exported?(module, :__bond_named_contracts__, 0) do
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description:
+          "Bond: include #{inspect(module)}.#{name} — #{inspect(module)} defines no named " <>
+            "contracts (no `defcontract`, or it does not `use Bond`)."
+    end
+
+    registry = module.__bond_named_contracts__()
+
+    case Map.fetch(registry, {name, arity}) do
+      {:ok, entry} ->
+        entry
+
+      :error ->
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description: unknown_include_message(name, arity, Map.keys(registry), module)
+    end
+  end
+
+  defp cycle_message(key, path) do
+    chain =
+      (Enum.reverse(path) ++ [key])
+      |> Enum.map_join(" -> ", fn {n, a} -> "#{n}/#{a}" end)
+
+    "Bond: defcontract include cycle detected (#{chain}). A contract cannot include itself, " <>
+      "directly or transitively."
+  end
+
+  defp unknown_include_message(name, arity, available_keys, module) do
+    where = if module, do: "in #{inspect(module)}", else: "in this module"
+
+    available =
+      available_keys |> Enum.sort() |> Enum.map_join(", ", fn {n, a} -> "#{n}/#{a}" end)
+
+    available_phrase =
+      if available == "", do: "it defines no named contracts", else: "available: #{available}"
+
+    "Bond: include #{name}/#{arity} — no such contract #{where} (#{available_phrase})."
+  end
+
+  # --- substitution engine (#40 composition) ---
+
+  @doc """
+  Substitutes an included contract's parameters with a host's argument expressions, throughout each
+  assertion. `bindings` maps the included contract's parameter name (atom) to the replacement
+  expression AST. Each assertion's expression is rewritten, its rendered `code` regenerated, and a
+  fresh id assigned; everything else (kind/label/env) is preserved.
+
+  Replacement is *simultaneous* — a substituted expression is not re-traversed — so swapped
+  parameters (`include f(y, x)` into `f(a, b)`) bind correctly and cannot double-substitute. Only
+  variable references are replaced; call names, operators, `result`, and literals are untouched
+  (substitution does recurse into `old(...)` arguments, so `old(p)` becomes `old(<arg for p>)`).
+  """
+  @spec substitute([Assertion.t()], %{optional(atom()) => Macro.t()}) :: [Assertion.t()]
+  def substitute(assertions, bindings) when is_list(assertions) and is_map(bindings) do
+    Enum.map(assertions, fn %Assertion{expression: expression} = assertion ->
+      Assertion.replace_expression(assertion, substitute_expr(expression, bindings))
+    end)
+  end
+
+  # A variable reference: replace it with its bound expression (and do NOT recurse into the
+  # replacement — that is what makes the substitution simultaneous / swap-safe). `ctx` being an atom
+  # is what distinguishes a variable `{name, meta, ctx}` from a no-arg local call `{name, meta, []}`.
+  defp substitute_expr({name, _meta, ctx} = var, bindings) when is_atom(name) and is_atom(ctx) do
+    Map.get(bindings, name, var)
+  end
+
+  # A call / operator node `{form, meta, args}`: recurse into the form and each argument.
+  defp substitute_expr({form, meta, args}, bindings) when is_list(args) do
+    {substitute_expr(form, bindings), meta, Enum.map(args, &substitute_expr(&1, bindings))}
+  end
+
+  # A 3-tuple whose third element is not an arg list (e.g. a nested quoted form); recurse the form.
+  defp substitute_expr({form, meta, ctx}, bindings) do
+    {substitute_expr(form, bindings), meta, ctx}
+  end
+
+  defp substitute_expr({left, right}, bindings) do
+    {substitute_expr(left, bindings), substitute_expr(right, bindings)}
+  end
+
+  defp substitute_expr(list, bindings) when is_list(list) do
+    Enum.map(list, &substitute_expr(&1, bindings))
+  end
+
+  defp substitute_expr(other, _bindings), do: other
+
+  # --- include parsing ---
+
+  # Local: `include name(arg, …)`. The included contract is identified by `{name, arity}` where
+  # arity is the number of arguments passed; the args are arbitrary expressions over THIS contract's
+  # parameters, substituted into the included contract's clauses at flatten time (#40).
+  defp parse_include({name, _meta, args}, env) when is_atom(name) and is_list(args) do
+    %{ref: {:local, name, length(args)}, name: name, args: args, env: env}
+  end
+
+  # Remote: `include Module.name(arg, …)`. The module alias is expanded in the caller's context now,
+  # establishing the compile-time dependency for the cross-module read at flatten time.
+  defp parse_include({{:., _, [module_ast, name]}, _meta, args}, env)
+       when is_atom(name) and is_list(args) do
+    module = Macro.expand(module_ast, env)
+    %{ref: {:remote, module, name, length(args)}, name: name, args: args, env: env}
+  end
+
+  defp parse_include(other, env) do
+    raise CompileError,
+      file: env.file,
+      line: env.line,
+      description:
+        "Bond: `include` expects a contract call — `include name(arg, …)` or " <>
+          "`include Module.name(arg, …)`. Got: `#{Macro.to_string(other)}`."
+  end
+
+  # Each `include` argument is substituted into the included contract's assertions, so it must
+  # reference only THIS contract's declared arguments (the names in scope when the host is applied).
+  defp validate_include_args!(includes, host_name, host_arg_names, _env) do
+    allowed = MapSet.new(host_arg_names)
+
+    for %{args: args, env: include_env} <- includes, arg <- args do
+      unknown =
+        arg
+        |> Clauses.expression_var_names()
+        |> MapSet.difference(allowed)
+        |> Enum.sort()
+
+      if unknown != [] do
+        raise CompileError,
+          file: include_env.file,
+          line: include_env.line,
+          description:
+            "Bond: include argument `#{Macro.to_string(arg)}` references " <>
+              "#{Enum.map_join(unknown, ", ", &"`#{&1}`")}, which #{verb(unknown)} not an " <>
+              "argument of contract #{host_name}. Include arguments may reference only its " <>
+              "arguments: #{Enum.map_join(host_arg_names, ", ", &"`#{&1}`")}."
+      end
+    end
+
+    :ok
+  end
+
+  defp verb([_single]), do: "is"
+  defp verb(_many), do: "are"
 
   # --- registry ---
 

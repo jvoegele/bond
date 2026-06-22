@@ -188,19 +188,26 @@ rules are in the [Reusable Contracts](reusable-contracts.md) guide.
   * **`defcontract name(arg1, …) do … end`** — a macro available after
     `use Bond` (in either `:at_annotations` mode). Declares a contract identified
     by `{name, arity}`; the head's parameter list supplies the canonical argument
-    names and order. The body accepts only `@pre`/`@post` (the same bare/labelled
-    forms as `@pre`/`@post`); expressions reference the declared arguments and
-    `result`/`old/1` in a `@post`. Same name at different arities are distinct
-    contracts.
+    names and order. The body accepts `@pre`/`@post` (the same bare/labelled forms
+    as `@pre`/`@post`; expressions reference the declared arguments and `result`/
+    `old/1` in a `@post`) and `include` directives (see below). Same name at
+    different arities are distinct contracts.
+  * **`include name(args)`** / **`include Module.name(args)`** — inside a
+    `defcontract`, composes another named contract's clauses into this one. Each
+    argument is an expression over this contract's parameters, substituted into the
+    included contract's clauses; the argument count selects the included overload.
+    Works in either `:at_annotations` mode.
   * **`@apply_contract :name`** / **`@apply_contract {Module, :name}`** — applies
     a named contract (local or cross-module) to the next function, immediately
     preceding it like `@pre`. The function's parameters rebind positionally to the
-    contract's canonical names; the function's arity selects the overload.
-    Requires Bond's `@` syntax (unavailable under `at_annotations: false`).
+    contract's canonical names; the function's arity selects the overload. A
+    function may add its own `@pre`/`@post` alongside (conjoined with the contract,
+    referencing the contract's canonical names). Requires Bond's `@` syntax
+    (unavailable under `at_annotations: false`).
 
-By design, v1 applies a single contract per function and treats it like inheriting
-a contract verbatim: an applied contract cannot be combined with own `@pre`/`@post`,
-with behaviour/protocol inheritance, with another applied contract, or be refined.
+A function applies a single named contract directly (use `include` to combine
+several). An applied contract may not be combined with behaviour/protocol
+inheritance on the same function, nor refined with `@pre_weaken`/`@post_strengthen`.
 The *fact* that these rules fire at compile time is part of the public surface; the
 diagnostic wording is not.
 

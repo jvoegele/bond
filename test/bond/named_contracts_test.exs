@@ -56,6 +56,218 @@ defmodule Bond.NamedContractsTest do
     end
   end
 
+  describe "substitution engine (#40)" do
+    alias Bond.Compiler.Assertion
+    alias Bond.Compiler.NamedContracts
+
+    defp substituted_code(expression, bindings) do
+      [result] =
+        NamedContracts.substitute([Assertion.new(:precondition, nil, expression)], bindings)
+
+      result.code
+    end
+
+    test "replaces a variable with the bound expression" do
+      assert substituted_code(quote(do: x > 0), %{x: quote(do: cart.total)}) == "cart.total > 0"
+    end
+
+    test "swapped parameters bind simultaneously (no double substitution)" do
+      assert substituted_code(quote(do: x > y), %{x: quote(do: a), y: quote(do: b)}) == "a > b"
+    end
+
+    test "result and old/1 are preserved; old's argument is substituted" do
+      assert substituted_code(quote(do: old(x) < result), %{x: quote(do: item.base)}) ==
+               "old(item.base) < result"
+    end
+
+    test "remote-call heads are preserved while arguments are substituted" do
+      assert substituted_code(quote(do: String.contains?(s, "@")), %{s: quote(do: u.email)}) ==
+               ~s|String.contains?(u.email, "@")|
+    end
+
+    test "fresh id and preserved label" do
+      original = Assertion.new(:precondition, :positive, quote(do: x > 0))
+      [result] = NamedContracts.substitute([original], %{x: quote(do: n)})
+      assert result.label == :positive
+      assert result.code == "n > 0"
+      assert result.id != original.id
+    end
+  end
+
+  describe "composition enforcement (#40)" do
+    test "included clauses are enforced, with expression args and substituted-form messages" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.Order do
+          use Bond
+          defcontract positive(x), do: (@pre x > 0)
+          defcontract in_range(v, lo, hi), do: (@pre lo <= v and v <= hi)
+
+          defcontract order(item) do
+            include positive(item.quantity)
+            include in_range(item.discount, 0, 100)
+            @post priced: result.total >= 0
+          end
+
+          @apply_contract :order
+          def place(it), do: %{total: it.quantity * 10}
+        end
+        """)
+
+      assert mod.place(%{quantity: 2, discount: 10}) == %{total: 20}
+
+      error =
+        assert_raise Bond.PreconditionError, fn -> mod.place(%{quantity: 0, discount: 10}) end
+
+      # Attributed to the APPLIED contract, rendered in its substituted form.
+      assert Exception.message(error) =~ "from contract :order"
+      assert Exception.message(error) =~ "item.quantity > 0"
+
+      assert_raise Bond.PreconditionError, fn -> mod.place(%{quantity: 2, discount: 250}) end
+    end
+
+    test "cross-module include is enforced" do
+      compile!("""
+      defmodule Bond.NamedContractsTest.ComposeLib do
+        use Bond
+        defcontract nonneg(x), do: (@pre x >= 0)
+      end
+      """)
+
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.ComposeConsumer do
+          use Bond
+          defcontract amt(a) do
+            include Bond.NamedContractsTest.ComposeLib.nonneg(a)
+          end
+          @apply_contract :amt
+          def f(n), do: n
+        end
+        """)
+
+      assert mod.f(5) == 5
+      assert_raise Bond.PreconditionError, fn -> mod.f(-1) end
+    end
+
+    test "transitive composition (a includes b includes c)" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.Transitive do
+          use Bond
+          defcontract c(x), do: (@pre x > 0)
+          defcontract b(x) do include c(x) end
+          defcontract a(x) do include b(x) end
+          @apply_contract :a
+          def f(n), do: n
+        end
+        """)
+
+      assert mod.f(3) == 3
+      assert_raise Bond.PreconditionError, fn -> mod.f(0) end
+    end
+
+    test "a diamond shares a base without dedup and fails once" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.Diamond do
+          use Bond
+          defcontract d(x), do: (@pre x > 0)
+          defcontract b(x) do include d(x) end
+          defcontract cc(x) do include d(x) end
+          defcontract a(x) do include b(x); include cc(x) end
+          @apply_contract :a
+          def f(n), do: n
+        end
+        """)
+
+      assert mod.f(5) == 5
+      assert_raise Bond.PreconditionError, fn -> mod.f(0) end
+    end
+
+    test "an include cycle is rejected" do
+      assert_raise CompileError, ~r/include cycle detected/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.Cycle do
+          use Bond
+          defcontract a(x) do include b(x) end
+          defcontract b(x) do include a(x) end
+        end
+        """)
+      end
+    end
+
+    test "an unknown include lists available contracts" do
+      assert_raise CompileError, ~r|include nope/1 — no such contract in this module|, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.UnknownInclude do
+          use Bond
+          defcontract real(x), do: (@pre x > 0)
+          defcontract c(x) do include nope(x) end
+        end
+        """)
+      end
+    end
+  end
+
+  describe "include capture (#40)" do
+    test "local, remote, and includes-only forms compile; reflection strips includes" do
+      compile!("""
+      defmodule Bond.NamedContractsTest.IncludeLib do
+        use Bond
+        defcontract base(x) do
+          @pre x > 0
+        end
+      end
+      """)
+
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.IncludeCapture do
+          use Bond
+          defcontract positive(x), do: (@pre x > 0)
+
+          defcontract checkout(cart, user) do
+            include positive(cart.total)
+            include Bond.NamedContractsTest.IncludeLib.base(user.id)
+            @post ok: result != nil
+          end
+        end
+        """)
+
+      entry = mod.__bond_named_contracts__()[{:checkout, 2}]
+      assert entry.arg_names == [:cart, :user]
+      refute Map.has_key?(entry, :includes)
+    end
+
+    test "a malformed include is rejected" do
+      assert_raise CompileError, ~r/expects a contract call/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.BadInclude do
+          use Bond
+          defcontract c(x) do
+            include 123
+          end
+        end
+        """)
+      end
+    end
+
+    test "an include argument referencing a non-argument is rejected" do
+      assert_raise CompileError, ~r/which is not an argument of contract c/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.BadIncludeArg do
+          use Bond
+          defcontract p(x), do: (@pre x > 0)
+          defcontract c(cart) do
+            include p(user.id)
+          end
+        end
+        """)
+      end
+    end
+  end
+
   describe "__bond_named_contracts__/0 reflection" do
     test "exposes captured contracts keyed by {name, arity}" do
       [{mod, _} | _] =
@@ -415,23 +627,55 @@ defmodule Bond.NamedContractsTest do
     end
   end
 
-  describe "@apply_contract resolution diagnostics" do
-    test "applying with its own @pre is rejected" do
-      assert_raise CompileError, ~r/also declares its own/, fn ->
+  describe "@apply_contract extension (additive own clauses, #40)" do
+    test "own @pre/@post are conjoined with the applied contract and attributed to the function" do
+      [{mod, _} | _] =
         compile!("""
-        defmodule Bond.NamedContractsTest.OwnPre do
+        defmodule Bond.NamedContractsTest.Extended do
           use Bond
-          defcontract p(x) do
-            @pre x > 0
+          defcontract withdrawal(account, amount) do
+            @pre positive: amount > 0
           end
-          @apply_contract :p
-          @pre x < 100
-          def f(x), do: x
+          @apply_contract :withdrawal
+          @pre whole: amount == trunc(amount)
+          def withdraw(acct, amt), do: %{acct | balance: acct.balance - amt}
+        end
+        """)
+
+      assert mod.withdraw(%{balance: 100}, 30) == %{balance: 70}
+
+      # The applied contract's own precondition still fires, attributed to the contract.
+      contract_error =
+        assert_raise Bond.PreconditionError, fn -> mod.withdraw(%{balance: 100}, -5) end
+
+      assert Exception.message(contract_error) =~ "from contract :withdrawal"
+
+      # The added precondition fires, attributed to the function (no "from contract").
+      added_error =
+        assert_raise Bond.PreconditionError, fn -> mod.withdraw(%{balance: 100}, 3.5) end
+
+      refute Exception.message(added_error) =~ "from contract"
+      assert Exception.message(added_error) =~ "Bond.NamedContractsTest.Extended.withdraw/2"
+    end
+
+    test "an added clause referencing a function param name (not canonical) is rejected" do
+      assert_raise CompileError, ~r/not a contract argument/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.AddedImplName do
+          use Bond
+          defcontract w(account, amount) do
+            @pre amount > 0
+          end
+          @apply_contract :w
+          @pre amt > 0
+          def withdraw(acct, amt), do: acct
         end
         """)
       end
     end
+  end
 
+  describe "@apply_contract resolution diagnostics" do
     test "applying alongside behaviour inheritance is rejected" do
       compile!("""
       defmodule Bond.NamedContractsTest.Charger do
@@ -541,7 +785,7 @@ defmodule Bond.NamedContractsTest do
 
   describe "defcontract diagnostics" do
     test "empty body" do
-      assert_raise CompileError, ~r/declares no @pre\/@post/, fn ->
+      assert_raise CompileError, ~r/declares nothing/, fn ->
         compile!(
           "defmodule Bond.NamedContractsTest.E1 do\n use Bond\n defcontract foo(x) do\n end\nend"
         )

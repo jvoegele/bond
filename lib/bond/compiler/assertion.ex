@@ -94,6 +94,26 @@ defmodule Bond.Compiler.Assertion do
   end
 
   @doc """
+  Returns a copy of `assertion` with `new_expression` in place of its expression, regenerating the
+  rendered `code` and assigning a fresh `:id`, while keeping `kind`/`label`/`definition_env`/
+  `meta`/source/refinement.
+
+  Used when composing named contracts (#40): an included contract's assertion, with its parameters
+  substituted by the host's argument expressions, is a new, distinct materialised assertion (hence a
+  fresh id) whose error/doc text should show the substituted form (hence regenerated `code`).
+  """
+  @spec replace_expression(t(), Bond.assertion_expression()) :: t()
+  def replace_expression(%__MODULE__{} = assertion, new_expression)
+      when is_assertion_expression(new_expression) do
+    %{
+      assertion
+      | id: generate_unique_id(),
+        expression: new_expression,
+        code: Macro.to_string(new_expression)
+    }
+  end
+
+  @doc """
   Tags an assertion with its refinement role (`:pre_weaken` or `:post_strengthen`).
 
   Used by `Bond.Compiler.register_assertion/6` when an `@pre_weaken`/`@post_strengthen`

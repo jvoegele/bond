@@ -1,0 +1,42 @@
+flowchart TD
+%% Mikado graph for named-contract extension + composition (GitHub #40).
+%%
+%% Two additive (AND) ways to build on a named contract (#35), both in the
+%% contract's canonical-name vocabulary (single-namespace, no dual-namespace):
+%%   A. inline additive @pre/@post alongside @apply_contract (conjoined)
+%%   D. `include name(args)` composition inside a defcontract, with expression
+%%      args (substitution) — local + remote, flattened at __before_compile__.
+%% Not Eiffel refinement: named contracts make no Liskov promise, so the natural
+%% "extend" is additive strengthening (AND), which inheritance forbids.
+%%
+%% Each numbered node is a commit-sized step. Arrows point from a goal to its
+%% prerequisites — leaves (green) have no further prerequisites. Depth-first per
+%% Mikado: pick a leaf, finish it, commit, repeat. Every commit stays green.
+%%
+%% Scope note: @pre_weaken-on-applied (the OR/lenient case) is DEFERRED from this
+%% cut; diamonds are NOT deduped (harmless); cycle detection IS mandatory.
+
+    G(["**Goal**<br/>Extend & compose named contracts (#40)"])
+
+    G --> S6[6. Docs: reusable-contracts guide + public-api + FAQ + CHANGELOG]
+    S6 --> S2[2. A: additive own-clauses — validate canonical refs + conjoin in merge_applied_contract]
+    S6 --> S5[5. D3: flatten pass at before_compile — expand includes, cycle detection, diagnostics, feed reflection + resolution]
+
+    S5 --> S2
+    S5 --> S3[3. D1: include capture in defcontract — parse name/Mod.name(args), store raw :includes]
+    S5 --> S4[4. D2: substitution engine — param=>expr over assertions, regen code, fresh id]
+
+    S3 --> S1[1. Mikado graph]
+    S4 --> S1
+    S2 --> S1
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S1,S2,S3,S4 leaf;
+
+    style G fill:#90EE90
+    style S1 fill:#90EE90
+    style S2 fill:#90EE90
+    style S3 fill:#90EE90
+    style S4 fill:#90EE90
+    style S5 fill:#90EE90
+    style S6 fill:#90EE90
