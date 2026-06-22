@@ -201,6 +201,53 @@ defmodule Bond.Compiler.NamedContracts do
 
   defp statement_line(_other, env), do: env.line
 
+  # --- substitution engine (#40 composition) ---
+
+  @doc """
+  Substitutes an included contract's parameters with a host's argument expressions, throughout each
+  assertion. `bindings` maps the included contract's parameter name (atom) to the replacement
+  expression AST. Each assertion's expression is rewritten, its rendered `code` regenerated, and a
+  fresh id assigned; everything else (kind/label/env) is preserved.
+
+  Replacement is *simultaneous* — a substituted expression is not re-traversed — so swapped
+  parameters (`include f(y, x)` into `f(a, b)`) bind correctly and cannot double-substitute. Only
+  variable references are replaced; call names, operators, `result`, and literals are untouched
+  (substitution does recurse into `old(...)` arguments, so `old(p)` becomes `old(<arg for p>)`).
+  """
+  @spec substitute([Assertion.t()], %{optional(atom()) => Macro.t()}) :: [Assertion.t()]
+  def substitute(assertions, bindings) when is_list(assertions) and is_map(bindings) do
+    Enum.map(assertions, fn %Assertion{expression: expression} = assertion ->
+      Assertion.replace_expression(assertion, substitute_expr(expression, bindings))
+    end)
+  end
+
+  # A variable reference: replace it with its bound expression (and do NOT recurse into the
+  # replacement — that is what makes the substitution simultaneous / swap-safe). `ctx` being an atom
+  # is what distinguishes a variable `{name, meta, ctx}` from a no-arg local call `{name, meta, []}`.
+  defp substitute_expr({name, _meta, ctx} = var, bindings) when is_atom(name) and is_atom(ctx) do
+    Map.get(bindings, name, var)
+  end
+
+  # A call / operator node `{form, meta, args}`: recurse into the form and each argument.
+  defp substitute_expr({form, meta, args}, bindings) when is_list(args) do
+    {substitute_expr(form, bindings), meta, Enum.map(args, &substitute_expr(&1, bindings))}
+  end
+
+  # A 3-tuple whose third element is not an arg list (e.g. a nested quoted form); recurse the form.
+  defp substitute_expr({form, meta, ctx}, bindings) do
+    {substitute_expr(form, bindings), meta, ctx}
+  end
+
+  defp substitute_expr({left, right}, bindings) do
+    {substitute_expr(left, bindings), substitute_expr(right, bindings)}
+  end
+
+  defp substitute_expr(list, bindings) when is_list(list) do
+    Enum.map(list, &substitute_expr(&1, bindings))
+  end
+
+  defp substitute_expr(other, _bindings), do: other
+
   # --- include parsing ---
 
   # Local: `include name(arg, …)`. The included contract is identified by `{name, arity}` where

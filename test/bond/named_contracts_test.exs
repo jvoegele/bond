@@ -56,6 +56,44 @@ defmodule Bond.NamedContractsTest do
     end
   end
 
+  describe "substitution engine (#40)" do
+    alias Bond.Compiler.Assertion
+    alias Bond.Compiler.NamedContracts
+
+    defp substituted_code(expression, bindings) do
+      [result] =
+        NamedContracts.substitute([Assertion.new(:precondition, nil, expression)], bindings)
+
+      result.code
+    end
+
+    test "replaces a variable with the bound expression" do
+      assert substituted_code(quote(do: x > 0), %{x: quote(do: cart.total)}) == "cart.total > 0"
+    end
+
+    test "swapped parameters bind simultaneously (no double substitution)" do
+      assert substituted_code(quote(do: x > y), %{x: quote(do: a), y: quote(do: b)}) == "a > b"
+    end
+
+    test "result and old/1 are preserved; old's argument is substituted" do
+      assert substituted_code(quote(do: old(x) < result), %{x: quote(do: item.base)}) ==
+               "old(item.base) < result"
+    end
+
+    test "remote-call heads are preserved while arguments are substituted" do
+      assert substituted_code(quote(do: String.contains?(s, "@")), %{s: quote(do: u.email)}) ==
+               ~s|String.contains?(u.email, "@")|
+    end
+
+    test "fresh id and preserved label" do
+      original = Assertion.new(:precondition, :positive, quote(do: x > 0))
+      [result] = NamedContracts.substitute([original], %{x: quote(do: n)})
+      assert result.label == :positive
+      assert result.code == "n > 0"
+      assert result.id != original.id
+    end
+  end
+
   describe "include capture (#40)" do
     test "local, remote, and includes-only forms compile; reflection strips includes" do
       compile!("""
