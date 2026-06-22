@@ -349,6 +349,72 @@ defmodule Bond.NamedContractsTest do
     end
   end
 
+  describe "cross-module application (mix-compiled support modules)" do
+    test "a remote contract is enforced across the compile boundary" do
+      assert BondTest.NamedContractConsumer.withdraw(%{balance: 100}, 40) == %{balance: 60}
+
+      assert_raise Bond.PreconditionError, fn ->
+        BondTest.NamedContractConsumer.withdraw(%{balance: 100}, 200)
+      end
+    end
+
+    test "the overload is selected by the applying function's arity" do
+      assert BondTest.NamedContractConsumer.only_positive(5) == 5
+      assert BondTest.NamedContractConsumer.above_floor(9, 2) == 7
+
+      assert_raise Bond.PreconditionError, fn ->
+        BondTest.NamedContractConsumer.only_positive(-1)
+      end
+
+      assert_raise Bond.PreconditionError, fn ->
+        BondTest.NamedContractConsumer.above_floor(1, 5)
+      end
+    end
+  end
+
+  describe "multi-clause and configuration" do
+    test "an applied contract binds positionally across every clause" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.MultiClause do
+          use Bond
+          defcontract described(n) do
+            @pre is_integer(n)
+            @post is_binary(result)
+          end
+          @apply_contract :described
+          def describe(0), do: "zero"
+          def describe(n) when n > 0, do: "positive"
+          def describe(n) when n < 0, do: "negative"
+        end
+        """)
+
+      assert mod.describe(0) == "zero"
+      assert mod.describe(7) == "positive"
+      assert mod.describe(-7) == "negative"
+      # A clause matches (1.5 > 0) but the rebound `n` fails the contract's is_integer/1 pre.
+      assert_raise Bond.PreconditionError, fn -> mod.describe(1.5) end
+    end
+
+    test "an applied contract honours the consuming module's :purge config" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.PurgedApply do
+          use Bond, preconditions: :purge, postconditions: :purge, invariants: :purge
+          defcontract positive(x) do
+            @pre x > 0
+          end
+          @apply_contract :positive
+          def f(n), do: n
+        end
+        """)
+
+      # The precondition is purged at compile time on this module, so an otherwise-failing
+      # argument passes straight through.
+      assert mod.f(-5) == -5
+    end
+  end
+
   describe "@apply_contract resolution diagnostics" do
     test "applying with its own @pre is rejected" do
       assert_raise CompileError, ~r/also declares its own/, fn ->
