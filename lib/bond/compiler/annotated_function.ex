@@ -52,7 +52,12 @@ defmodule Bond.Compiler.AnnotatedFunction do
             # inherited contract uses), so they fold against the inherited assertions in
             # `preconditions` / `postconditions` without any name rebinding.
             pre_weaken_assertions: [],
-            post_strengthen_assertions: []
+            post_strengthen_assertions: [],
+            # Named contracts applied to this function via `@apply_contract` (#35), as a list of
+            # `%{ref: ref, env: env}` where `ref` is `{:local, name}` or `{:remote, module, name}`.
+            # Captured by the FSM and resolved into inherited-style contracts at
+            # `Bond.Compiler.__before_compile__/1` time, keyed by this function's `{fun, arity}`.
+            applied_contracts: []
 
   @type t :: %__MODULE__{
           kind: :def | :defp | nil,
@@ -66,7 +71,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
           doc_attributes: [FunctionDefinition.doc_attribute()],
           canonical_names_override: [atom()] | nil,
           pre_weaken_assertions: [Bond.Compiler.Assertion.t()],
-          post_strengthen_assertions: [Bond.Compiler.Assertion.t()]
+          post_strengthen_assertions: [Bond.Compiler.Assertion.t()],
+          applied_contracts: [%{ref: tuple(), env: Macro.Env.t()}]
         }
 
   def new(%FunctionDefinition{} = function_def) do
@@ -130,6 +136,18 @@ defmodule Bond.Compiler.AnnotatedFunction do
       )
       when is_list(doc_attributes) do
     %{annotated_function | doc_attributes: existing_doc_attributes ++ doc_attributes}
+  end
+
+  @doc """
+  Records the named contracts (`@apply_contract`) that precede this function, to be resolved and
+  merged at `__before_compile__` time. See the `:applied_contracts` field.
+  """
+  def put_applied_contracts(
+        %__MODULE__{applied_contracts: existing} = annotated_function,
+        applied_contracts
+      )
+      when is_list(applied_contracts) do
+    %{annotated_function | applied_contracts: existing ++ applied_contracts}
   end
 
   @doc """

@@ -162,11 +162,11 @@ defmodule Bond do
       if at_annotations? do
         quote do
           import Kernel, except: [@: 1]
-          import Bond, only: [@: 1, check: 1, check: 2]
+          import Bond, only: [@: 1, check: 1, check: 2, defcontract: 1, defcontract: 2]
         end
       else
         quote do
-          import Bond, only: [check: 1, check: 2]
+          import Bond, only: [check: 1, check: 2, defcontract: 1, defcontract: 2]
         end
       end
 
@@ -299,11 +299,85 @@ defmodule Bond do
     :ok
   end
 
+  # `@apply_contract <ref>` — apply a reusable named contract (`defcontract`) to the next
+  # function. A `ref` is `:name` (a contract defined in this module) or `{Module, :name}` (a
+  # contract in another module, read via its `__bond_named_contracts__/0` reflection). The
+  # contract's pre/postconditions are attached to the function and its parameters are rebound to
+  # the contract's canonical names positionally, exactly like an inherited behaviour contract. The
+  # applying function's arity selects the overload. v1 applies a single contract per function. See
+  # `defcontract`.
+  defmacro @{:apply_contract, meta, [expression]} do
+    Bond.Compiler.register_apply_contract(expression, __CALLER__, meta)
+  end
+
+  defmacro @{:apply_contract, _meta, [_, _ | _]} do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description:
+        "@apply_contract accepts a single contract reference — a name (`:withdrawal`) or a " <>
+          "`{Module, :name}` pair. Applying multiple contracts to one function is not " <>
+          "supported (v1)."
+  end
+
   defmacro @attr do
     # Forward any other module attributes that are not `@pre` or `@post` to `Kernel.@/1`
     quote do
       Kernel.@(unquote(attr))
     end
+  end
+
+  @doc """
+  Define a reusable, named contract that other functions apply with `@apply_contract`.
+
+  A named contract bundles `@pre`/`@post` under a `{name, arity}` so the same agreement can be
+  shared across functions instead of being restated on each one. The head's parameter list
+  supplies the contract's *canonical argument names* and their order; a function that applies
+  the contract has its parameters rebound to those names positionally (so it may name them
+  however it likes), exactly as an implementation inherits a `Bond.Behaviour` callback's
+  contract.
+
+      defmodule Money do
+        use Bond
+
+        defcontract withdrawal(account, amount) do
+          @pre sufficient: amount <= account.balance
+          @post non_negative: result.balance >= 0
+        end
+      end
+
+      defmodule Account do
+        use Bond
+
+        @apply_contract {Money, :withdrawal}
+        def withdraw(acct, amt), do: %{acct | balance: acct.balance - amt}
+      end
+
+  Contracts are keyed by `{name, arity}`, so `name(x)` and `name(x, y)` are distinct overloads;
+  the applying function's arity selects which one binds. A contract body may contain only
+  `@pre`/`@post`, and each expression may reference only the contract's declared arguments (plus
+  `result` in a `@post`).
+  """
+  defmacro defcontract(head, do: block) do
+    Bond.Compiler.NamedContracts.define(head, block, __CALLER__)
+  end
+
+  defmacro defcontract(_head, _opts) do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description:
+        "Bond: defcontract requires a `do … end` block, e.g. " <>
+          "`defcontract name(arg1, arg2) do @pre … end`."
+  end
+
+  defmacro defcontract(_head) do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description:
+        "Bond: defcontract requires a `do … end` block, e.g. " <>
+          "`defcontract name(arg1, arg2) do @pre … end`."
   end
 
   @doc """

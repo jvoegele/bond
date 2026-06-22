@@ -1,0 +1,52 @@
+flowchart TD
+%% Mikado graph for reusable named contracts (GitHub #35).
+%%
+%% A `defcontract name(args) do @pre.../@post... end` block defines a reusable,
+%% named bundle of pre/postconditions keyed by {name, arity}. Functions apply it
+%% with `@apply_contract :name` (local) or `@apply_contract {Mod, :name}`
+%% (cross-module). Binding is POSITIONAL with arity-must-match, so the annotated
+%% function's arity both selects the overload and rebinds its params to the
+%% contract's canonical argument names — reusing the inherited-contract engine
+%% (`canonical_names_override` -> `rewrite_clause_params`) wholesale.
+%%
+%% v1 is IMMUTABLE + SINGLE-SOURCE, exactly like a single behaviour's inherited
+%% contract: a function applies at most one named contract and may not also carry
+%% its own plain @pre/@post, behaviour inheritance, or a refinement on it (each a
+%% compile error). Those compositions are documented non-goals / fast-follows.
+%%
+%% Each numbered node is a commit-sized step. Arrows point from a goal to its
+%% prerequisites — leaves (green) have no further prerequisites and are safe to
+%% start with. Depth-first per Mikado: pick a leaf, finish it, commit, repeat.
+%% Every commit compiles and the suite stays green.
+
+    G(["**Goal**<br/>Reusable named contracts (#35)"])
+
+    G --> S9[9. Docs: guide section + public-api freeze + FAQ + getting-started + CHANGELOG 1.5.0]
+    S9 --> S8[8. Tests: local + cross-module, overload-by-arity, positional rebind, multi-clause, attribution, diagnostics, consolidation]
+    S8 --> S6
+    S8 --> S7[7. Diagnostics: unknown name+arity, arity mismatch, duplicate defcontract, combine-with-behaviour/own-pre/refinement, empty contract]
+    S7 --> S6[6. Resolve refs + build applied map keyed by name/arity + combine-with-inherited conflict guard + feed merge_inherited_contract, immutable + single-source]
+
+    S6 --> S2[2. defcontract macro: parse head -> name/arity + bare-var arg names, capture @pre/@post scope, store entry in module attr, reject non-pre/post + old/1-in-pre]
+    S6 --> S3[3. __bond_named_contracts__/0 reflection at before_compile, EnvSnapshot-sanitized + escaped]
+    S6 --> S4[4. source_contract plumbed through Assertion + Eval enrich + errors attribution + telemetry]
+    S6 --> S5[5. @apply_contract surface: atom / {mod, atom} / list, FSM applied-contracts accumulator pending per-function]
+
+    S3 --> S2
+    S5 --> S1[1. Mikado graph]
+    S2 --> S1
+    S4 --> S1
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class S1,S2,S4,S5 leaf;
+
+    style G fill:#90EE90
+    style S1 fill:#90EE90
+    style S2 fill:#90EE90
+    style S3 fill:#90EE90
+    style S4 fill:#90EE90
+    style S5 fill:#90EE90
+    style S6 fill:#90EE90
+    style S7 fill:#90EE90
+    style S8 fill:#90EE90
+    style S9 fill:#90EE90

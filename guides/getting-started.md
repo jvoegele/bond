@@ -371,6 +371,13 @@ See `Bond.Test` for `assert_precondition_violation/2`,
   for module-wide constraints on every instance of a struct, and the
   [Property-based testing](Bond.html#module-property-based-testing)
   section for using contracts as oracles with StreamData.
+- The [Contract Inheritance](contract-inheritance.md) guide shows how a
+  behaviour or protocol can declare `@pre`/`@post` once and have every
+  implementation enforce them, and how an implementation may refine what it
+  inherits.
+- The [Reusable Contracts](reusable-contracts.md) guide shows how to bundle
+  `@pre`/`@post` under a name with `defcontract` and share it across functions
+  (in the same module or across modules) with `@apply_contract`.
 - The [Contracts in a Concurrent World](contracts-and-concurrency.md) guide
   covers `old`, race conditions, how to design contracts for stateful
   processes, and how `@invariant` strengthens the pure-state-struct pattern.

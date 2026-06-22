@@ -124,6 +124,18 @@ defmodule Bond.Compiler.CompileStateFSM do
   end
 
   @doc """
+  Sends an `apply_contract_def` event to the FSM.
+
+  Like preconditions, an applied named contract (`@apply_contract`) is per-function: it is held
+  pending and flushed into the next function definition. `item` is `%{ref: ref, line: line,
+  env: env}`.
+  """
+  @spec apply_contract_def(server_ref(), map()) :: :ok
+  def apply_contract_def(fsm, item) when is_map(item) do
+    :gen_statem.cast(fsm, {:apply_contract_def, item})
+  end
+
+  @doc """
   Sends an `invariant_def` event to the FSM.
 
   Unlike preconditions/postconditions, invariants are module-scoped: they accumulate over the
