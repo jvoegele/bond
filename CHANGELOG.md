@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Extending and composing named contracts**
+  ([#40](https://github.com/jvoegele/bond/issues/40)). Two additive ways to build on
+  a named contract (#35):
+
+  - **Inline extension** — a function may add its own `@pre`/`@post` alongside
+    `@apply_contract`; the added clauses are conjoined with the contract. They
+    reference the contract's canonical argument names, and a failure in an added
+    clause is attributed to the function (not the contract).
+
+  - **Composition with `include`** — a `defcontract` can pull in another contract's
+    clauses, so small focused contracts compose into larger ones:
+
+    ```elixir
+    defcontract positive(x),         do: (@pre x > 0)
+    defcontract in_range(v, lo, hi), do: (@pre lo <= v and v <= hi)
+
+    defcontract order(item) do
+      include positive(item.quantity)
+      include in_range(item.discount, 0, 100)
+      @post priced: result.total >= 0
+    end
+    ```
+
+    `include name(args)` (local) and `include Module.name(args)` (cross-module)
+    splice the named contract's clauses in. Each argument is an expression over the
+    host's parameters, substituted into the included contract's clauses (so
+    `include positive(item.quantity)` enforces `item.quantity > 0`, with error
+    messages showing the substituted form). Includes nest transitively; an include
+    cycle is a compile error. Composition is also the way to apply several contracts'
+    rules to one function: compose them into one and apply that.
+
+  Because named contracts make no Liskov substitutability promise, the natural
+  extension is additive *strengthening* (the opposite of inheritance refinement).
+  Combining an applied contract with behaviour/protocol inheritance, and refining one
+  with `@pre_weaken`/`@post_strengthen`, remain compile errors.
+
 ## [1.5.0] - 2026-06-22
 
 ### Added

@@ -119,24 +119,74 @@ originating `{module, name}` is also available programmatically as the
 `:source_contract` field on the error struct, and in the
 `[:bond, :assertion, :failure]` telemetry metadata.
 
-## Scope and non-goals (v1)
+## Extending an applied contract
 
-Named contracts in this version deliberately mirror *inheriting a single
-behaviour contract verbatim*. The following are reported as clear compile errors,
-and are candidates for a future version rather than silent partial behaviour:
+A function may add its own `@pre`/`@post` alongside `@apply_contract`; the added
+clauses are **conjoined** with the contract — both must hold:
 
-  * **One contract per function.** A function applies a single named contract.
-    Two `@apply_contract` annotations (or a list) on one function is an error.
-  * **No own `@pre`/`@post` alongside an applied contract.** An applied contract
-    is enforced as written; for a function-specific assertion, use `Bond.check/1`
-    in the body, or add the assertion to the contract. (This is the same stance
-    inheritance takes, for the same reason: the lifted contract evaluates in the
-    contract's canonical-name vocabulary.)
-  * **No combining with behaviour/protocol inheritance** on the *same* function.
-  * **No refinement** of an applied contract with `@pre_weaken`/`@post_strengthen`.
+```elixir
+@apply_contract :withdrawal              # withdrawal(account, amount)
+@pre whole: amount == trunc(amount)      # also require this
+@post logged: audit_written?(result)     # also guarantee this
+def withdraw(acct, amt), do: ...
+```
 
-`@apply_contract` relies on Bond's `@` syntax, so it is unavailable under
-`use Bond, at_annotations: false`. `defcontract` itself works in either mode.
+Because a named contract carries no substitutability promise (unlike a behaviour
+or protocol contract), *strengthening* it this way is sound — adding a requirement
+just means this function is stricter than the bare contract. (This is the opposite
+of inheritance, where adding a precondition is forbidden precisely because an
+implementation *must* stay substitutable for its abstraction.)
+
+Added clauses reference the **contract's** argument names (`amount`, `account`) —
+the same canonical vocabulary the contract uses — not the function's own
+parameters. A reference to a function parameter (`amt`) is a compile error. A
+failure in an added clause is attributed to the **function** (no `from contract …`),
+so a message tells contract terms apart from function-specific ones.
+
+## Composing contracts with `include`
+
+A contract can pull in another contract's clauses with `include`, so small, focused
+contracts compose into larger ones:
+
+```elixir
+defcontract positive(x),         do: (@pre x > 0)
+defcontract in_range(v, lo, hi), do: (@pre lo <= v and v <= hi)
+
+defcontract order(item) do
+  include positive(item.quantity)
+  include in_range(item.discount, 0, 100)
+  @post priced: result.total >= 0
+end
+```
+
+`include name(args)` (local) or `include Module.name(args)` (cross-module) splices
+the named contract's `@pre`/`@post` into the host. Each argument is an **expression
+over the host's parameters**, substituted into the included contract's clauses — so
+`include positive(item.quantity)` enforces `item.quantity > 0`, and error messages
+and generated docs show the substituted form. The number of arguments selects the
+included overload by arity.
+
+Composition is also how you apply *several* contracts' worth of rules to one
+function: compose them into a single contract and apply that (a function still
+applies exactly one named contract directly). Includes nest transitively; a contract
+that includes the same base along two paths simply checks it twice (harmless —
+assertions are side-effect-free and a failure stops at the first). A contract that
+includes itself, directly or transitively, is a compile error.
+
+## Scope and non-goals
+
+Two relationships are reported as clear compile errors:
+
+  * **Combining an applied contract with behaviour/protocol inheritance** on the
+    *same* function.
+  * **Refining** an applied contract with `@pre_weaken`/`@post_strengthen` (the
+    *weaken* direction). Additive `@pre`/`@post` covers the common "require more"
+    case; weakening a named contract's precondition is not currently supported.
+
+A function applies a single named contract directly; use `include` to combine
+several. `@apply_contract` relies on Bond's `@` syntax, so it is unavailable under
+`use Bond, at_annotations: false`; `defcontract` (and `include` within it) work in
+either mode.
 
 ## Named contracts vs. a hand-rolled macro
 
