@@ -356,6 +356,7 @@ defmodule Bond.Compiler do
       fsm(env)
       |> FSM.annotated_functions()
       |> Enum.map(&merge_inherited_contract(&1, inherited))
+      |> Enum.map(&merge_applied_contract(&1, inherited))
       |> Enum.map(&AnnotatedFunction.put_invariants(&1, invariants))
       |> Enum.filter(&AnnotatedFunction.override?/1)
       |> Enum.map(&AnnotatedFunction.apply_contract(&1, config))
@@ -403,6 +404,14 @@ defmodule Bond.Compiler do
   # those are partitioned off here and folded by the codegen. A refinement that targets a
   # non-inherited function, or a `@pre_weaken` with no inherited precondition to weaken, is itself
   # a compile error.
+  #
+  # A function that applies a named contract (`@apply_contract`, #35) is handled entirely by
+  # `merge_applied_contract/2`, which owns its own diagnostics and v1 constraints; skip it here so
+  # the two paths never both process one function (combining the two is itself a v1 non-goal, caught
+  # in `merge_applied_contract/2`).
+  defp merge_inherited_contract(%AnnotatedFunction{applied_contracts: [_ | _]} = af, _inherited),
+    do: af
+
   defp merge_inherited_contract(%AnnotatedFunction{} = annotated_function, inherited) do
     key = {annotated_function.fun, annotated_function.arity}
 
@@ -454,6 +463,142 @@ defmodule Bond.Compiler do
         |> AnnotatedFunction.put_canonical_override(names)
     end
   end
+
+  # Resolves and folds an applied named contract (`@apply_contract`, #35) into a function. Kept
+  # separate from `merge_inherited_contract/2` (Option B): it speaks in "contract" terms and makes
+  # the v1 non-goals explicit compile errors. The fold itself is identical in spirit to inheriting
+  # a behaviour contract verbatim — replace the function's pre/post with the contract's and rebind
+  # parameters to the contract's canonical argument names positionally.
+  defp merge_applied_contract(%AnnotatedFunction{applied_contracts: []} = af, _inherited), do: af
+
+  defp merge_applied_contract(%AnnotatedFunction{applied_contracts: applied} = af, inherited) do
+    key = {af.fun, af.arity}
+    [%{env: apply_env} | _] = applied
+
+    # v1 non-goal: an applied contract cannot be combined with behaviour/protocol inheritance.
+    if Map.has_key?(inherited, key) do
+      raise CompileError,
+        file: apply_env.file,
+        line: apply_env.line,
+        description:
+          "Bond: #{mfa(af)} both inherits a behaviour contract and applies a named contract " <>
+            "(@apply_contract). Combining the two on one function is not supported (v1); use one " <>
+            "or the other."
+    end
+
+    # v1 non-goal: a single applied contract per function (composing several would require the
+    # canonical-name agreement / multi-binding the immutable v1 deliberately omits).
+    if length(applied) > 1 do
+      raise CompileError,
+        file: apply_env.file,
+        line: apply_env.line,
+        description:
+          "Bond: #{mfa(af)} applies more than one named contract. Applying multiple named " <>
+            "contracts to one function is not supported (v1); apply a single contract."
+    end
+
+    [%{ref: ref}] = applied
+    {contract_module, name, entry} = resolve_applied_ref(ref, key, af, apply_env)
+
+    {plain_pre, weaken_pre} = partition_refinements(af.preconditions)
+    {plain_post, strengthen_post} = partition_refinements(af.postconditions)
+
+    label = contract_label(contract_module, name, af.module)
+
+    # v1 non-goal: an applied contract is enforced as-is — no own plain @pre/@post alongside it
+    # (that would need the dual-namespace machinery #16 retired).
+    if plain_pre != [] or plain_post != [] do
+      raise CompileError,
+        file: apply_env.file,
+        line: apply_env.line,
+        description:
+          "Bond: #{mfa(af)} applies the named contract #{label} and also declares its own " <>
+            "@pre/@post. An applied contract is enforced as-is (v1); put function-specific " <>
+            "assertions in the body with Bond.check/1, or add them to the contract."
+    end
+
+    # v1 non-goal: refining an applied contract (@pre_weaken/@post_strengthen).
+    if weaken_pre != [] or strengthen_post != [] do
+      raise CompileError,
+        file: apply_env.file,
+        line: apply_env.line,
+        description:
+          "Bond: #{mfa(af)} refines the applied named contract #{label} with " <>
+            "@pre_weaken/@post_strengthen. Refining a named contract is not supported (v1)."
+    end
+
+    source = {contract_module, name}
+
+    af
+    |> AnnotatedFunction.replace_preconditions(stamp_source_contract(entry.preconditions, source))
+    |> AnnotatedFunction.replace_postconditions(
+      stamp_source_contract(entry.postconditions, source)
+    )
+    |> AnnotatedFunction.put_canonical_override(entry.arg_names)
+  end
+
+  defp resolve_applied_ref({:local, name}, {_fun, arity}, %AnnotatedFunction{module: module}, env) do
+    module
+    |> NamedContracts.registry()
+    |> Map.new()
+    |> fetch_applied_entry(name, arity, module, env)
+  end
+
+  defp resolve_applied_ref({:remote, contract_module, name}, {_fun, arity}, _af, env) do
+    Code.ensure_compiled!(contract_module)
+
+    unless function_exported?(contract_module, :__bond_named_contracts__, 0) do
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description:
+          "Bond: @apply_contract {#{inspect(contract_module)}, #{inspect(name)}} — " <>
+            "#{inspect(contract_module)} defines no named contracts (no `defcontract`, or it does " <>
+            "not `use Bond`)."
+    end
+
+    contract_module.__bond_named_contracts__()
+    |> fetch_applied_entry(name, arity, contract_module, env)
+  end
+
+  defp fetch_applied_entry(registry, name, arity, contract_module, env) do
+    case Map.fetch(registry, {name, arity}) do
+      {:ok, entry} ->
+        {contract_module, name, entry}
+
+      :error ->
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description: unknown_applied_contract_message(registry, name, arity, contract_module)
+    end
+  end
+
+  defp unknown_applied_contract_message(registry, name, arity, contract_module) do
+    available =
+      registry
+      |> Map.keys()
+      |> Enum.sort()
+      |> Enum.map_join(", ", fn {n, a} -> "#{n}/#{a}" end)
+
+    available_phrase =
+      if available == "", do: "it defines no named contracts", else: "available: #{available}"
+
+    "Bond: no named contract #{name}/#{arity} in #{inspect(contract_module)} (#{available_phrase})."
+  end
+
+  defp stamp_source_contract(assertions, source) do
+    Enum.map(assertions, fn assertion -> %{assertion | source_contract: source} end)
+  end
+
+  defp contract_label(contract_module, name, function_module) do
+    if contract_module == function_module,
+      do: inspect(name),
+      else: "#{inspect(contract_module)}.#{name}"
+  end
+
+  defp mfa(%AnnotatedFunction{module: module, fun: fun, arity: arity}),
+    do: "#{inspect(module)}.#{fun}/#{arity}"
 
   # Splits a function's own assertions into {plain, refinement} by the `:refinement` tag the
   # `@pre_weaken`/`@post_strengthen` macros set (`nil` => plain `@pre`/`@post`).
@@ -638,26 +783,18 @@ defmodule Bond.Compiler do
     do: Assertion.put_refinement(assertion, refinement)
 
   @doc false
-  # Records one or more `@apply_contract` references against the next function definition. Each
-  # reference normalises to `{:local, name}` or `{:remote, module, name}` (the module alias is
-  # expanded in the caller's context now, establishing the compile-time dependency for the
-  # cross-module read that resolution performs at `__before_compile__`). Arity is not known here;
-  # it comes from the function the references attach to.
+  # Records an `@apply_contract` reference against the next function definition. The reference
+  # normalises to `{:local, name}` or `{:remote, module, name}` (the module alias is expanded in
+  # the caller's context now, establishing the compile-time dependency for the cross-module read
+  # that resolution performs at `__before_compile__`). Arity is not known here; it comes from the
+  # function the reference attaches to. v1 applies a single contract per function, so there is no
+  # list form (applying multiple contracts is a documented non-goal).
   def register_apply_contract(expression, %Macro.Env{} = env, meta) do
+    ref = parse_apply_contract_ref(expression, env)
     line = Keyword.get(meta, :line, env.line)
-
-    expression
-    |> normalize_apply_contract_list()
-    |> Enum.each(fn ref_ast ->
-      ref = parse_apply_contract_ref(ref_ast, env)
-      FSM.apply_contract_def(fsm(env), %{ref: ref, line: line, env: env})
-    end)
-
+    FSM.apply_contract_def(fsm(env), %{ref: ref, line: line, env: env})
     :ok
   end
-
-  defp normalize_apply_contract_list(list) when is_list(list), do: list
-  defp normalize_apply_contract_list(single), do: [single]
 
   defp parse_apply_contract_ref(name, _env) when is_atom(name), do: {:local, name}
 
@@ -665,13 +802,22 @@ defmodule Bond.Compiler do
     {:remote, Macro.expand(module_ast, env), name}
   end
 
+  defp parse_apply_contract_ref(list, env) when is_list(list) do
+    raise CompileError,
+      file: env.file,
+      line: env.line,
+      description:
+        "Bond: @apply_contract takes a single named contract in v1 (`:name` or " <>
+          "`{Module, :name}`). Applying multiple contracts to one function is not supported."
+  end
+
   defp parse_apply_contract_ref(other, env) do
     raise CompileError,
       file: env.file,
       line: env.line,
       description:
-        "Bond: @apply_contract expects a contract name (`:withdrawal`), a `{Module, :name}` " <>
-          "pair, or a list of these. Got: `#{Macro.to_string(other)}`."
+        "Bond: @apply_contract expects a contract name (`:withdrawal`) or a `{Module, :name}` " <>
+          "pair. Got: `#{Macro.to_string(other)}`."
   end
 
   @doc false

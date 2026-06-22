@@ -133,7 +133,7 @@ defmodule Bond.NamedContractsTest do
       assert mod.double(5) == 10
     end
 
-    test "list and {Module, :name} forms compile" do
+    test "the {Module, :name} remote form compiles" do
       compile!("""
       defmodule Bond.NamedContractsTest.ApplyLib do
         use Bond
@@ -145,17 +145,47 @@ defmodule Bond.NamedContractsTest do
 
       assert [{_, _} | _] =
                compile!("""
-               defmodule Bond.NamedContractsTest.ApplyList do
+               defmodule Bond.NamedContractsTest.ApplyRemote do
                  use Bond
 
-                 @apply_contract [:local_one, {Bond.NamedContractsTest.ApplyLib, :a}]
+                 @apply_contract {Bond.NamedContractsTest.ApplyLib, :a}
                  def g(n), do: n
-
-                 defcontract local_one(x) do
-                   @pre x != 0
-                 end
                end
                """)
+    end
+
+    test "the list (multiple-contract) form is rejected in v1" do
+      assert_raise CompileError, ~r/single named contract in v1/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.ListForm do
+          use Bond
+          defcontract p(x) do
+            @pre x > 0
+          end
+          @apply_contract [:p, :p]
+          def f(x), do: x
+        end
+        """)
+      end
+    end
+
+    test "two @apply_contract lines on one function are rejected in v1" do
+      assert_raise CompileError, ~r/applies more than one named contract/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.TwoLines do
+          use Bond
+          defcontract a(x) do
+            @pre x > 0
+          end
+          defcontract b(x) do
+            @pre x < 9
+          end
+          @apply_contract :a
+          @apply_contract :b
+          def f(x), do: x
+        end
+        """)
+      end
     end
 
     test "a dangling @apply_contract with no following def is rejected" do
@@ -201,12 +231,218 @@ defmodule Bond.NamedContractsTest do
     end
 
     test "the comma (multi-arg) form is rejected" do
-      assert_raise CompileError, ~r/accepts a single argument/, fn ->
+      assert_raise CompileError, ~r/accepts a single contract reference/, fn ->
         compile!("""
         defmodule Bond.NamedContractsTest.CommaForm do
           use Bond
           @apply_contract :a, :b
           def k(x), do: x
+        end
+        """)
+      end
+    end
+  end
+
+  describe "@apply_contract enforcement" do
+    test "a cross-module contract is enforced with positional rebind and attribution" do
+      compile!("""
+      defmodule Bond.NamedContractsTest.Money do
+        use Bond
+        defcontract withdrawal(account, amount) do
+          @pre positive: amount > 0
+          @pre sufficient: amount <= account.balance
+          @post non_negative: result.balance >= 0
+        end
+      end
+      """)
+
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.Account do
+          use Bond
+          @apply_contract {Bond.NamedContractsTest.Money, :withdrawal}
+          def withdraw(acct, amt), do: %{acct | balance: acct.balance - amt}
+        end
+        """)
+
+      assert mod.withdraw(%{balance: 100}, 30) == %{balance: 70}
+
+      error = assert_raise Bond.PreconditionError, fn -> mod.withdraw(%{balance: 100}, -5) end
+      message = Exception.message(error)
+      assert message =~ "from contract Bond.NamedContractsTest.Money.withdrawal"
+      assert message =~ "Bond.NamedContractsTest.Account.withdraw/2"
+    end
+
+    test "a local contract abbreviates attribution and overloads by arity" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.LocalApply do
+          use Bond
+          defcontract positive(x) do
+            @pre x > 0
+          end
+          defcontract positive(x, floor) do
+            @pre x > floor
+          end
+          @apply_contract :positive
+          def f(n), do: n
+          @apply_contract :positive
+          def g(n, floor), do: n - floor
+        end
+        """)
+
+      assert mod.f(3) == 3
+      assert mod.g(5, 2) == 3
+
+      error = assert_raise Bond.PreconditionError, fn -> mod.f(-1) end
+      assert Exception.message(error) =~ "from contract :positive"
+      assert_raise Bond.PreconditionError, fn -> mod.g(1, 5) end
+    end
+
+    test "a postcondition over result is enforced" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.PostApply do
+          use Bond
+          defcontract doubler(n) do
+            @post result == n * 2
+          end
+          @apply_contract :doubler
+          def twice(x), do: x * 2
+          @apply_contract :doubler
+          def broken(x), do: x * 3
+        end
+        """)
+
+      assert mod.twice(4) == 8
+      assert_raise Bond.PostconditionError, fn -> mod.broken(4) end
+    end
+
+    test "the failure telemetry event carries source_contract" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.TelemetryApply do
+          use Bond
+          defcontract positive(x) do
+            @pre x > 0
+          end
+          @apply_contract :positive
+          def f(n), do: n
+        end
+        """)
+
+      handler = {__MODULE__, :"telemetry-#{System.unique_integer([:positive])}"}
+      test_pid = self()
+
+      :telemetry.attach(
+        handler,
+        [:bond, :assertion, :failure],
+        fn _event, _measurements, metadata, _ -> send(test_pid, {:bond_failure, metadata}) end,
+        nil
+      )
+
+      assert_raise Bond.PreconditionError, fn -> mod.f(-1) end
+      assert_received {:bond_failure, %{source_contract: {mod_in_event, :positive}}}
+      assert mod_in_event == mod
+
+      :telemetry.detach(handler)
+    end
+  end
+
+  describe "@apply_contract resolution diagnostics" do
+    test "applying with its own @pre is rejected" do
+      assert_raise CompileError, ~r/also declares its own/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.OwnPre do
+          use Bond
+          defcontract p(x) do
+            @pre x > 0
+          end
+          @apply_contract :p
+          @pre x < 100
+          def f(x), do: x
+        end
+        """)
+      end
+    end
+
+    test "applying alongside behaviour inheritance is rejected" do
+      compile!("""
+      defmodule Bond.NamedContractsTest.Charger do
+        use Bond.Behaviour
+        @pre amount > 0
+        @callback charge(amount :: integer) :: integer
+      end
+      """)
+
+      assert_raise CompileError, ~r/both inherits a behaviour contract and applies/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.Combined do
+          use Bond, behaviours: [Bond.NamedContractsTest.Charger]
+          defcontract cap(amount) do
+            @pre amount < 1000
+          end
+          @apply_contract :cap
+          @impl true
+          def charge(amount), do: amount
+        end
+        """)
+      end
+    end
+
+    test "an unknown contract lists the available name/arities" do
+      assert_raise CompileError, ~r|no named contract foo/1.*available: bar/1|s, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.UnknownName do
+          use Bond
+          defcontract bar(x) do
+            @pre x > 0
+          end
+          @apply_contract :foo
+          def f(x), do: x
+        end
+        """)
+      end
+    end
+
+    test "an arity mismatch is reported" do
+      assert_raise CompileError, ~r|no named contract p/2.*available: p/1|s, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.ArityMismatch do
+          use Bond
+          defcontract p(x) do
+            @pre x > 0
+          end
+          @apply_contract :p
+          def f(a, b), do: a + b
+        end
+        """)
+      end
+    end
+
+    test "a remote module with no named contracts is rejected" do
+      assert_raise CompileError, ~r/defines no named contracts/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.NotAContractModule do
+          use Bond
+          @apply_contract {Enum, :nope}
+          def f(x), do: x
+        end
+        """)
+      end
+    end
+
+    test "refining an applied contract is rejected in v1" do
+      assert_raise CompileError, ~r/Refining a named contract is not supported/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.RefineApplied do
+          use Bond
+          defcontract p(x) do
+            @pre x > 0
+          end
+          @apply_contract :p
+          @pre_weaken x == 0
+          def f(x), do: x
         end
         """)
       end
