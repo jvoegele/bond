@@ -114,6 +114,30 @@ defmodule Bond.NamedContractsTest do
     end
   end
 
+  describe "source_contract attribution" do
+    test "a cross-module contract is named module.contract" do
+      error = %Bond.PreconditionError{
+        module: SomeApp.Account,
+        source_contract: {SomeApp.Money, :withdrawal}
+      }
+
+      assert Bond.AssertionError.attribution(error) == " (from contract SomeApp.Money.withdrawal)"
+    end
+
+    test "a same-module contract abbreviates to :contract" do
+      error = %Bond.PreconditionError{
+        module: SomeApp.Money,
+        source_contract: {SomeApp.Money, :withdrawal}
+      }
+
+      assert Bond.AssertionError.attribution(error) == " (from contract :withdrawal)"
+    end
+
+    test "no attribution when source_contract is nil" do
+      assert Bond.AssertionError.attribution(%Bond.PreconditionError{module: M}) == ""
+    end
+  end
+
   describe "defcontract diagnostics" do
     test "empty body" do
       assert_raise CompileError, ~r/declares no @pre\/@post/, fn ->

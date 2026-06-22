@@ -12,6 +12,7 @@ defmodule Bond.AssertionError do
         :function,
         :binding,
         :source_behaviour,
+        :source_contract,
         :source_protocol,
         :impl,
         :quantifier
@@ -22,6 +23,9 @@ defmodule Bond.AssertionError do
 
       `:source_behaviour` is the behaviour module an inherited contract came from (see
       `Bond.Behaviour`), or `nil` for a contract declared directly on the function.
+
+      `:source_contract` is the `{module, name}` of an applied named contract the failing
+      assertion came from (see `defcontract`/`@apply_contract`), or `nil` otherwise.
 
       `:source_protocol` is the protocol module a contract was declared on (see `Bond.Protocol`),
       or `nil`; when set, `:impl` is the implementation module the failing call resolved to (or
@@ -39,6 +43,7 @@ defmodule Bond.AssertionError do
               function: {String.t(), non_neg_integer()},
               binding: keyword(),
               source_behaviour: module() | nil,
+              source_contract: {module(), atom()} | nil,
               source_protocol: module() | nil,
               impl: module() | nil,
               quantifier: map() | nil
@@ -63,7 +68,8 @@ defmodule Bond.AssertionError do
           module: assertion_env.module,
           function: function_env.function,
           binding: binding,
-          source_behaviour: Map.get(assertion, :source_behaviour)
+          source_behaviour: Map.get(assertion, :source_behaviour),
+          source_contract: Map.get(assertion, :source_contract)
         }
       end
     end
@@ -75,7 +81,9 @@ defmodule Bond.AssertionError do
 
   A behaviour-inherited contract (see `Bond.Behaviour`) reads `" (inherited from Ledger)"`; a
   protocol contract (see `Bond.Protocol`) reads `" (from protocol Sized, impl Sized.List)"`,
-  dropping the `impl` clause when it could not be resolved.
+  dropping the `impl` clause when it could not be resolved. An applied named contract (see
+  `defcontract`/`@apply_contract`) reads `" (from contract Money.withdrawal)"`, abbreviating to
+  `" (from contract :withdrawal)"` when the contract was defined in the failing call's own module.
   """
   def attribution(%{source_protocol: protocol} = error) when not is_nil(protocol) do
     impl_part = if error.impl, do: ", impl #{inspect(error.impl)}", else: ""
@@ -84,6 +92,14 @@ defmodule Bond.AssertionError do
 
   def attribution(%{source_behaviour: behaviour}) when not is_nil(behaviour) do
     " (inherited from #{inspect(behaviour)})"
+  end
+
+  def attribution(%{source_contract: {contract_module, name}} = error) do
+    if contract_module == error.module do
+      " (from contract #{inspect(name)})"
+    else
+      " (from contract #{inspect(contract_module)}.#{name})"
+    end
   end
 
   def attribution(_error), do: ""

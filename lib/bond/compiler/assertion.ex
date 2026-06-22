@@ -25,6 +25,11 @@ defmodule Bond.Compiler.Assertion do
     # contracts; flows through to the assertion-failure metadata and error structs so a
     # violation can be attributed to the source behaviour.
     :source_behaviour,
+    # The named contract an applied `defcontract` assertion came from, as `{module, name}`, or
+    # `nil` for an ordinary assertion. Stamped when `@apply_contract` resolution attaches the
+    # contract to a function (#35); flows through to the failure metadata and error structs so a
+    # violation reads "(from contract Money.withdrawal)".
+    :source_contract,
     # The refinement role of an impl-authored assertion that refines an inherited contract:
     # `:pre_weaken` (weakens the inherited precondition — combined with `or`) or
     # `:post_strengthen` (strengthens the inherited postcondition — combined with `and`).
@@ -45,6 +50,7 @@ defmodule Bond.Compiler.Assertion do
           definition_env: Macro.Env.t(),
           meta: list(),
           source_behaviour: module() | nil,
+          source_contract: {module(), atom()} | nil,
           refinement: :pre_weaken | :post_strengthen | nil
         }
 
@@ -194,7 +200,8 @@ defmodule Bond.Compiler.Assertion do
         # explicitly for inherited contracts; otherwise fall back to the assertion's env.
         module: function_module || assertion_env.module,
         function: function_info,
-        source_behaviour: assertion.source_behaviour
+        source_behaviour: assertion.source_behaviour,
+        source_contract: assertion.source_contract
       }
 
       # Delegate the truthiness check and throw-on-failure to
