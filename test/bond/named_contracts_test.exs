@@ -56,6 +56,64 @@ defmodule Bond.NamedContractsTest do
     end
   end
 
+  describe "include capture (#40)" do
+    test "local, remote, and includes-only forms compile; reflection strips includes" do
+      compile!("""
+      defmodule Bond.NamedContractsTest.IncludeLib do
+        use Bond
+        defcontract base(x) do
+          @pre x > 0
+        end
+      end
+      """)
+
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.IncludeCapture do
+          use Bond
+          defcontract positive(x), do: (@pre x > 0)
+
+          defcontract checkout(cart, user) do
+            include positive(cart.total)
+            include Bond.NamedContractsTest.IncludeLib.base(user.id)
+            @post ok: result != nil
+          end
+        end
+        """)
+
+      entry = mod.__bond_named_contracts__()[{:checkout, 2}]
+      assert entry.arg_names == [:cart, :user]
+      refute Map.has_key?(entry, :includes)
+    end
+
+    test "a malformed include is rejected" do
+      assert_raise CompileError, ~r/expects a contract call/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.BadInclude do
+          use Bond
+          defcontract c(x) do
+            include 123
+          end
+        end
+        """)
+      end
+    end
+
+    test "an include argument referencing a non-argument is rejected" do
+      assert_raise CompileError, ~r/which is not an argument of contract c/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.BadIncludeArg do
+          use Bond
+          defcontract p(x), do: (@pre x > 0)
+          defcontract c(cart) do
+            include p(user.id)
+          end
+        end
+        """)
+      end
+    end
+  end
+
   describe "__bond_named_contracts__/0 reflection" do
     test "exposes captured contracts keyed by {name, arity}" do
       [{mod, _} | _] =
@@ -573,7 +631,7 @@ defmodule Bond.NamedContractsTest do
 
   describe "defcontract diagnostics" do
     test "empty body" do
-      assert_raise CompileError, ~r/declares no @pre\/@post/, fn ->
+      assert_raise CompileError, ~r/declares nothing/, fn ->
         compile!(
           "defmodule Bond.NamedContractsTest.E1 do\n use Bond\n defcontract foo(x) do\n end\nend"
         )

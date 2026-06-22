@@ -382,7 +382,15 @@ defmodule Bond.Compiler do
       entries ->
         contracts =
           Map.new(entries, fn {key, entry} ->
-            {key, EnvSnapshot.sanitize_contract_entry(entry)}
+            # Emit only the reflected shape — `:includes` is internal and (once S5 lands) already
+            # flattened into pre/post; it also carries live envs that can't be escaped.
+            reflected = %{
+              arg_names: entry.arg_names,
+              preconditions: entry.preconditions,
+              postconditions: entry.postconditions
+            }
+
+            {key, EnvSnapshot.sanitize_contract_entry(reflected)}
           end)
 
         quote do

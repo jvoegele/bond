@@ -26,6 +26,7 @@ defmodule Bond.Compiler.NamedContracts do
   """
 
   alias Bond.Compiler.Assertion
+  alias Bond.Compiler.Clauses
   alias Bond.Compiler.InheritedContracts
   alias Bond.Compiler.InheritedContracts.Context
 
@@ -48,18 +49,19 @@ defmodule Bond.Compiler.NamedContracts do
   @spec define(Macro.t(), Macro.t(), Macro.Env.t()) :: :ok
   def define(head, block, %Macro.Env{} = env) do
     {name, arity, arg_names} = parse_head(head, env)
-    {pre, post} = capture_assertions(block, env)
+    {pre, post, includes} = capture_body(block, env)
 
-    if pre == [] and post == [] do
+    if pre == [] and post == [] and includes == [] do
       raise CompileError,
         file: env.file,
         line: env.line,
         description:
-          "Bond: defcontract #{name}/#{arity} declares no @pre/@post. A named contract must " <>
-            "declare at least one precondition or postcondition."
+          "Bond: defcontract #{name}/#{arity} declares nothing. A named contract must declare " <>
+            "at least one @pre, @post, or include."
     end
 
     InheritedContracts.validate_referenced_names!(ctx(), pre, post, {name, arity}, arg_names, env)
+    validate_include_args!(includes, name, arg_names, env)
 
     register(
       env.module,
@@ -67,7 +69,8 @@ defmodule Bond.Compiler.NamedContracts do
       %{
         arg_names: arg_names,
         preconditions: pre,
-        postconditions: post
+        postconditions: post,
+        includes: includes
       },
       env
     )
@@ -128,13 +131,14 @@ defmodule Bond.Compiler.NamedContracts do
 
   # --- body capture ---
 
-  defp capture_assertions(block, env) do
+  defp capture_body(block, env) do
     block
     |> block_statements()
-    |> Enum.reduce({[], []}, fn statement, {pre, post} ->
+    |> Enum.reduce({[], [], []}, fn statement, {pre, post, includes} ->
       case classify_statement(statement, env) do
-        {:precondition, assertions} -> {pre ++ assertions, post}
-        {:postcondition, assertions} -> {pre, post ++ assertions}
+        {:precondition, assertions} -> {pre ++ assertions, post, includes}
+        {:postcondition, assertions} -> {pre, post ++ assertions, includes}
+        {:include, directive} -> {pre, post, includes ++ [directive]}
       end
     end)
   end
@@ -148,6 +152,12 @@ defmodule Bond.Compiler.NamedContracts do
        when kind in [:pre, :post] do
     assertion_kind = if kind == :pre, do: :precondition, else: :postcondition
     {assertion_kind, build_assertions(assertion_kind, expression, env, kmeta)}
+  end
+
+  # `include name(args)` / `include Module.name(args)` — compose another contract's clauses into
+  # this one (#40). Captured raw here; resolved, substituted, and flattened at __before_compile__.
+  defp classify_statement({:include, _meta, [call]}, env) do
+    {:include, parse_include(call, env)}
   end
 
   # `@pre`/`@post` with 2+ args — the bare-mixed-with-labelled trip, same as the `use Bond`
@@ -190,6 +200,62 @@ defmodule Bond.Compiler.NamedContracts do
     do: Keyword.get(meta, :line, env.line)
 
   defp statement_line(_other, env), do: env.line
+
+  # --- include parsing ---
+
+  # Local: `include name(arg, …)`. The included contract is identified by `{name, arity}` where
+  # arity is the number of arguments passed; the args are arbitrary expressions over THIS contract's
+  # parameters, substituted into the included contract's clauses at flatten time (#40).
+  defp parse_include({name, _meta, args}, env) when is_atom(name) and is_list(args) do
+    %{ref: {:local, name, length(args)}, name: name, args: args, env: env}
+  end
+
+  # Remote: `include Module.name(arg, …)`. The module alias is expanded in the caller's context now,
+  # establishing the compile-time dependency for the cross-module read at flatten time.
+  defp parse_include({{:., _, [module_ast, name]}, _meta, args}, env)
+       when is_atom(name) and is_list(args) do
+    module = Macro.expand(module_ast, env)
+    %{ref: {:remote, module, name, length(args)}, name: name, args: args, env: env}
+  end
+
+  defp parse_include(other, env) do
+    raise CompileError,
+      file: env.file,
+      line: env.line,
+      description:
+        "Bond: `include` expects a contract call — `include name(arg, …)` or " <>
+          "`include Module.name(arg, …)`. Got: `#{Macro.to_string(other)}`."
+  end
+
+  # Each `include` argument is substituted into the included contract's assertions, so it must
+  # reference only THIS contract's declared arguments (the names in scope when the host is applied).
+  defp validate_include_args!(includes, host_name, host_arg_names, env) do
+    allowed = MapSet.new(host_arg_names)
+
+    for %{args: args, env: include_env} <- includes, arg <- args do
+      unknown =
+        arg
+        |> Clauses.expression_var_names()
+        |> MapSet.difference(allowed)
+        |> Enum.sort()
+
+      if unknown != [] do
+        raise CompileError,
+          file: include_env.file,
+          line: include_env.line,
+          description:
+            "Bond: include argument `#{Macro.to_string(arg)}` references " <>
+              "#{Enum.map_join(unknown, ", ", &"`#{&1}`")}, which #{verb(unknown)} not an " <>
+              "argument of contract #{host_name}. Include arguments may reference only its " <>
+              "arguments: #{Enum.map_join(host_arg_names, ", ", &"`#{&1}`")}."
+      end
+    end
+
+    :ok
+  end
+
+  defp verb([_single]), do: "is"
+  defp verb(_many), do: "are"
 
   # --- registry ---
 
