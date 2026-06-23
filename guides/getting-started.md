@@ -361,18 +361,21 @@ defmodule MyAppTest do
 end
 ```
 
-See `Bond.Test` for `assert_precondition_violation/2`,
-`assert_postcondition_violation/2`, and `assert_check_violation/2`.
+`Bond.Test` has one such macro per contract kind (preconditions, postconditions,
+`check`s, and invariants), and you can target a specific clause by `label`. For the
+complete testing story — these example-based helpers *and* property-based testing,
+where contracts act as the oracle for random inputs — see the
+[Testing Contracts](testing-contracts.md) guide.
 
 ## Next steps
 
 - The `Bond` moduledoc has the full reference, including the
   [`@invariant`](Bond.html#module-invariant-for-struct-modules) section
-  for module-wide constraints on every instance of a struct, and the
-  [Property-based testing](Bond.html#module-property-based-testing)
-  section for using contracts as oracles with StreamData — including
-  `probe_contract/2`, which probes a function at the boundaries implied
-  by its `@pre`.
+  for module-wide constraints on every instance of a struct.
+- The [Testing Contracts](testing-contracts.md) guide covers the whole
+  testing surface — `Bond.Test`'s example-based assertions and
+  `Bond.PropertyTest`'s `contract_holds/2`, `probe_contract/2`, and
+  `invariants_hold/2` — and when to reach for each.
 - The [Contract Inheritance](contract-inheritance.md) guide shows how a
   behaviour or protocol can declare `@pre`/`@post` once and have every
   implementation enforce them, and how an implementation may refine what it

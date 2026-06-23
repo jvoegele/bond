@@ -411,9 +411,9 @@ invariants_hold BoundedStack,
 ```
 
 `stream_data` is an optional dep of bond — add it to your own project
-when you want PBT. See the
-[Property-based testing](Bond.html#module-property-based-testing) section
-in the moduledoc.
+when you want PBT. The [Testing Contracts](testing-contracts.md) guide
+covers all three property-based macros (and `Bond.Test`'s example-based
+assertions) in full, including when to use which.
 
 ## When does Bond check invariants?
 
