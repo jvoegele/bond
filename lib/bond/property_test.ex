@@ -8,7 +8,7 @@ defmodule Bond.PropertyTest do
   outputs. With Bond, the oracle is *already there at every call site*; PBT just feeds
   random inputs in and lets the existing instrumentation raise on any violation.
 
-  `Bond.PropertyTest` adds two macros, one per testing shape:
+  `Bond.PropertyTest` adds three macros, one per testing shape:
 
     * **`contract_holds/2` — single function.** Pass a function reference and a list of
       generators (one per argument). The macro calls the function with random inputs; any
@@ -16,6 +16,13 @@ defmodule Bond.PropertyTest do
       counterexample.
 
           contract_holds &Math.sqrt/1, args: [StreamData.float(min: 0.0)]
+
+    * **`probe_contract/2` — single function, boundary-driven.** Like `contract_holds/2`, but it
+      mixes the boundary values implied by the function's `@pre` into your generators and *filters*
+      out inputs that violate `@pre` (rather than failing on them), so the function's `@post` is the
+      oracle and its precondition edges are probed deliberately.
+
+          probe_contract &Account.withdraw/2, args: [account_gen(), StreamData.integer()]
 
     * **`invariants_hold/2` — stateful module sequence.** Pass a struct module plus
       constructor / transformer / observer specs. The macro generates random sequences of
@@ -145,6 +152,128 @@ defmodule Bond.PropertyTest do
 
           invariants_hold #{mod}, constructors: [...], transformers: [...], observers: [...]
       """
+  end
+
+  @doc """
+  Generates an ExUnit property that *probes a function at its precondition boundaries*: it mixes
+  the boundary values implied by the function's `@pre` (e.g. `0` and its neighbours for
+  `@pre x >= 0`) into your generators, discards any generated input that does not satisfy `@pre`,
+  and lets the function's own `@post`/`check` contracts be the oracle on the inputs that survive.
+
+  Pass a remote function capture and one base generator per argument:
+
+      probe_contract &Account.withdraw/2, args: [account_generator(), StreamData.integer()]
+
+  How it differs from `contract_holds/2`:
+
+    * **Boundary probing.** Bond reads the function's `__bond_boundaries__/0` reflection (emitted
+      from the literal comparisons in its `@pre`) and blends each argument's boundary candidates
+      into that argument's generator, so the edges — where off-by-one postcondition bugs live —
+      are hit regularly rather than by chance.
+    * **`@pre` as a filter, not a guard.** A generated input that violates the precondition is
+      *discarded* — a generation miss, not a failure — instead of raising. `contract_holds/2`, by
+      contrast, calls the function unconditionally and lets a `@pre` violation fail the property.
+      Reach for `probe_contract/2` to generate broadly and probe boundaries; for `contract_holds/2`
+      when your generators already produce only valid inputs.
+
+  Because preconditions are the filter, the `@post` and `check` contracts are the oracle: any
+  postcondition violation on a *valid* input fails the property and StreamData shrinks to a minimal
+  counterexample.
+
+  ## Requirements and notes
+
+    * The capture must be a **remote** function (`&Module.fun/arity`) — the contracts and the
+      `__bond_boundaries__/0` / `__bond_precondition__/3` reflections live on that module.
+    * Functions whose `@pre` has no literal comparison (or no `@pre` at all) are still exercised:
+      there are simply no boundary candidates to inject and nothing to filter, so `probe_contract`
+      degrades gracefully to plain generated testing.
+    * If a single-clause function destructures an argument in its head (e.g.
+      `def f(%Account{} = a, n)`), your generator for that argument must produce shape-matching
+      values, exactly as the function itself requires.
+    * If the precondition is so restrictive that too many generated inputs are discarded,
+      StreamData raises its standard "too many filtered" error — narrow your base generators (or
+      use `StreamData.bind/2` for relational preconditions) so they produce valid inputs more often.
+
+  ## Options
+
+    * `:args` (required) — list of `StreamData` generators, one per function argument.
+    * `:name` (optional) — the property's description. Defaults to `"probe_contract <source>"`.
+  """
+  defmacro probe_contract(fun, opts)
+
+  defmacro probe_contract(
+             {:&, _, [{:/, _, [{{:., _, [mod_ast, fun]}, _, []}, arity]}]} = fun_ast,
+             opts
+           )
+           when is_atom(fun) and is_integer(arity) do
+    args_gens =
+      Keyword.get(opts, :args) ||
+        raise ArgumentError,
+              "probe_contract requires an `:args` keyword with a list of generators " <>
+                "(one per function argument)"
+
+    name = Keyword.get(opts, :name, "probe_contract #{Macro.to_string(fun_ast)}")
+
+    quote do
+      property unquote(name) do
+        mod = unquote(mod_ast)
+        boundaries = Bond.PropertyTest.__boundaries__(mod, unquote(fun), unquote(arity))
+        gens = Bond.PropertyTest.__augment_generators__(unquote(args_gens), boundaries)
+
+        check all args <- StreamData.fixed_list(gens),
+                  Bond.PropertyTest.__satisfies_pre__(mod, unquote(fun), unquote(arity), args) do
+          apply(unquote(fun_ast), args)
+        end
+      end
+    end
+  end
+
+  defmacro probe_contract(other, _opts) do
+    raise ArgumentError,
+          "probe_contract expects a remote function capture like `&Module.fun/arity`, got: " <>
+            Macro.to_string(other)
+  end
+
+  @doc false
+  # Returns the boundary-candidate map (`%{arg_index => [values]}`) for `{fun, arity}`, or `%{}`
+  # when the module emitted no boundaries reflection (no literal-comparison precondition anywhere).
+  def __boundaries__(mod, fun, arity) do
+    if function_exported?(mod, :__bond_boundaries__, 0) do
+      Map.get(mod.__bond_boundaries__(), {fun, arity}, %{})
+    else
+      %{}
+    end
+  end
+
+  @doc false
+  # The generation filter: true when `args` satisfies the function's `@pre`. Routes through the
+  # non-raising `__bond_precondition__/3` shim; a module with no compiled precondition exports no
+  # shim, in which case there is nothing to filter and every input passes.
+  def __satisfies_pre__(mod, fun, arity, args) do
+    if function_exported?(mod, :__bond_precondition__, 3) do
+      mod.__bond_precondition__(fun, arity, args)
+    else
+      true
+    end
+  end
+
+  @doc false
+  # Blends boundary candidates into each argument's base generator. An argument with candidates is
+  # drawn from its base generator ~75% of the time and a boundary value ~25% of the time, so the
+  # edges are probed regularly while the base generator still drives broad coverage. Arguments with
+  # no candidates keep their generator untouched.
+  def __augment_generators__(arg_gens, boundaries) when is_list(arg_gens) and is_map(boundaries) do
+    arg_gens
+    |> Enum.with_index()
+    |> Enum.map(fn {gen, index} ->
+      case Map.get(boundaries, index) do
+        candidates when is_list(candidates) and candidates != [] ->
+          StreamData.frequency([{3, gen}, {1, StreamData.member_of(candidates)}])
+
+        _none ->
+          gen
+      end
+    end)
   end
 
   @doc """

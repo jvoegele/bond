@@ -391,13 +391,18 @@ default-arg form into explicit clauses.
 Contracts and property-based testing are natural partners: PBT's hard
 part is usually writing the oracle that says whether an output is right
 or wrong, and contracts *are* that oracle. `Bond.PropertyTest` exposes
-this directly with two macros:
+this directly with three macros:
 
 ```elixir
 use Bond.PropertyTest
 
 # contract_holds/2: random inputs into a single function
 contract_holds &Math.sqrt/1, args: [StreamData.float(min: 0.0)]
+
+# probe_contract/2: like contract_holds/2, but mixes the boundary values
+# implied by @pre into the generators and filters out inputs that violate
+# @pre — so @post is the oracle and the precondition edges are probed
+probe_contract &Account.withdraw/2, args: [account_gen(), StreamData.integer()]
 
 # invariants_hold/2: random sequences over a struct's @invariant
 invariants_hold BoundedStack,
@@ -406,9 +411,9 @@ invariants_hold BoundedStack,
 ```
 
 `stream_data` is an optional dep of bond — add it to your own project
-when you want PBT. See the
-[Property-based testing](Bond.html#module-property-based-testing) section
-in the moduledoc.
+when you want PBT. The [Testing Contracts](testing-contracts.md) guide
+covers all three property-based macros (and `Bond.Test`'s example-based
+assertions) in full, including when to use which.
 
 ## When does Bond check invariants?
 

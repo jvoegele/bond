@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Contract-driven boundary probing for property tests**
+  ([#36](https://github.com/jvoegele/bond/issues/36)). A new
+  `Bond.PropertyTest.probe_contract/2` macro turns a function's own contract into a
+  property-test driver: it mixes the boundary values implied by the function's `@pre`
+  into your generators, *discards* any input that violates `@pre` (a generation miss, not
+  a failure), and lets the function's `@post`/`check` contracts be the oracle on the
+  inputs that survive.
+
+  ```elixir
+  use Bond.PropertyTest
+
+  probe_contract &Account.withdraw/2, args: [account_gen(), StreamData.integer()]
+  ```
+
+  Bond reads the literal comparisons in a function's `@pre` (e.g. `amount >= 0`,
+  `amount <= 100`) at compile time and blends the resulting boundary values into the
+  matching argument's generator, so the property probes the edges — where off-by-one
+  postcondition bugs live — deliberately rather than by chance. Unlike `contract_holds/2`,
+  which calls the function unconditionally and *fails* on a `@pre` violation,
+  `probe_contract/2` uses the precondition as a *filter*: you can generate broadly and
+  still exercise only valid inputs, with the postcondition as the free oracle. A function
+  whose `@pre` has no literal comparison (or no `@pre` at all) is still exercised — there
+  are simply no boundary candidates to inject and nothing to filter.
+
+  Inspired by Eiffel's AutoTest, which likewise derives test cases from a routine's
+  contract and uses the contract itself as the pass/fail oracle.
+
 ## [1.6.0] - 2026-06-22
 
 ### Added

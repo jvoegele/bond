@@ -21,6 +21,7 @@ defmodule Bond.Compiler do
 
   alias Bond.Compiler.AnnotatedFunction
   alias Bond.Compiler.Assertion
+  alias Bond.Compiler.Boundaries
   # `require` (not `alias`) so Mix creates a strong compile-time dep on
   # CompileStateFSM and schedules compile_state_fsm.ex (and transitively
   # server.ex) before this file. User modules have compile deps on Bond.Compiler
@@ -356,20 +357,115 @@ defmodule Bond.Compiler do
     # emitted reflection and apply-time local resolution.
     named = NamedContracts.flatten(env.module)
 
-    contract_overrides =
+    # The merged-but-not-yet-codegen'd functions: inherited/applied contracts folded in and
+    # invariants attached, filtered to those that actually carry a contract. Captured before
+    # `apply_contract/2` turns each into override AST so boundary extraction can read their final
+    # preconditions and argument names.
+    annotated =
       fsm(env)
       |> FSM.annotated_functions()
       |> Enum.map(&merge_inherited_contract(&1, inherited))
       |> Enum.map(&merge_applied_contract(&1, inherited, named))
       |> Enum.map(&AnnotatedFunction.put_invariants(&1, invariants))
       |> Enum.filter(&AnnotatedFunction.override?/1)
+
+    contract_overrides =
+      annotated
       |> Enum.map(&AnnotatedFunction.apply_contract(&1, config))
       |> Enum.reject(&is_nil/1)
 
     named_contracts_ast = build_named_contracts_reflection(named)
+    # Built from `annotated` *after* `apply_contract/2` has run, so any multi-clause
+    # name-disagreement `CompileError` surfaces from contract compilation as before, not here.
+    boundaries_ast = build_boundaries_reflection(annotated)
+    precondition_shim_ast = build_precondition_shim(annotated, config)
 
-    extras = Enum.reject([named_contracts_ast, moduledoc_invariants_ast], &is_nil/1)
+    extras =
+      Enum.reject(
+        [named_contracts_ast, moduledoc_invariants_ast, boundaries_ast, precondition_shim_ast],
+        &is_nil/1
+      )
+
     extras ++ contract_overrides
+  end
+
+  # Emits the `__bond_precondition__/3` filter shim (#36): for each contracted function whose
+  # precondition is actually compiled (`emits_preconditions?/2`), a clause that delegates to that
+  # function's private lifted precondition defp through `Bond.Runtime.Eval.precondition_satisfied?/1`
+  # — returning a boolean instead of raising, so `Bond.PropertyTest` can use `@pre` as a generator
+  # *filter*. A trailing catch-all returns `true`: a function with no compiled precondition has
+  # nothing to violate, so any input vacuously satisfies it. All clauses are emitted in one block so
+  # they stay grouped (Elixir warns on scattered same-name/arity clauses). Modules with no compiled
+  # preconditions emit nothing.
+  defp build_precondition_shim(annotated, config) do
+    clauses =
+      annotated
+      |> Enum.filter(&AnnotatedFunction.emits_preconditions?(&1, config))
+      |> Enum.map(fn annotated_function ->
+        fun = annotated_function.fun
+        arity = annotated_function.arity
+        pre_fn = AnnotatedFunction.precondition_fn_name(annotated_function)
+        arg_vars = Macro.generate_arguments(arity, __MODULE__)
+
+        quote do
+          @doc false
+          def __bond_precondition__(unquote(fun), unquote(arity), [unquote_splicing(arg_vars)]) do
+            Bond.Runtime.Eval.precondition_satisfied?(fn ->
+              unquote(pre_fn)(unquote_splicing(arg_vars))
+            end)
+          end
+        end
+      end)
+
+    case clauses do
+      [] ->
+        nil
+
+      _ ->
+        catch_all =
+          quote do
+            @doc false
+            def __bond_precondition__(_fun, _arity, _args), do: true
+          end
+
+        quote do
+          (unquote_splicing(clauses ++ [catch_all]))
+        end
+    end
+  end
+
+  # Emits the `__bond_boundaries__/0` reflection: a map of `{fun, arity} => %{arg_index =>
+  # [candidate values]}` extracted from each contracted function's precondition literals (#36).
+  # `Bond.PropertyTest` reads this to probe a function exactly at its precondition boundaries.
+  # The table holds only plain numbers, so it escapes directly — no env snapshotting needed.
+  # Functions with no literal precondition boundary contribute nothing; a module with none emits
+  # no reflection at all.
+  defp build_boundaries_reflection(annotated) do
+    table =
+      annotated
+      |> Enum.flat_map(fn annotated_function ->
+        expressions = Enum.map(annotated_function.preconditions, & &1.expression)
+
+        case Boundaries.extract(expressions, AnnotatedFunction.arg_names(annotated_function)) do
+          empty when map_size(empty) == 0 ->
+            []
+
+          candidates ->
+            [{{annotated_function.fun, annotated_function.arity}, candidates}]
+        end
+      end)
+      |> Map.new()
+
+    case table do
+      empty when map_size(empty) == 0 ->
+        nil
+
+      entries ->
+        quote do
+          @doc false
+          def __bond_boundaries__, do: unquote(Macro.escape(entries))
+        end
+    end
   end
 
   # Emits the `__bond_named_contracts__/0` reflection for a module that declared `defcontract`s,

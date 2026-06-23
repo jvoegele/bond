@@ -251,6 +251,11 @@ Brought into ExUnit modules via `use Bond.PropertyTest`. Provides:
 
   * `contract_holds/2` — runs StreamData-generated input through a single
     function and asserts every call satisfies its contracts.
+  * `probe_contract/2` — like `contract_holds/2`, but mixes the boundary
+    values implied by the function's `@pre` into the generators and uses the
+    precondition as a *filter* (discarding violating inputs rather than failing
+    on them), so the `@post` is the oracle and the precondition edges are
+    probed deliberately.
   * `invariants_hold/2` — runs random sequences of operations over a
     struct module and asserts the module's `@invariant`s (and any
     per-function contracts) hold across every reachable state.

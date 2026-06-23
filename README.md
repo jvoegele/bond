@@ -652,76 +652,46 @@ Only failure events are emitted. Pass events would be far too chatty for
 production use; if there's demand for them they can be added later
 behind an opt-in.
 
-## Property-based testing
+## Testing contracts
 
-Bond contracts compose naturally with
-[StreamData](https://hex.pm/packages/stream_data) property-based
-testing. The usual hard parts of PBT are generating inputs and writing
-an oracle that distinguishes right answers from wrong ones; Bond's
-contracts already supply the oracle at every call site. PBT then just
-feeds random inputs through already-instrumented code.
+A contract is a runtime predicate that fires at every call site — which means it is
+also a ready-made test oracle. Bond gives you two complementary ways to lean on that,
+covered in full by the [Testing Contracts](guides/testing-contracts.md) guide.
 
-`Bond.PropertyTest` provides two macros, one per testing shape.
-
-### Single function — `contract_holds/2`
+**Example-based, with `Bond.Test`** — make a call and assert a contract was violated.
+Four macros, one per contract kind (`assert_precondition_violation`,
+`assert_postcondition_violation`, `assert_check_violation`,
+`assert_invariant_violation`), each able to target a specific clause by `label`:
 
 ```elixir
-defmodule MathTest do
-  use ExUnit.Case
-  use Bond.PropertyTest
+use Bond.Test
 
-  contract_holds &Math.sqrt/1, args: [StreamData.float(min: 0.0)]
-end
+assert_precondition_violation(Math.sqrt(-1), label: :non_negative_x)
 ```
 
-Generates a property block that calls `Math.sqrt/1` with random
-non-negative floats. Any precondition, postcondition, or `check`
-violation fails the property; StreamData shrinks to the minimal failing
-input.
-
-### Stateful module sequence — `invariants_hold/2`
+**Property-based, with `Bond.PropertyTest`** — feed random inputs through the
+instrumented code and let the contracts be the oracle. Three macros:
 
 ```elixir
-defmodule BoundedStackTest do
-  use ExUnit.Case
-  use Bond.PropertyTest
+use Bond.PropertyTest
 
-  invariants_hold BoundedStack,
-    constructors: [{:new, [StreamData.integer(1..100)]}],
-    transformers: [{:push, [StreamData.term()]}, {:pop, []}],
-    observers:    [{:size, []}, {:peek, []}]
-end
+# contract_holds/2 — your generators produce valid inputs
+contract_holds &Math.sqrt/1, args: [StreamData.float(min: 0.0)]
+
+# probe_contract/2 — mixes the boundary values implied by @pre into the generators
+# and filters out inputs that violate @pre, so @post is the oracle at the edges
+probe_contract &Account.withdraw/2, args: [account_gen(), StreamData.integer(0..100)]
+
+# invariants_hold/2 — random sequences of operations against a struct's @invariant
+invariants_hold BoundedStack,
+  constructors: [{:new, [StreamData.integer(1..100)]}],
+  transformers: [{:push, [StreamData.term()]}, {:pop, []}]
 ```
 
-Generates random *sequences* of operations over a struct module. The
-constructor produces an initial struct; transformers thread state
-forward (they take the current struct as their first argument);
-observers take the struct but don't advance state. The module's
-`@invariant`s fire on every operation entry and exit, so any violation
-in any operation shrinks back to the minimal failing sequence.
-
-`invariants_hold` supports `%Mod{}` and `{:ok, %Mod{}}` return shapes
-from constructors and transformers. `{:error, _}` terminates the
-sequence cleanly (an operation refusing isn't a contract violation).
-Other return shapes raise an `ArgumentError` — wrap your function or
-test it with `contract_holds/2`.
-
-### Setup
-
-`stream_data` is an optional dep of `bond`. Add it to your own deps to
-enable PBT:
-
-```elixir
-def deps do
-  [
-    {:bond, "~> 1.6"},
-    {:stream_data, "~> 1.0", only: [:dev, :test]}
-  ]
-end
-```
-
-`use Bond.PropertyTest` raises a `CompileError` with an explanation if
-`stream_data` isn't on the path.
+`Bond.PropertyTest` builds on [StreamData](https://hex.pm/packages/stream_data), an
+*optional* dependency — add `{:stream_data, "~> 1.0", only: [:dev, :test]}` to your deps
+to enable it. See the [Testing Contracts](guides/testing-contracts.md) guide for the full
+treatment of every macro, when to use which, and the patterns and gotchas.
 
 ## Stability and the public API surface
 

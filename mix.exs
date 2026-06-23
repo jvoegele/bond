@@ -97,6 +97,7 @@ defmodule Bond.MixProject do
         "guides/getting-started.md",
         "guides/contract-inheritance.md",
         "guides/reusable-contracts.md",
+        "guides/testing-contracts.md",
         "guides/stability.md",
         "guides/public-api.md",
         "guides/overhead.md",

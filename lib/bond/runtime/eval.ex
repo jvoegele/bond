@@ -306,6 +306,31 @@ defmodule Bond.Runtime.Eval do
   end
 
   @doc """
+  Evaluates a precondition group purely as a predicate: returns `true` if every assertion holds,
+  `false` on the first violation — *without* raising, firing a `[:bond, :assertion, :failure]`
+  telemetry event, or running the function body.
+
+  `preconditions_fun` is the same 0-arity thunk `evaluate_preconditions/1` receives (it invokes
+  the lifted precondition defp, which throws `{:assertion_failure, info}` on the first failing
+  assertion). This is the non-raising, side-effect-free evaluator behind the public
+  `__bond_precondition__/3` shim, used by `Bond.PropertyTest` to *filter* generated inputs down to
+  those that satisfy `@pre` (#36): a discarded out-of-precondition input is a generation miss, not
+  a contract violation, so it must not raise or emit failure telemetry.
+
+  Mirrors the private `run_group/1` used by `evaluate_pre_weaken/3`: only the
+  `{:assertion_failure, _}` throw counts as non-satisfaction. A genuine exception from a malformed
+  assertion — or a parameter-pattern mismatch in a single-clause function's lifted defp, whose
+  head reproduces the user's pattern — propagates unchanged.
+  """
+  @spec precondition_satisfied?(assertion_fun()) :: boolean()
+  def precondition_satisfied?(preconditions_fun) when is_function(preconditions_fun, 0) do
+    preconditions_fun.()
+    true
+  catch
+    {:assertion_failure, _info} -> false
+  end
+
+  @doc """
   Evaluates an Eiffel-style *weakened* precondition: the inherited precondition group OR the
   implementation's `@pre_weaken` group (#16).
 
