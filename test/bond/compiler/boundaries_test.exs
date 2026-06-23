@@ -41,11 +41,15 @@ defmodule Bond.Compiler.BoundariesTest do
 
   describe "extract/2 — argument positioning" do
     test "maps to the correct positional index in a multi-arg function" do
-      assert Boundaries.extract([quote(do: amount >= 1)], [:account, :amount]) == %{1 => [0, 1, 2]}
+      assert Boundaries.extract([quote(do: amount >= 1)], [:account, :amount]) == %{
+               1 => [0, 1, 2]
+             }
     end
 
     test "arguments with no literal boundary are absent from the map" do
-      assert Boundaries.extract([quote(do: amount >= 0)], [:account, :amount]) == %{1 => [-1, 0, 1]}
+      assert Boundaries.extract([quote(do: amount >= 0)], [:account, :amount]) == %{
+               1 => [-1, 0, 1]
+             }
     end
 
     test "empty precondition list yields an empty map" do

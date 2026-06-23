@@ -262,7 +262,8 @@ defmodule Bond.PropertyTest do
   # drawn from its base generator ~75% of the time and a boundary value ~25% of the time, so the
   # edges are probed regularly while the base generator still drives broad coverage. Arguments with
   # no candidates keep their generator untouched.
-  def __augment_generators__(arg_gens, boundaries) when is_list(arg_gens) and is_map(boundaries) do
+  def __augment_generators__(arg_gens, boundaries)
+      when is_list(arg_gens) and is_map(boundaries) do
     arg_gens
     |> Enum.with_index()
     |> Enum.map(fn {gen, index} ->

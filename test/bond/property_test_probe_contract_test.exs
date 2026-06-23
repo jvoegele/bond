@@ -84,7 +84,9 @@ defmodule Bond.PropertyTest.ProbeContractTest do
       # The base generator can only produce 1000; any other value sampled must be an injected
       # boundary candidate, proving the candidates are actually mixed in.
       candidates = [0, 100]
-      augmented = PropertyTest.__augment_generators__([StreamData.constant(1000)], %{0 => candidates})
+
+      augmented =
+        PropertyTest.__augment_generators__([StreamData.constant(1000)], %{0 => candidates})
 
       sampled =
         augmented
