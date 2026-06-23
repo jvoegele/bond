@@ -87,6 +87,23 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
   def mfa(%__MODULE__{module: module, fun: function, arity: arity}), do: {module, function, arity}
 
+  @doc """
+  Returns the function's positional argument names — the canonical names its contract expressions
+  reference, one per argument in declaration order.
+
+  For an inherited contract these are the callback's canonical names (`canonical_names_override`);
+  otherwise they are the names negotiated across the clauses by `resolve_canonical_names/2`
+  (raising the same multi-clause name-disagreement `CompileError` that contract compilation does).
+
+  Used by boundary extraction (#36, `Bond.Compiler.Boundaries`) to map a precondition such as
+  `amount >= 0` to the positional index of `amount`, since those expressions reference exactly
+  these names.
+  """
+  @spec arg_names(t()) :: [atom()]
+  def arg_names(%__MODULE__{fun: fun, arity: arity} = annotated_function) do
+    resolve_canonical_names(annotated_function, {fun, arity})
+  end
+
   def add_clause(
         %__MODULE__{module: module, fun: function, arity: arity, clauses: clauses} = function_def,
         %FunctionDefinition{module: module, fun: function, arity: arity} = clause_def
@@ -208,6 +225,32 @@ defmodule Bond.Compiler.AnnotatedFunction do
       has_pre_weaken?(annotated_function) or
       has_post_strengthen?(annotated_function) or
       (annotated_function.kind == :def and has_invariants?(annotated_function))
+  end
+
+  @doc """
+  Whether `apply_contract/2` will emit a lifted precondition defp for this function under `config`
+  — i.e. the precondition mode resolves to something other than `:purge`.
+
+  This is the single source of truth (it routes through the same `resolve_mode/2` `apply_contract/2`
+  uses) for deciding which functions get a `__bond_precondition__/3` shim clause (#36): the shim
+  delegates to the lifted defp, so it may only be emitted when that defp actually exists.
+  """
+  @spec emits_preconditions?(t(), contract_config()) :: boolean()
+  def emits_preconditions?(%__MODULE__{} = annotated_function, config) do
+    resolve_mode(
+      Map.fetch!(config, :preconditions),
+      has_preconditions?(annotated_function) or has_pre_weaken?(annotated_function)
+    ) != :purge
+  end
+
+  @doc """
+  The name of the lifted precondition defp `apply_contract/2` emits for this function — the
+  private `__bond_preconditions__<fun>__<arity>` that the `__bond_precondition__/3` shim delegates
+  to (#36). Only meaningful when `emits_preconditions?/2` is true.
+  """
+  @spec precondition_fn_name(t()) :: atom()
+  def precondition_fn_name(%__MODULE__{fun: fun, arity: arity}) do
+    lifted_fn_name(:preconditions, fun, arity)
   end
 
   @typedoc """

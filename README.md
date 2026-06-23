@@ -661,7 +661,7 @@ an oracle that distinguishes right answers from wrong ones; Bond's
 contracts already supply the oracle at every call site. PBT then just
 feeds random inputs through already-instrumented code.
 
-`Bond.PropertyTest` provides two macros, one per testing shape.
+`Bond.PropertyTest` provides three macros, one per testing shape.
 
 ### Single function — `contract_holds/2`
 
@@ -678,6 +678,29 @@ Generates a property block that calls `Math.sqrt/1` with random
 non-negative floats. Any precondition, postcondition, or `check`
 violation fails the property; StreamData shrinks to the minimal failing
 input.
+
+### Single function, boundary-driven — `probe_contract/2`
+
+```elixir
+defmodule AccountTest do
+  use ExUnit.Case
+  use Bond.PropertyTest
+
+  probe_contract &Account.withdraw/2, args: [account_gen(), StreamData.integer()]
+end
+```
+
+Like `contract_holds/2`, but it reads the literal comparisons in the
+function's `@pre` (e.g. `amount >= 0`, `amount <= 100`) and mixes the
+resulting *boundary values* into your generators, so the property probes
+the edges — where off-by-one postcondition bugs live — deliberately
+rather than by chance. It also uses the precondition as a *filter*: a
+generated input that violates `@pre` is **discarded** (a generation miss,
+not a failure) rather than failing the property, leaving the `@post` /
+`check` contracts as the oracle on the inputs that survive. Reach for
+`probe_contract/2` to generate broadly and probe boundaries; for
+`contract_holds/2` when your generators already produce only valid
+inputs.
 
 ### Stateful module sequence — `invariants_hold/2`
 

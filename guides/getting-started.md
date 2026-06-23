@@ -370,7 +370,9 @@ See `Bond.Test` for `assert_precondition_violation/2`,
   [`@invariant`](Bond.html#module-invariant-for-struct-modules) section
   for module-wide constraints on every instance of a struct, and the
   [Property-based testing](Bond.html#module-property-based-testing)
-  section for using contracts as oracles with StreamData.
+  section for using contracts as oracles with StreamData — including
+  `probe_contract/2`, which probes a function at the boundaries implied
+  by its `@pre`.
 - The [Contract Inheritance](contract-inheritance.md) guide shows how a
   behaviour or protocol can declare `@pre`/`@post` once and have every
   implementation enforce them, and how an implementation may refine what it
