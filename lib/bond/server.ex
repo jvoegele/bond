@@ -1,0 +1,99 @@
+defmodule Bond.Server do
+  @moduledoc """
+  Design-by-Contract for `GenServer` process state.
+
+  Bond's struct `@invariant` constrains every *value* of a type, but the state most worth
+  constraining in Elixir is the state that changes over time inside a process. `Bond.Server`
+  brings contracts to that state: declare module-wide properties of a server's state and Bond
+  checks them automatically around the server's state-transition callbacks.
+
+      defmodule Counter do
+        use GenServer
+        use Bond.Server
+
+        @state_invariant non_negative: state.count >= 0
+
+        @impl true
+        def init(n), do: {:ok, %{count: n}}
+
+        @impl true
+        def handle_call(:inc, _from, state), do: {:reply, :ok, %{state | count: state.count + 1}}
+      end
+
+  A `@state_invariant` is checked after every state-transition callback returns a new state —
+  `init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`, `handle_continue/2`, and
+  `code_change/3` — and a violation raises `Bond.StateInvariantError`. Unlike a struct
+  `@invariant`, this fires even when a callback mutates state inline (the common case), because
+  Bond wraps the callbacks themselves rather than relying on the state flowing through a
+  contracted pure function.
+
+  > #### Usage order {: .info}
+  >
+  > `use GenServer` must come **before** `use Bond.Server`. Bond.Server detects the callbacks
+  > you define via the `@on_definition` compiler hook, which only sees definitions made after
+  > it is installed; `use GenServer` provides default callback implementations during its own
+  > expansion, so putting it first keeps those defaults out of Bond.Server's view.
+
+  This module is the in-progress foundation for issue #34. The current step installs the
+  compiler hooks and records which `GenServer` callbacks a module defines; assertion capture
+  and callback wrapping land in subsequent steps.
+  """
+
+  # The GenServer state-transition callbacks Bond.Server reasons about. Each carries (or, for
+  # init/1 and code_change/3, establishes) the server's state, so each is a point at which a
+  # state invariant can be checked. `terminate/2` is excluded — it returns no new state.
+  @genserver_callbacks [
+    init: 1,
+    handle_call: 3,
+    handle_cast: 2,
+    handle_info: 2,
+    handle_continue: 2,
+    code_change: 3
+  ]
+
+  @doc false
+  def __genserver_callbacks__, do: @genserver_callbacks
+
+  defmacro __using__(_opts) do
+    quote do
+      Module.register_attribute(__MODULE__, :bond_server_callbacks, accumulate: true)
+      @on_definition Bond.Server
+      @before_compile Bond.Server
+    end
+  end
+
+  @doc false
+  def __on_definition__(env, kind, fun, params, _guards, body) when kind in [:def, :defp] do
+    fa = {fun, length(params)}
+
+    # Record the GenServer callbacks the user actually defines. We deliberately do NOT gate on
+    # `Module.overridable?/2`: a user's handle_call/handle_cast/handle_info fires `@on_definition`
+    # while still marked overridable, because it overrides `use GenServer`'s pre-provided default
+    # (Bond's general external-override heuristic in `Bond.Compiler` would wrongly drop it). The
+    # GenServer defaults themselves never reach this hook — they are defined during `use
+    # GenServer`, before `use Bond.Server` installs the hook — so every callback event we see
+    # here is a genuine user clause. (See `spikes/server_defoverridable/`.)
+    if body != nil and fa in @genserver_callbacks do
+      Module.put_attribute(env.module, :bond_server_callbacks, fa)
+    end
+
+    :ok
+  end
+
+  def __on_definition__(_env, _kind, _fun, _params, _guards, _body), do: :ok
+
+  @doc false
+  defmacro __before_compile__(env) do
+    callbacks =
+      env.module
+      |> Module.get_attribute(:bond_server_callbacks)
+      |> Enum.uniq()
+      # Keep a stable, declaration-independent order for reflection and codegen.
+      |> then(fn defined -> Enum.filter(@genserver_callbacks, &(&1 in defined)) end)
+
+    quote do
+      @doc false
+      def __bond_server_callbacks__, do: unquote(Macro.escape(callbacks))
+    end
+  end
+end
