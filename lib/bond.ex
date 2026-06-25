@@ -294,6 +294,31 @@ defmodule Bond do
           "or use a separate @invariant line per bare expression."
   end
 
+  # @state_invariant <expression-or-keyword-list>
+  #
+  # Declared in a `Bond.Server` module (#34). Constrains the GenServer's state and is checked
+  # after every state-transition callback returns. Expressions reference the implicit `state`
+  # binding, which Bond.Server rebinds to the new state extracted from each callback's return.
+  # Same bare-or-keyword-list shape as `@invariant`. Capturing here (rather than only in
+  # `Bond.Server`) keeps it on the same `@`-override path as the other annotations; in a module
+  # that is not a `Bond.Server`, the captured invariant is simply never consumed.
+  defmacro @{:state_invariant, meta, [expression_or_kw_list]} do
+    register_state_invariant(expression_or_kw_list, __CALLER__, meta)
+  end
+
+  defmacro @{:state_invariant, _meta, [_, _ | _] = args} do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description:
+        "@state_invariant accepts a single argument — either a bare expression or a " <>
+          "keyword list of label: expression pairs. Got #{length(args)} arguments " <>
+          "(likely a bare expression mixed with labelled ones, e.g. " <>
+          "`@state_invariant state.count >= 0, positive: state.total > 0`). Either label " <>
+          "every expression (`@state_invariant non_negative: state.count >= 0, positive: " <>
+          "state.total > 0`) or use a separate @state_invariant line per bare expression."
+  end
+
   defmacro @{:doc, meta, [value]} do
     Bond.Compiler.register_doc(__CALLER__, meta, value)
     :ok
@@ -554,6 +579,20 @@ defmodule Bond do
       end
     else
       Bond.Compiler.register_invariant(expression_or_kw_list, nil, caller, meta)
+    end
+
+    :ok
+  end
+
+  # `@state_invariant` (#34). Same bare-or-keyword-list dispatch as `register_invariant/3`,
+  # routing each assertion to `Bond.Compiler.register_state_invariant/4`.
+  defp register_state_invariant(expression_or_kw_list, caller, meta) do
+    if Keyword.keyword?(expression_or_kw_list) do
+      for {label, expr} <- expression_or_kw_list do
+        Bond.Compiler.register_state_invariant(expr, label, caller, meta)
+      end
+    else
+      Bond.Compiler.register_state_invariant(expression_or_kw_list, nil, caller, meta)
     end
 
     :ok

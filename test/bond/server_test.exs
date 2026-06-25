@@ -5,6 +5,8 @@ defmodule Bond.ServerTest do
     use GenServer
     use Bond.Server
 
+    @state_invariant non_negative: state.count >= 0
+
     @impl true
     def init(n), do: {:ok, %{count: n}}
 
@@ -12,6 +14,21 @@ defmodule Bond.ServerTest do
     def handle_call(:inc, _from, %{count: c} = s), do: {:reply, c + 1, %{s | count: c + 1}}
     # Deliberately defines NO handle_cast/handle_info/handle_continue/code_change — GenServer
     # provides defaults for some of those, which must NOT be captured.
+  end
+
+  defmodule MultiInvariant do
+    use GenServer
+    use Bond.Server
+
+    # Bare (unlabelled), keyword, and multi-entry keyword forms, across two declarations.
+    @state_invariant state.count >= 0
+    @state_invariant capped: state.count <= state.max, has_max: is_integer(state.max)
+
+    @impl true
+    def init(max), do: {:ok, %{count: 0, max: max}}
+
+    @impl true
+    def handle_cast(:inc, s), do: {:noreply, %{s | count: s.count + 1}}
   end
 
   defmodule FullServer do
@@ -59,6 +76,24 @@ defmodule Bond.ServerTest do
       # handle_call/3 fires @on_definition with overridable?=true (it overrides GenServer's
       # default); Bond.Server must still record it — the spike's critical finding.
       assert {:handle_call, 3} in Counter.__bond_server_callbacks__()
+    end
+  end
+
+  describe "__bond_state_invariants__/0" do
+    test "captures a labelled state invariant as {label, code}" do
+      assert Counter.__bond_state_invariants__() == [{:non_negative, "state.count >= 0"}]
+    end
+
+    test "captures bare and multi-entry keyword forms, in declaration order" do
+      assert MultiInvariant.__bond_state_invariants__() == [
+               {nil, "state.count >= 0"},
+               {:capped, "state.count <= state.max"},
+               {:has_max, "is_integer(state.max)"}
+             ]
+    end
+
+    test "is empty when no state invariants are declared" do
+      assert FullServer.__bond_state_invariants__() == []
     end
   end
 

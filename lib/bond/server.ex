@@ -34,9 +34,9 @@ defmodule Bond.Server do
   > it is installed; `use GenServer` provides default callback implementations during its own
   > expansion, so putting it first keeps those defaults out of Bond.Server's view.
 
-  This module is the in-progress foundation for issue #34. The current step installs the
-  compiler hooks and records which `GenServer` callbacks a module defines; assertion capture
-  and callback wrapping land in subsequent steps.
+  This module is the in-progress foundation for issue #34. It installs the compiler hooks,
+  records which `GenServer` callbacks a module defines, and captures `@state_invariant`
+  declarations; the callback wrapping that actually evaluates them lands in a subsequent step.
   """
 
   # The GenServer state-transition callbacks Bond.Server reasons about. Each carries (or, for
@@ -54,8 +54,12 @@ defmodule Bond.Server do
   @doc false
   def __genserver_callbacks__, do: @genserver_callbacks
 
-  defmacro __using__(_opts) do
+  defmacro __using__(opts) do
     quote do
+      # Bond.Server builds on the full Bond machinery: `use Bond` installs the `@`-override (so
+      # `@state_invariant` is captured), the compile-state FSM, and the runtime contract gate.
+      use Bond, unquote(opts)
+
       Module.register_attribute(__MODULE__, :bond_server_callbacks, accumulate: true)
       @on_definition Bond.Server
       @before_compile Bond.Server
@@ -91,9 +95,19 @@ defmodule Bond.Server do
       # Keep a stable, declaration-independent order for reflection and codegen.
       |> then(fn defined -> Enum.filter(@genserver_callbacks, &(&1 in defined)) end)
 
+    # State invariants are captured into `:bond_state_invariants` by
+    # `Bond.Compiler.register_state_invariant/4` (via the `@state_invariant` override), newest-last
+    # = declaration order. Expose the `{label, code}` pairs for reflection/testing; the full
+    # assertions drive the check codegen in a later step.
+    state_invariants = Module.get_attribute(env.module, :bond_state_invariants) || []
+    reflection = Enum.map(state_invariants, fn assertion -> {assertion.label, assertion.code} end)
+
     quote do
       @doc false
       def __bond_server_callbacks__, do: unquote(Macro.escape(callbacks))
+
+      @doc false
+      def __bond_state_invariants__, do: unquote(Macro.escape(reflection))
     end
   end
 end
