@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **State invariants for GenServer processes** with the new `Bond.Server` module
+  ([#34](https://github.com/jvoegele/bond/issues/34)). A module that does `use GenServer`
+  and `use Bond.Server` can declare a module-wide `@state_invariant`; Bond checks it after
+  every state-transition callback (`init/1`, `handle_call/3`, `handle_cast/2`,
+  `handle_info/2`, `handle_continue/2`, `code_change/3`) returns a new state, and a violation
+  raises the new `Bond.StateInvariantError`.
+
+  ```elixir
+  defmodule Counter do
+    use GenServer
+    use Bond.Server
+
+    @state_invariant non_negative: state.count >= 0
+
+    @impl true
+    def init(n), do: {:ok, %{count: n}}
+
+    @impl true
+    def handle_call(:inc, _from, state), do: {:reply, :ok, %{state | count: state.count + 1}}
+  end
+  ```
+
+  Unlike a struct `@invariant` — which holds for every *value* of a type and only fires when
+  that value flows through a contracted function — a `@state_invariant` fires after every
+  callback, so it catches the common case of a callback mutating state *inline*. Because the
+  checks run inside the server process, on its own sequentially-processed state, they are free
+  of the interleaving hazards described in the "Contracts in a Concurrent World" guide.
+
+  State invariants reuse the `:invariants` configuration kind: they honour the
+  precondition ≤ postcondition ≤ invariant chain, can be toggled at runtime with
+  `Bond.Config.enable/1`/`disable/1`, and are compiled out entirely under
+  `invariants: :purge`. Declaring `@state_invariant` in a module that does not `use
+  Bond.Server` emits a compile warning (it would otherwise be silently ignored).
+
 ## [1.7.0] - 2026-06-23
 
 ### Added
