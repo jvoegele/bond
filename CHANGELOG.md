@@ -55,6 +55,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   `invariants: :purge`. Declaring either in a module that does not `use Bond.Server` emits a
   compile warning (it would otherwise be silently ignored).
 
+  New public API surface: the `Bond.Server` module and the `Bond.StateInvariantError` and
+  `Bond.TransitionInvariantError` exception structs. The `[:bond, :assertion, :failure]`
+  telemetry event now also fires with `:kind` of `:state_invariant` / `:transition_invariant`.
+
 ## [1.7.0] - 2026-06-23
 
 ### Added

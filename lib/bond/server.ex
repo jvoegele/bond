@@ -48,9 +48,10 @@ defmodule Bond.Server do
   them.
 
   Like Bond's other contracts, `@state_invariant` and `@transition_invariant` checks honour the
-  `:invariants` configuration and runtime gate: they are compiled out entirely under
-  `invariants: :purge`, and can be toggled at runtime with `Bond.Config.enable/1`/`disable/1`
-  (both share the `:invariants` kind). See `Bond` and `Bond.Config`.
+  `:invariants` configuration and runtime gate: both share the `:invariants` kind, so they observe
+  the precondition ≤ postcondition ≤ invariant chain, are compiled out entirely under
+  `invariants: :purge`, and can be toggled at runtime with `Bond.Config.enable/1`/`disable/1`. See
+  `Bond` and `Bond.Config`.
   """
 
   defmacro __using__(opts) do

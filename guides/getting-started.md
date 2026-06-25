@@ -335,12 +335,17 @@ defmodule Counter do
 
   @impl true
   def handle_call(:inc, _from, state), do: {:reply, :ok, %{state | count: state.count + 1}}
+
+  @impl true
+  def handle_cast(:dec, state), do: {:noreply, %{state | count: state.count - 1}}
 end
 ```
 
 Because the checks run inside the serialized server process, they are race-free —
-even a temporal property like "the counter never decreases". See `Bond.Server`
-and the [Contracts in a Concurrent World](contracts-and-concurrency.html) guide.
+even a temporal property like "the counter never decreases". A `:dec` cast that
+drops `count` below the previous value raises `Bond.TransitionInvariantError`. See
+`Bond.Server` and the
+[Contracts in a Concurrent World](contracts-and-concurrency.html) guide.
 
 ## Disabling contracts in production
 

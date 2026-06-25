@@ -302,7 +302,8 @@ Bond emits exactly one telemetry event:
   * **Measurements:** `%{}` (no numeric measurements; emitted purely for
     observation).
   * **Metadata:** map with keys `:kind` (`:precondition` | `:postcondition` |
-    `:invariant` | `:check`), `:label`, `:module`, `:function` (`{name, arity}`
+    `:invariant` | `:state_invariant` | `:transition_invariant` | `:check`),
+    `:label`, `:module`, `:function` (`{name, arity}`
     tuple), `:expression` (string source), `:file`, `:line`, `:binding`
     (keyword list of variables in scope at the assertion site). For inherited
     contracts the metadata also carries `:source_behaviour` (the originating
@@ -316,7 +317,7 @@ telemetry handlers see every assertion failure even when an upstream
 
 ## Error structs
 
-All four are raised by Bond, all four are catchable, all four share the same
+All six are raised by Bond, all six are catchable, all six share the same
 shape (defined by the internal `Bond.AssertionError` `__using__` macro):
 
   * `Bond.PreconditionError`
