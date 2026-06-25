@@ -272,6 +272,8 @@ Brought into ExUnit modules via `use Bond.Test`. Provides:
   * `assert_postcondition_violation/2`
   * `assert_check_violation/2`
   * `assert_invariant_violation/2`
+  * `assert_state_invariant_violation/2`
+  * `assert_transition_invariant_violation/2`
 
 Each accepts an expression and a keyword list of optional fields to verify on
 the raised error struct (`:label`, `:module`, `:function`, etc.). The full

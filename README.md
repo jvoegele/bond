@@ -709,18 +709,17 @@ also a ready-made test oracle. Bond gives you two complementary ways to lean on 
 covered in full by the [Testing Contracts](guides/testing-contracts.md) guide.
 
 **Example-based, with `Bond.Test`** — make a call and assert a contract was violated.
-Four macros, one per contract kind (`assert_precondition_violation`,
+One macro per contract kind (`assert_precondition_violation`,
 `assert_postcondition_violation`, `assert_check_violation`,
-`assert_invariant_violation`), each able to target a specific clause by `label`:
+`assert_invariant_violation`, and for `Bond.Server`,
+`assert_state_invariant_violation` and `assert_transition_invariant_violation`),
+each able to target a specific clause by `label`:
 
 ```elixir
 use Bond.Test
 
 assert_precondition_violation(Math.sqrt(-1), label: :non_negative_x)
 ```
-
-(`Bond.Server`'s `Bond.StateInvariantError` / `Bond.TransitionInvariantError`
-have no dedicated macro yet — assert them with `assert_raise/2`.)
 
 **Property-based, with `Bond.PropertyTest`** — feed random inputs through the
 instrumented code and let the contracts be the oracle. Three macros:

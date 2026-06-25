@@ -52,13 +52,15 @@ explaining how to add it.
 
 ## Example-based testing with `Bond.Test`
 
-`use Bond.Test` imports four macros, one per contract kind. Each wraps the call in an
+`use Bond.Test` imports a macro per contract kind. Each wraps the call in an
 `assert_raise` for the matching exception and returns the raised struct:
 
   * `assert_precondition_violation/2` → `Bond.PreconditionError`
   * `assert_postcondition_violation/2` → `Bond.PostconditionError`
   * `assert_check_violation/2` → `Bond.CheckError`
   * `assert_invariant_violation/2` → `Bond.InvariantError`
+  * `assert_state_invariant_violation/2` → `Bond.StateInvariantError` (`Bond.Server`)
+  * `assert_transition_invariant_violation/2` → `Bond.TransitionInvariantError` (`Bond.Server`)
 
 ```elixir
 defmodule MyApp.MathTest do

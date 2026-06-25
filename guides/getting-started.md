@@ -395,7 +395,8 @@ end
 ```
 
 `Bond.Test` has one such macro per contract kind (preconditions, postconditions,
-`check`s, and invariants), and you can target a specific clause by `label`. For the
+`check`s, struct invariants, and `Bond.Server` state/transition invariants), and you
+can target a specific clause by `label`. For the
 complete testing story — these example-based helpers *and* property-based testing,
 where contracts act as the oracle for random inputs — see the
 [Testing Contracts](testing-contracts.md) guide.

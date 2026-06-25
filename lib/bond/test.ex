@@ -2,9 +2,11 @@ defmodule Bond.Test do
   @moduledoc """
   ExUnit helpers for asserting that Bond contract violations are raised.
 
-  Each macro wraps the given expression in an `ExUnit.Assertions.assert_raise/2` that expects
-  the matching `Bond.PreconditionError` / `Bond.PostconditionError` / `Bond.CheckError`, and
-  optionally checks fields on the raised exception against a keyword of expected values.
+  Each macro wraps the given expression in an `ExUnit.Assertions.assert_raise/2` that expects the
+  matching Bond error struct — `Bond.PreconditionError`, `Bond.PostconditionError`,
+  `Bond.CheckError`, `Bond.InvariantError`, or the `Bond.Server` errors
+  `Bond.StateInvariantError` / `Bond.TransitionInvariantError` — and optionally checks fields on
+  the raised exception against a keyword of expected values.
 
   Field expectations may be exact values or `Regex` patterns. Regexes are matched against the
   string form of the field (the exception's `:expression` field is a string; the `:file` field
@@ -88,6 +90,26 @@ defmodule Bond.Test do
   """
   defmacro assert_invariant_violation(call, opts \\ []) do
     assert_violation_ast(Bond.InvariantError, call, opts)
+  end
+
+  @doc """
+  Asserts that the given `call` raises a `Bond.StateInvariantError` — a `@state_invariant`
+  declared with `Bond.Server`.
+
+  See `assert_precondition_violation/2` for details.
+  """
+  defmacro assert_state_invariant_violation(call, opts \\ []) do
+    assert_violation_ast(Bond.StateInvariantError, call, opts)
+  end
+
+  @doc """
+  Asserts that the given `call` raises a `Bond.TransitionInvariantError` — a
+  `@transition_invariant` declared with `Bond.Server`.
+
+  See `assert_precondition_violation/2` for details.
+  """
+  defmacro assert_transition_invariant_violation(call, opts \\ []) do
+    assert_violation_ast(Bond.TransitionInvariantError, call, opts)
   end
 
   defp assert_violation_ast(exception_module, call, opts) do
