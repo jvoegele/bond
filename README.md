@@ -465,13 +465,20 @@ and respects `@moduledoc false`.
 > #### Conditional compilation and docs {: .info}
 >
 > When a function has **all** of its contracts `:purge`d (see
-> [Conditional compilation](#module-conditional-compilation)), the
-> function runs with zero contract overhead and its auto-generated
-> contract sections are also suppressed. If you want the contract
-> documentation visible in production builds, leave at least one of
-> `:preconditions` or `:postconditions` set to `true` or `false` (both
-> emit the override; only `:purge` removes it). Likewise, setting
-> `:invariants` to `:purge` suppresses the generated `## Invariants` section.
+> [Conditional compilation](#module-conditional-compilation)), the function runs
+> with zero contract overhead and its auto-generated contract sections are
+> suppressed; likewise, `:invariants` set to `:purge` suppresses the generated
+> `## Invariants` section.
+>
+> This only affects docs *compiled in a purging environment*. `mix docs` runs in
+> whichever `MIX_ENV` you invoke it in — `:dev` by default — where contracts are
+> normally enabled, so a `:purge` confined to `config/prod.exs` does **not** strip
+> your published HexDocs: you generate them in dev, not prod. The suppression only
+> removes contract documentation from a *build* that itself purges — for example,
+> browsing `h MyModule.fun/1` in a production release console. If you want it
+> present even there, leave at least one of `:preconditions` / `:postconditions` /
+> `:invariants` set to `true` or `false` (those emit the override; only `:purge`
+> removes it).
 
 ## Conditional compilation
 
