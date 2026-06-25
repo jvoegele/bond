@@ -97,6 +97,34 @@ defmodule Bond.ServerTest do
     end
   end
 
+  defmodule WithTransition do
+    use GenServer
+    use Bond.Server
+
+    @state_invariant non_negative: state.n >= 0
+    @transition_invariant monotonic: new_state.n >= old_state.n
+    @transition_invariant step1: new_state.n - old_state.n <= 1
+
+    @impl true
+    def init(n), do: {:ok, %{n: n}}
+    @impl true
+    def handle_cast(:inc, s), do: {:noreply, %{s | n: s.n + 1}}
+  end
+
+  describe "__bond_transition_invariants__/0 (H1)" do
+    test "captures transition invariants as {label, code}, in declaration order" do
+      assert WithTransition.__bond_transition_invariants__() == [
+               {:monotonic, "new_state.n >= old_state.n"},
+               {:step1, "new_state.n - old_state.n <= 1"}
+             ]
+    end
+
+    test "state and transition invariants are captured independently" do
+      assert WithTransition.__bond_state_invariants__() == [{:non_negative, "state.n >= 0"}]
+      assert Counter.__bond_transition_invariants__() == []
+    end
+  end
+
   describe "__bond_state_invariant_check__/1 (lifted check)" do
     test "returns :ok when every state invariant holds" do
       assert Counter.__bond_state_invariant_check__(%{count: 0}) == :ok

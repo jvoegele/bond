@@ -319,6 +319,30 @@ defmodule Bond do
           "state.total > 0`) or use a separate @state_invariant line per bare expression."
   end
 
+  # @transition_invariant <expression-or-keyword-list>
+  #
+  # Declared in a `Bond.Server` module (#34). Relates the prior and next state across a state
+  # transition: expressions reference the implicit `old_state` and `new_state` bindings, which
+  # Bond.Server binds to the callback's incoming state and the state extracted from its return.
+  # Checked across every transition callback except `init/1`/`code_change/3` (re-creations).
+  defmacro @{:transition_invariant, meta, [expression_or_kw_list]} do
+    register_transition_invariant(expression_or_kw_list, __CALLER__, meta)
+  end
+
+  defmacro @{:transition_invariant, _meta, [_, _ | _] = args} do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description:
+        "@transition_invariant accepts a single argument — either a bare expression or a " <>
+          "keyword list of label: expression pairs. Got #{length(args)} arguments " <>
+          "(likely a bare expression mixed with labelled ones, e.g. " <>
+          "`@transition_invariant new_state.n >= old_state.n, capped: new_state.n <= 100`). " <>
+          "Either label every expression (`@transition_invariant monotonic: new_state.n >= " <>
+          "old_state.n, capped: new_state.n <= 100`) or use a separate @transition_invariant " <>
+          "line per bare expression."
+  end
+
   defmacro @{:doc, meta, [value]} do
     Bond.Compiler.register_doc(__CALLER__, meta, value)
     :ok
@@ -593,6 +617,20 @@ defmodule Bond do
       end
     else
       Bond.Compiler.register_state_invariant(expression_or_kw_list, nil, caller, meta)
+    end
+
+    :ok
+  end
+
+  # `@transition_invariant` (#34). Mirrors `register_state_invariant/3`, routing each assertion
+  # to `Bond.Compiler.register_transition_invariant/4`.
+  defp register_transition_invariant(expression_or_kw_list, caller, meta) do
+    if Keyword.keyword?(expression_or_kw_list) do
+      for {label, expr} <- expression_or_kw_list do
+        Bond.Compiler.register_transition_invariant(expr, label, caller, meta)
+      end
+    else
+      Bond.Compiler.register_transition_invariant(expression_or_kw_list, nil, caller, meta)
     end
 
     :ok

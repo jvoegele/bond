@@ -104,12 +104,17 @@ defmodule Bond.Server do
       # Keep a stable, declaration-independent order for reflection and codegen.
       |> then(fn defined -> Enum.filter(@genserver_callbacks, &(&1 in defined)) end)
 
-    # State invariants are captured into `:bond_state_invariants` by
-    # `Bond.Compiler.register_state_invariant/4` (via the `@state_invariant` override), newest-last
-    # = declaration order. Expose the `{label, code}` pairs for reflection/testing; the full
-    # assertions drive the check codegen below.
+    # State and transition invariants are captured into `:bond_state_invariants` /
+    # `:bond_transition_invariants` by `Bond.Compiler.register_{state,transition}_invariant/4` (via
+    # the `@state_invariant` / `@transition_invariant` overrides), newest-last = declaration order.
+    # Expose the `{label, code}` pairs for reflection/testing; the full assertions drive the check
+    # codegen below.
     state_invariants = Module.get_attribute(env.module, :bond_state_invariants) || []
-    reflection = Enum.map(state_invariants, fn assertion -> {assertion.label, assertion.code} end)
+    transition_invariants = Module.get_attribute(env.module, :bond_transition_invariants) || []
+
+    reflection = fn assertions ->
+      Enum.map(assertions, fn assertion -> {assertion.label, assertion.code} end)
+    end
 
     # State invariants are gated under the `:invariants` kind (zero new Bond.Config surface). The
     # resolved per-module config lives in `@__bond_contract_config__` (set by `use Bond`). `:purge`
@@ -131,7 +136,11 @@ defmodule Bond.Server do
       def __bond_server_callbacks__, do: unquote(Macro.escape(callbacks))
 
       @doc false
-      def __bond_state_invariants__, do: unquote(Macro.escape(reflection))
+      def __bond_state_invariants__, do: unquote(Macro.escape(reflection.(state_invariants)))
+
+      @doc false
+      def __bond_transition_invariants__,
+        do: unquote(Macro.escape(reflection.(transition_invariants)))
 
       unquote_splicing(runtime_ast)
     end
