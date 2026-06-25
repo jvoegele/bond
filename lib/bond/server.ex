@@ -210,7 +210,7 @@ defmodule Bond.Server do
       state_call =
         if has_state? do
           quote do
-            Bond.Runtime.Eval.evaluate_state_invariants(
+            Bond.Runtime.Eval.evaluate_server_invariants(
               fn -> __bond_state_invariant_check__(unquote(new_state)) end,
               unquote(fa_ast)
             )
@@ -222,7 +222,7 @@ defmodule Bond.Server do
           old_state = List.last(args)
 
           quote do
-            Bond.Runtime.Eval.evaluate_transition_invariants(
+            Bond.Runtime.Eval.evaluate_server_invariants(
               fn ->
                 __bond_transition_invariant_check__(unquote(old_state), unquote(new_state))
               end,
@@ -264,7 +264,7 @@ defmodule Bond.Server do
   # struct `@invariant`s do. Returns `[]` (no defp emitted) when the module declares none.
   #
   # The assertion-failure `:function` is NOT baked in here — it is added on the failure path by
-  # `Bond.Runtime.Eval.evaluate_state_invariants/2` at the call site, because these module-level
+  # `Bond.Runtime.Eval.evaluate_server_invariants/2` at the call site, because these module-level
   # invariants are shared across every callback. So the passing path allocates nothing beyond the
   # boolean checks, and the defp takes only `state` (keeping the failure binding to `[state: ...]`).
   defp state_invariant_check_ast([]), do: []

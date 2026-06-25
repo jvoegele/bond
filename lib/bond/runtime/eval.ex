@@ -395,31 +395,18 @@ defmodule Bond.Runtime.Eval do
   end
 
   @doc """
-  Evaluates a `Bond.Server` module's `@state_invariant` check around a state-transition callback
-  (#34), attributing any failure to that callback.
+  Evaluates a `Bond.Server` module's `@state_invariant` / `@transition_invariant` check around a
+  callback (#34), attributing any failure to that callback.
 
-  Mirrors `evaluate_invariants/1` (the kind, `:state_invariant`, comes from the assertion and
-  maps to `Bond.StateInvariantError`), except the thrown `assertion_info` is enriched with
-  `:function => function_info` on the failure path. State invariants are module-level — shared
-  across every callback — so the callback they were checked after is supplied here rather than
-  baked into the assertion, and the enrichment runs only when an invariant actually fails, so the
-  passing path stays allocation-free.
+  Mirrors `evaluate_invariants/1` (the kind — `:state_invariant` or `:transition_invariant` —
+  comes from the assertion and selects the error type), except the thrown `assertion_info` is
+  enriched with `:function => function_info` on the failure path. These invariants are
+  module-level — shared across every callback — so the callback they were checked around is
+  supplied here rather than baked into the assertion, and the enrichment runs only when an
+  invariant actually fails, so the passing path stays allocation-free.
   """
-  @spec evaluate_state_invariants(assertion_fun(), {atom(), non_neg_integer()}) :: term()
-  def evaluate_state_invariants(check_fun, function_info)
-      when is_function(check_fun, 0) and is_tuple(function_info) do
-    evaluate_assertions(check_fun, &Map.put(&1, :function, function_info))
-  end
-
-  @doc """
-  Evaluates a `Bond.Server` module's `@transition_invariant` check across a state transition
-  (#34), attributing any failure to the callback the transition occurred in.
-
-  Identical to `evaluate_state_invariants/2` (the kind, `:transition_invariant`, maps to
-  `Bond.TransitionInvariantError`); separate only for symmetry and a self-documenting call site.
-  """
-  @spec evaluate_transition_invariants(assertion_fun(), {atom(), non_neg_integer()}) :: term()
-  def evaluate_transition_invariants(check_fun, function_info)
+  @spec evaluate_server_invariants(assertion_fun(), {atom(), non_neg_integer()}) :: term()
+  def evaluate_server_invariants(check_fun, function_info)
       when is_function(check_fun, 0) and is_tuple(function_info) do
     evaluate_assertions(check_fun, &Map.put(&1, :function, function_info))
   end

@@ -137,10 +137,10 @@ defmodule Bond.ServerTest do
                catch_throw(Counter.__bond_state_invariant_check__(%{count: -1}))
     end
 
-    test "via evaluate_state_invariants/2, raises StateInvariantError attributed to the callback" do
+    test "via evaluate_server_invariants/2, raises StateInvariantError attributed to the callback" do
       error =
         assert_raise Bond.StateInvariantError, fn ->
-          Bond.Runtime.Eval.evaluate_state_invariants(
+          Bond.Runtime.Eval.evaluate_server_invariants(
             fn -> Counter.__bond_state_invariant_check__(%{count: -1}) end,
             {:handle_call, 3}
           )
