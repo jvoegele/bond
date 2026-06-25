@@ -314,6 +314,32 @@ See the [`@invariant`](Bond.html#module-invariant-for-struct-modules)
 section of the moduledoc for head-shape detection, multi-struct
 heads, and per-module configuration.
 
+## Invariants for process state
+
+A struct `@invariant` constrains a *value*. To constrain the state of a running
+`GenServer` — checked after every callback, catching inline state mutations a
+struct invariant would miss — add `use Bond.Server` and declare a
+`@state_invariant`:
+
+```elixir
+defmodule Counter do
+  use GenServer
+  use Bond.Server
+
+  @state_invariant non_negative: state.count >= 0
+
+  @impl true
+  def init(n), do: {:ok, %{count: n}}
+
+  @impl true
+  def handle_call(:inc, _from, state), do: {:reply, :ok, %{state | count: state.count + 1}}
+end
+```
+
+Because the checks run inside the serialized server process, they are race-free.
+See `Bond.Server` and the
+[Contracts in a Concurrent World](contracts-and-concurrency.html) guide.
+
 ## Disabling contracts in production
 
 Bond's four application-config keys — `:preconditions`, `:postconditions`,

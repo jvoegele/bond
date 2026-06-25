@@ -342,6 +342,7 @@ defmodule Bond.Compiler do
   @doc false
   defmacro __before_compile__(%Macro.Env{} = env) do
     :ok = FSM.module_defined(fsm(env))
+    warn_orphan_state_invariants(env)
 
     config =
       Module.get_attribute(env.module, :__bond_contract_config__) ||
@@ -983,6 +984,48 @@ defmodule Bond.Compiler do
       other ->
         other
     end)
+  end
+
+  @doc false
+  # Registers a `@state_invariant` (#34, `Bond.Server`). Unlike `@invariant`, state invariants
+  # are stored in the `:bond_state_invariants` module attribute rather than the FSM: they are a
+  # flat, module-level list with no per-function association or multi-clause grouping (the FSM's
+  # reason for being), and they are consumed by `Bond.Server.__before_compile__`, not the
+  # AnnotatedFunction merge. The implicit binding is `state` (normalized like `subject` so refs
+  # resolve to the `state` var that `Bond.Server` rebinds at each check site). Stored newest-last
+  # via get-append-put, because `Module.put_attribute` at macro-expansion time does not accumulate.
+  def register_state_invariant(expression, label, env, meta) do
+    Assertion.validate_expression!(expression, env)
+    normalized = normalize_state_context(expression)
+    assertion = Assertion.new(:state_invariant, label, normalized, env, meta)
+    existing = Module.get_attribute(env.module, :bond_state_invariants) || []
+    Module.put_attribute(env.module, :bond_state_invariants, existing ++ [assertion])
+    :ok
+  end
+
+  defp normalize_state_context(expression) do
+    Macro.prewalk(expression, fn
+      {:state, meta, ctx} when is_atom(ctx) ->
+        {:state, meta, nil}
+
+      other ->
+        other
+    end)
+  end
+
+  # `@state_invariant` is only consumed by `Bond.Server` (which sets `@__bond_server__`). In a
+  # plain `use Bond` module it is captured but never enforced — a silently-ignored contract. Warn
+  # so the missing `use Bond.Server` is loud rather than mysterious, pointing at the declaration.
+  defp warn_orphan_state_invariants(env) do
+    with [assertion | _] <- Module.get_attribute(env.module, :bond_state_invariants) || [],
+         false <- Module.get_attribute(env.module, :__bond_server__) == true do
+      IO.warn(
+        "@state_invariant was declared in #{inspect(env.module)}, which does not `use Bond.Server`. " <>
+          "State invariants are enforced only in a Bond.Server module; this declaration is ignored. " <>
+          "Add `use Bond.Server` (after `use GenServer`).",
+        assertion.definition_env
+      )
+    end
   end
 
   @doc false

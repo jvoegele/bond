@@ -1,0 +1,76 @@
+flowchart TD
+%% Mikado graph for stateful process contracts (GitHub #34) — `Bond.Server`.
+%%
+%% A GenServer module does `use GenServer` + `use Bond.Server` and declares
+%% module-wide, state-centric contracts that Bond checks around the server's
+%% state-transition callbacks:
+%%   @state_invariant      <label>: <expr over `state`>
+%%       — checked after every transition callback returns (and after init/1
+%%         and code_change/3 establish a new state).
+%%   @transition_invariant <label>: <expr over `old_state` and `new_state`>
+%%       — checked across every transition that has a comparable prior state
+%%         (every callback EXCEPT init/1 and code_change/3).
+%%
+%% Mechanism reuses Bond wholesale: the @on_definition compiler hook records the
+%% user's callbacks (NOT def-shadowing; and overridable? must NOT gate capture —
+%% a user's handle_call fires overridable?=true because it overrides GenServer's
+%% default), @before_compile emits a defoverridable + wrapper-def + super around
+%% each, the wrapper pulls the new state out of the return tuple via
+%% Bond.Server.Runtime.extract_state/2, and the existing check_assertion / Eval
+%% gate / failure-raise machinery does the rest. Gated under the :invariants kind
+%% (zero new Bond.Config surface). Spike: spikes/server_defoverridable/ (GO).
+%%
+%% Shipped as TWO minors: Slice 1 = @state_invariant (safety net, quiet release);
+%% Slice 2 = @transition_invariant (marquee, forum-announced). Each numbered node
+%% is a commit-sized step; arrows point from a goal to its prerequisites; leaves
+%% (green) are safe to start. Depth-first: pick a leaf, finish it, commit, repeat.
+%% Every commit compiles and the suite stays green.
+
+    G(["**Goal**<br/>Stateful process contracts (#34)"])
+
+    %% ---- Slice 1: @state_invariant (first minor) ----
+    GS1(["**Slice 1**<br/>@state_invariant on every transition callback"])
+    G --> GS1
+
+    GS1 --> S7[S7. Docs: concurrency-guide rewrite + public-api StateInvariantError + getting-started + CHANGELOG]
+    S7 --> S6[S6. Tests: inline-mutation catch, init/code_change creation-check, all callbacks, :invariants gating, use-order]
+    S6 --> S5[S5. before_compile: defoverridable + wrapper-def + super per user callback, extract_state, run state-invariant, gate :invariants]
+    S5 --> S4[S4. Bond.Server.Runtime.extract_state/2 — per-callback return-shape matcher]
+    S5 --> S3[S3. Lifted __bond_state_invariants__/1 defp reusing check_assertion, kind :state_invariant]
+    S5 --> SE[SE. Bond.StateInvariantError struct + eval @assertion_errors entry]
+    S3 --> S2[S2. Capture @state_invariant AST via @-override clause + __bond_state_invariants__ reflection]
+    S2 --> S1[S1. Bond.Server skeleton: @on_definition + @before_compile, record user callbacks, __bond_server_callbacks__ reflection]
+    S4 --> M
+    S1 --> M[M. Mikado graph]
+    SE --> M
+
+    %% ---- Slice 2: @transition_invariant (second minor, marquee) ----
+    GS2(["**Slice 2**<br/>@transition_invariant across every transition"])
+    G --> GS2
+
+    GS2 --> H5[H5. Docs: temporal-constraints section + public-api TransitionInvariantError + CHANGELOG + forum announcement]
+    H5 --> H4[H4. Tests: monotonic catch on inline cast, init/code_change skip, old vs new threading]
+    H4 --> H3[H3. Wrap: bind old=incoming state, call __bond_transition_invariants__ old,new; init/code_change omit]
+    H3 --> H2[H2. Lifted __bond_transition_invariants__/2 defp, old_state/new_state bindings]
+    H2 --> H1[H1. Capture @transition_invariant AST via @-override clause + reflection fn]
+    H3 --> HE[HE. Bond.TransitionInvariantError struct + eval @assertion_errors entry]
+    H1 --> S2
+    H3 --> S5
+
+    %% ---- v2 / stretch ----
+    GV(["**v2 / stretch**"])
+    G --> GV
+    GV --> V1[V1. Bond.PropertyTest server sequence runner — start server, drive calls/casts, wrapped callbacks are the oracle]
+    V1 --> GS2
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+    class M,SE,S1,S4 leaf;
+
+    style G fill:#90EE90
+    style GS1 fill:#cfe8cf
+    style GS2 fill:#cfe8cf
+    style GV fill:#cfe8cf
+    style M fill:#90EE90
+    style SE fill:#90EE90
+    style S1 fill:#90EE90
+    style S4 fill:#90EE90

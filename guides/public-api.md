@@ -13,12 +13,14 @@ The full set of modules in published API docs is the source-of-truth for
   * `Bond`
   * `Bond.Behaviour`
   * `Bond.Protocol`
+  * `Bond.Server`
   * `Bond.Predicates`
   * `Bond.Test`
   * `Bond.PropertyTest`
   * `Bond.PreconditionError`
   * `Bond.PostconditionError`
   * `Bond.InvariantError`
+  * `Bond.StateInvariantError`
   * `Bond.CheckError`
 
 Everything under `Bond.Compiler.*` and `Bond.Runtime.*` is internal (marked
@@ -29,7 +31,9 @@ and may break on a patch release.
 ## Module-attribute syntax (in `use Bond` scope)
 
 By default Bond overrides `Kernel.@/1` while `use Bond` is in scope to
-intercept four attribute names; everything else forwards through to
+intercept four attribute names (plus `@state_invariant`, which only a
+`Bond.Server` module consumes — see "Stateful process contracts" below);
+everything else forwards through to
 `Kernel.@/1` unchanged (verified by `test/bond/attr_compat_test.exs`).
 (Under `at_annotations: false` the override is disabled and the qualified
 `Bond.pre`/`Bond.post`/`Bond.invariant` calls are used instead — see
@@ -180,6 +184,27 @@ The *fact* that the documented compile-time rules fire (e.g. a plain
 inherited precondition; a contract may reference only declared names) is part of
 the public surface; the exact wording of those diagnostics is not.
 
+## Stateful process contracts
+
+`use Bond.Server`, alongside `use GenServer` (and after it), enables module-wide
+invariants on a server's process state:
+
+  * **`@state_invariant expr`** / **`@state_invariant label: expr, ...`** — same
+    bare-or-keyword-list shape as `@invariant`. The implicit binding is `state`,
+    bound to the new state the callback produced. Checked after every
+    state-transition callback returns a new state: `init/1`, `handle_call/3`,
+    `handle_cast/2`, `handle_info/2`, `handle_continue/2`, `code_change/3`. A
+    violation raises `Bond.StateInvariantError`, whose `:function` field is the
+    callback the invariant was checked after.
+
+State invariants are gated under the `:invariants` configuration kind: they
+honour the precondition ≤ postcondition ≤ invariant chain, respond to
+`Bond.Config.enable/1`/`disable/1` at runtime, and are compiled out entirely
+under `invariants: :purge`. `use Bond.Server` accepts the same options as
+`use Bond`. Declaring `@state_invariant` in a module that does not
+`use Bond.Server` emits a compile warning; the bare-form qualified-call
+equivalent for `at_annotations: false` is not part of this version.
+
 ## Reusable named contracts
 
 A bundle of `@pre`/`@post` declared once and applied to many functions. The full
@@ -290,6 +315,8 @@ shape (defined by the internal `Bond.AssertionError` `__using__` macro):
   * `Bond.PreconditionError`
   * `Bond.PostconditionError`
   * `Bond.InvariantError`
+  * `Bond.StateInvariantError` (raised by `Bond.Server`; see "Stateful process
+    contracts")
   * `Bond.CheckError`
 
 Public fields on every error struct:

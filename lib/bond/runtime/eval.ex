@@ -57,7 +57,8 @@ defmodule Bond.Runtime.Eval do
     precondition: Bond.PreconditionError,
     postcondition: Bond.PostconditionError,
     check: Bond.CheckError,
-    invariant: Bond.InvariantError
+    invariant: Bond.InvariantError,
+    state_invariant: Bond.StateInvariantError
   }
 
   # Single persistent_term key holding the runtime modes map. Atom key (not a tuple) so the
@@ -390,6 +391,23 @@ defmodule Bond.Runtime.Eval do
   @spec evaluate_invariants(assertion_fun()) :: term()
   def evaluate_invariants(invariants_fun) when is_function(invariants_fun, 0) do
     evaluate_assertions(invariants_fun)
+  end
+
+  @doc """
+  Evaluates a `Bond.Server` module's `@state_invariant` check around a state-transition callback
+  (#34), attributing any failure to that callback.
+
+  Mirrors `evaluate_invariants/1` (the kind, `:state_invariant`, comes from the assertion and
+  maps to `Bond.StateInvariantError`), except the thrown `assertion_info` is enriched with
+  `:function => function_info` on the failure path. State invariants are module-level — shared
+  across every callback — so the callback they were checked after is supplied here rather than
+  baked into the assertion, and the enrichment runs only when an invariant actually fails, so the
+  passing path stays allocation-free.
+  """
+  @spec evaluate_state_invariants(assertion_fun(), {atom(), non_neg_integer()}) :: term()
+  def evaluate_state_invariants(check_fun, function_info)
+      when is_function(check_fun, 0) and is_tuple(function_info) do
+    evaluate_assertions(check_fun, &Map.put(&1, :function, function_info))
   end
 
   @doc """

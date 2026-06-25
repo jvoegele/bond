@@ -160,3 +160,64 @@ stateful wrapper — gives the strongest guarantees Bond can provide for code
 that has both pure and concurrent concerns. Structure your modules this way
 when you can; the strong contracts on the State struct, plus the weakened
 postconditions on the Agent wrapper, together describe what's actually true.
+
+## Process state invariants with `Bond.Server`
+
+The race that opened this guide comes from *sharing*: an `Agent`'s state is read
+and written by many processes, so an `old` snapshot and the later read can be
+torn apart by an interleaving update. A `GenServer` is the opposite case. It
+processes one message at a time, and its state is touched only from inside the
+server process. There is no interleaving to defend against — which makes it the
+natural home for the strongest stateful contracts Bond offers.
+
+`Bond.Server` adds a module-wide `@state_invariant` that Bond checks after every
+state-transition callback. Because the check runs *inside the server process, on
+its own sequentially-processed state*, it is race-free by construction:
+
+```elixir
+defmodule Counter do
+  use GenServer
+  use Bond.Server
+
+  @state_invariant non_negative: state.count >= 0
+
+  @impl true
+  def init(n), do: {:ok, %{count: n}}
+
+  @impl true
+  def handle_call(:inc, _from, state), do: {:reply, :ok, %{state | count: state.count + 1}}
+
+  @impl true
+  def handle_cast(:dec, state), do: {:noreply, %{state | count: state.count - 1}}
+end
+```
+
+The `non_negative` invariant is checked after `init/1` establishes the initial
+state and after each `handle_call`/`handle_cast`/`handle_info`/`handle_continue`/
+`code_change` returns a new one. A `:dec` that drives `count` below zero raises
+`Bond.StateInvariantError` from inside the server, naming the callback it failed
+after.
+
+### How this relates to the State-struct pattern
+
+`@state_invariant` is *complementary* to the pure-State-struct-plus-`@invariant`
+pattern above, not a replacement for it. Two differences are worth keeping in
+mind:
+
+  * **It catches inline mutation.** A struct `@invariant` only fires when the
+    struct flows through a public function *of its own module*. A `GenServer`
+    callback that mutates state inline — `{:noreply, %{state | count: ...}}`,
+    the common style — never routes through such a function, so a struct
+    invariant would not see it. `@state_invariant` wraps the callbacks
+    themselves, so it does.
+
+  * **It does not replace the pure core.** If your state is a struct with its
+    own `@invariant`s and pure transition functions, keep them: those contracts
+    are checked wherever the struct is used, including in tests and outside the
+    server. Use `@state_invariant` for properties of the *server's* state as a
+    whole, and as a safety net over callbacks that change state directly.
+
+Like every Bond contract, `@state_invariant` honours configuration: it shares the
+`:invariants` kind, so `Bond.Config.disable(:invariants)` turns it off at runtime
+and `use Bond.Server, invariants: :purge` compiles it out of a production build.
+See `Bond.Server` for the full reference.
