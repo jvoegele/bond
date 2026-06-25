@@ -206,4 +206,109 @@ defmodule Bond.ServerTest do
       assert_receive {:EXIT, ^pid, {%Bond.StateInvariantError{function: {:handle_info, 2}}, _}}
     end
   end
+
+  # A server defining every state-transition callback, each able to set the state directly, so the
+  # wrapper for each can be exercised by direct invocation (the wrapper is the public def, so
+  # calling it runs super + the state-invariant check synchronously — no live process needed).
+  defmodule Probe do
+    use GenServer
+    use Bond.Server
+
+    @state_invariant non_negative: state.n >= 0
+
+    @impl true
+    def init(n), do: {:ok, %{n: n}}
+    @impl true
+    def handle_call({:set, n}, _from, s), do: {:reply, :ok, %{s | n: n}}
+    @impl true
+    def handle_cast({:set, n}, s), do: {:noreply, %{s | n: n}}
+    @impl true
+    def handle_info({:set, n}, s), do: {:noreply, %{s | n: n}}
+    @impl true
+    def handle_continue({:set, n}, s), do: {:noreply, %{s | n: n}}
+    @impl true
+    def code_change(_old_vsn, s, {:set, n}), do: {:ok, %{s | n: n}}
+  end
+
+  describe "every state-transition callback is wrapped (S6)" do
+    test "valid transitions pass through unchanged" do
+      assert Probe.init(0) == {:ok, %{n: 0}}
+      assert Probe.handle_call({:set, 5}, :from, %{n: 0}) == {:reply, :ok, %{n: 5}}
+      assert Probe.handle_cast({:set, 5}, %{n: 0}) == {:noreply, %{n: 5}}
+      assert Probe.handle_info({:set, 5}, %{n: 0}) == {:noreply, %{n: 5}}
+      assert Probe.handle_continue({:set, 5}, %{n: 0}) == {:noreply, %{n: 5}}
+      assert Probe.code_change(:v0, %{n: 0}, {:set, 5}) == {:ok, %{n: 5}}
+    end
+
+    test "a violating result raises StateInvariantError attributed to that callback" do
+      for {invoke, fa} <- [
+            {fn -> Probe.init(-1) end, {:init, 1}},
+            {fn -> Probe.handle_call({:set, -1}, :from, %{n: 0}) end, {:handle_call, 3}},
+            {fn -> Probe.handle_cast({:set, -1}, %{n: 0}) end, {:handle_cast, 2}},
+            {fn -> Probe.handle_info({:set, -1}, %{n: 0}) end, {:handle_info, 2}},
+            {fn -> Probe.handle_continue({:set, -1}, %{n: 0}) end, {:handle_continue, 2}},
+            {fn -> Probe.code_change(:v0, %{n: 0}, {:set, -1}) end, {:code_change, 3}}
+          ] do
+        error = assert_raise Bond.StateInvariantError, invoke
+        assert error.function == fa
+        assert error.label == :non_negative
+      end
+    end
+  end
+
+  defmodule Ranged do
+    use GenServer
+    use Bond.Server
+
+    @state_invariant lower: state.n >= 0
+    @state_invariant upper: state.n <= 100
+
+    @impl true
+    def init(n), do: {:ok, %{n: n}}
+    @impl true
+    def handle_cast({:set, n}, s), do: {:noreply, %{s | n: n}}
+  end
+
+  describe "multiple state invariants (S6)" do
+    test "all invariants are enforced; the violated one is reported" do
+      assert Ranged.handle_cast({:set, 50}, %{n: 0}) == {:noreply, %{n: 50}}
+
+      assert_raise Bond.StateInvariantError, ~r/label: :lower/, fn ->
+        Ranged.handle_cast({:set, -1}, %{n: 0})
+      end
+
+      assert_raise Bond.StateInvariantError, ~r/label: :upper/, fn ->
+        Ranged.handle_cast({:set, 101}, %{n: 0})
+      end
+    end
+  end
+
+  defmodule Purged do
+    use GenServer
+    use Bond.Server, invariants: :purge
+
+    @state_invariant non_negative: state.n >= 0
+
+    @impl true
+    def init(n), do: {:ok, %{n: n}}
+    @impl true
+    def handle_cast({:set, n}, s), do: {:noreply, %{s | n: n}}
+  end
+
+  describe "invariants: :purge compiles the checks out (S6)" do
+    test "no check defp is emitted" do
+      refute function_exported?(Purged, :__bond_state_invariant_check__, 1)
+    end
+
+    test "callbacks are not wrapped — a violating state passes through" do
+      assert Purged.handle_cast({:set, -1}, %{n: 0}) == {:noreply, %{n: -1}}
+      {:ok, pid} = GenServer.start_link(Purged, -5)
+      assert :sys.get_state(pid) == %{n: -5}
+      GenServer.stop(pid)
+    end
+
+    test "declarations are still captured for reflection" do
+      assert Purged.__bond_state_invariants__() == [{:non_negative, "state.n >= 0"}]
+    end
+  end
 end
