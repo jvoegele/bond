@@ -97,6 +97,43 @@ defmodule Bond.ServerTest do
     end
   end
 
+  describe "__bond_state_invariant_check__/1 (lifted check)" do
+    test "returns :ok when every state invariant holds" do
+      assert Counter.__bond_state_invariant_check__(%{count: 0}) == :ok
+      assert Counter.__bond_state_invariant_check__(%{count: 7}) == :ok
+      assert MultiInvariant.__bond_state_invariant_check__(%{count: 0, max: 10}) == :ok
+    end
+
+    test "throws an :assertion_failure when an invariant is violated" do
+      assert {:assertion_failure, %{kind: :state_invariant, label: :non_negative}} =
+               catch_throw(Counter.__bond_state_invariant_check__(%{count: -1}))
+    end
+
+    test "via evaluate_state_invariants/2, raises StateInvariantError attributed to the callback" do
+      error =
+        assert_raise Bond.StateInvariantError, fn ->
+          Bond.Runtime.Eval.evaluate_state_invariants(
+            fn -> Counter.__bond_state_invariant_check__(%{count: -1}) end,
+            {:handle_call, 3}
+          )
+        end
+
+      message = Exception.message(error)
+      assert message =~ "state invariant violated after Bond.ServerTest.Counter.handle_call/3"
+      assert message =~ "label: :non_negative"
+      assert message =~ "assertion: state.count >= 0"
+    end
+
+    test "checks multiple invariants and reports the first violated one" do
+      assert {:assertion_failure, %{label: :capped}} =
+               catch_throw(MultiInvariant.__bond_state_invariant_check__(%{count: 11, max: 10}))
+    end
+
+    test "is not emitted for a module with no state invariants" do
+      refute function_exported?(FullServer, :__bond_state_invariant_check__, 1)
+    end
+  end
+
   test "the skeleton leaves GenServer behaviour intact" do
     {:ok, pid} = GenServer.start_link(Counter, 0)
     assert GenServer.call(pid, :inc) == 1

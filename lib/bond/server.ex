@@ -98,7 +98,7 @@ defmodule Bond.Server do
     # State invariants are captured into `:bond_state_invariants` by
     # `Bond.Compiler.register_state_invariant/4` (via the `@state_invariant` override), newest-last
     # = declaration order. Expose the `{label, code}` pairs for reflection/testing; the full
-    # assertions drive the check codegen in a later step.
+    # assertions drive the check codegen below.
     state_invariants = Module.get_attribute(env.module, :bond_state_invariants) || []
     reflection = Enum.map(state_invariants, fn assertion -> {assertion.label, assertion.code} end)
 
@@ -108,6 +108,59 @@ defmodule Bond.Server do
 
       @doc false
       def __bond_state_invariants__, do: unquote(Macro.escape(reflection))
+
+      unquote_splicing(state_invariant_check_ast(state_invariants))
     end
+  end
+
+  # Builds the shared `__bond_state_invariant_check__(state)` that evaluates every
+  # `@state_invariant` against `state`, reusing `Bond.Runtime.Eval.check_assertion/3` exactly as
+  # struct `@invariant`s do. Returns `[]` (no defp emitted) when the module declares none.
+  #
+  # The assertion-failure `:function` is NOT baked in here — it is added on the failure path by
+  # `Bond.Runtime.Eval.evaluate_state_invariants/2` at the call site, because these module-level
+  # invariants are shared across every callback. So the passing path allocates nothing beyond the
+  # boolean checks, and the defp takes only `state` (keeping the failure binding to `[state: ...]`).
+  defp state_invariant_check_ast([]), do: []
+
+  defp state_invariant_check_ast(state_invariants) do
+    # The unhygienic `state` var the normalized assertion expressions resolve to (see
+    # `Bond.Compiler.register_state_invariant/4`, which strips the hygiene context off `state`).
+    state_var = Macro.var(:state, nil)
+
+    checks =
+      for assertion <- state_invariants do
+        env = assertion.definition_env
+
+        assertion_info = %{
+          assertion_id: assertion.id,
+          kind: :state_invariant,
+          label: assertion.label,
+          expression: assertion.code,
+          file: env.file,
+          line: env.line,
+          module: env.module
+        }
+
+        quote do
+          Bond.Runtime.Eval.check_assertion(
+            unquote(assertion.expression),
+            unquote(Macro.escape(assertion_info)),
+            fn -> binding() end
+          )
+        end
+      end
+
+    [
+      quote do
+        @doc false
+        def __bond_state_invariant_check__(unquote(state_var)) do
+          import Bond.Predicates
+
+          unquote_splicing(checks)
+          :ok
+        end
+      end
+    ]
   end
 end
