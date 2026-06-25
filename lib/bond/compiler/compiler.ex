@@ -971,15 +971,21 @@ defmodule Bond.Compiler do
     # `subject` variable rebound by `Bond.Compiler.Assertion.invariants_body/2`
     # (which uses `Macro.var(:subject, nil)`). Without this, references inherited from
     # the macro's expansion context would not resolve to the rebind.
-    normalized = normalize_subject_context(expression)
+    normalized = normalize_var_context(expression, [:subject])
     invariant = Assertion.new(:invariant, label, normalized, env, meta)
     FSM.invariant_def(fsm(env), invariant)
   end
 
-  defp normalize_subject_context(expression) do
+  # Strip the hygiene context off every reference to an implicit binding (`subject`, `state`,
+  # `old_state`/`new_state`) so they resolve to the unhygienic `Macro.var(name, nil)` the check
+  # codegen rebinds at the check site, rather than to whatever the macro's expansion context held.
+  defp normalize_var_context(expression, var_names) do
     Macro.prewalk(expression, fn
-      {:subject, meta, ctx} when is_atom(ctx) ->
-        {:subject, meta, nil}
+      # A variable node is `{name, meta, context}` with both `name` and `context` atoms (a call
+      # node's third element is its argument list). `var_names` is a runtime list, so the
+      # membership test goes in the body, not the guard.
+      {name, meta, ctx} when is_atom(name) and is_atom(ctx) ->
+        if name in var_names, do: {name, meta, nil}, else: {name, meta, ctx}
 
       other ->
         other
@@ -987,54 +993,51 @@ defmodule Bond.Compiler do
   end
 
   @doc false
-  # Registers a `@state_invariant` (#34, `Bond.Server`). Unlike `@invariant`, state invariants
-  # are stored in the `:bond_state_invariants` module attribute rather than the FSM: they are a
-  # flat, module-level list with no per-function association or multi-clause grouping (the FSM's
-  # reason for being), and they are consumed by `Bond.Server.__before_compile__`, not the
-  # AnnotatedFunction merge. The implicit binding is `state` (normalized like `subject` so refs
-  # resolve to the `state` var that `Bond.Server` rebinds at each check site). Stored newest-last
-  # via get-append-put, because `Module.put_attribute` at macro-expansion time does not accumulate.
+  # Registers a `@state_invariant` (#34, `Bond.Server`); implicit binding `state`.
   def register_state_invariant(expression, label, env, meta) do
-    Assertion.validate_expression!(expression, env)
-    normalized = normalize_state_context(expression)
-    assertion = Assertion.new(:state_invariant, label, normalized, env, meta)
-    existing = Module.get_attribute(env.module, :bond_state_invariants) || []
-    Module.put_attribute(env.module, :bond_state_invariants, existing ++ [assertion])
-    :ok
-  end
-
-  defp normalize_state_context(expression) do
-    Macro.prewalk(expression, fn
-      {:state, meta, ctx} when is_atom(ctx) ->
-        {:state, meta, nil}
-
-      other ->
-        other
-    end)
+    register_server_invariant(
+      :state_invariant,
+      :bond_state_invariants,
+      [:state],
+      expression,
+      label,
+      env,
+      meta
+    )
   end
 
   @doc false
-  # Registers a `@transition_invariant` (#34, `Bond.Server`). Like `register_state_invariant/4`,
-  # stored in the `:bond_transition_invariants` module attribute (flat, module-level, consumed by
-  # `Bond.Server.__before_compile__`). The implicit bindings are `old_state` and `new_state`,
-  # normalized so references resolve to the vars `Bond.Server` rebinds at each transition site.
+  # Registers a `@transition_invariant` (#34, `Bond.Server`); implicit bindings `old_state`/`new_state`.
   def register_transition_invariant(expression, label, env, meta) do
-    Assertion.validate_expression!(expression, env)
-    normalized = normalize_transition_context(expression)
-    assertion = Assertion.new(:transition_invariant, label, normalized, env, meta)
-    existing = Module.get_attribute(env.module, :bond_transition_invariants) || []
-    Module.put_attribute(env.module, :bond_transition_invariants, existing ++ [assertion])
-    :ok
+    register_server_invariant(
+      :transition_invariant,
+      :bond_transition_invariants,
+      [:old_state, :new_state],
+      expression,
+      label,
+      env,
+      meta
+    )
   end
 
-  defp normalize_transition_context(expression) do
-    Macro.prewalk(expression, fn
-      {name, meta, ctx} when name in [:old_state, :new_state] and is_atom(ctx) ->
-        {name, meta, nil}
+  # Shared body for the `Bond.Server` invariant kinds. Unlike `@invariant`, server invariants are
+  # stored in a module attribute (`attr`) rather than the FSM: they are a flat, module-level list
+  # with no per-function association or multi-clause grouping (the FSM's reason for being), and are
+  # consumed by `Bond.Compiler.Server.__before_compile__`, not the AnnotatedFunction merge. Stored
+  # newest-last via get-append-put, because `Module.put_attribute` at macro-expansion time does not
+  # accumulate. `var_names` are the implicit bindings to normalize (see `normalize_var_context/2`).
+  defp register_server_invariant(kind, attr, var_names, expression, label, env, meta) do
+    Assertion.validate_expression!(expression, env)
+    normalized = normalize_var_context(expression, var_names)
+    assertion = Assertion.new(kind, label, normalized, env, meta)
 
-      other ->
-        other
-    end)
+    Module.put_attribute(
+      env.module,
+      attr,
+      (Module.get_attribute(env.module, attr) || []) ++ [assertion]
+    )
+
+    :ok
   end
 
   # `@state_invariant` / `@transition_invariant` are only consumed by `Bond.Server` (which sets
