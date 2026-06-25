@@ -319,14 +319,16 @@ heads, and per-module configuration.
 A struct `@invariant` constrains a *value*. To constrain the state of a running
 `GenServer` — checked after every callback, catching inline state mutations a
 struct invariant would miss — add `use Bond.Server` and declare a
-`@state_invariant`:
+`@state_invariant`. A `@transition_invariant` goes further, relating the prior
+state (`old_state`) to the next (`new_state`) across each transition:
 
 ```elixir
 defmodule Counter do
   use GenServer
   use Bond.Server
 
-  @state_invariant non_negative: state.count >= 0
+  @state_invariant      non_negative: state.count >= 0
+  @transition_invariant monotonic:    new_state.count >= old_state.count
 
   @impl true
   def init(n), do: {:ok, %{count: n}}
@@ -336,9 +338,9 @@ defmodule Counter do
 end
 ```
 
-Because the checks run inside the serialized server process, they are race-free.
-See `Bond.Server` and the
-[Contracts in a Concurrent World](contracts-and-concurrency.html) guide.
+Because the checks run inside the serialized server process, they are race-free —
+even a temporal property like "the counter never decreases". See `Bond.Server`
+and the [Contracts in a Concurrent World](contracts-and-concurrency.html) guide.
 
 ## Disabling contracts in production
 
