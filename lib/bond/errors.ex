@@ -249,3 +249,26 @@ defmodule Bond.StateInvariantError do
     )
   end
 end
+
+defmodule Bond.TransitionInvariantError do
+  @moduledoc """
+  Exception raised when a `@transition_invariant` declared with `Bond.Server` is violated.
+
+  A transition invariant relates the prior state (`old_state`) and the next state (`new_state`)
+  across a state transition, and is checked across every transition callback — `handle_call/3`,
+  `handle_cast/2`, `handle_info/2`, and `handle_continue/2`. (`init/1` and `code_change/3` are
+  treated as re-creations: they establish a new state but have no comparable prior state, so they
+  are checked by `@state_invariant` only.) The error's `:function` field identifies the callback
+  the transition occurred in; `:module` is the server module.
+  """
+
+  use Bond.AssertionError
+
+  @impl Exception
+  def message(%{module: module, function: {function, arity}} = error) do
+    Bond.AssertionError.message(
+      error,
+      "transition invariant violated across #{inspect(module)}.#{function}/#{arity}"
+    )
+  end
+end
