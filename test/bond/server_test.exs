@@ -137,9 +137,9 @@ defmodule Bond.ServerTest do
                catch_throw(Counter.__bond_state_invariant_check__(%{count: -1}))
     end
 
-    test "via evaluate_server_invariants/2, raises StateInvariantError attributed to the callback" do
+    test "via evaluate_server_invariants/2, raises a state-invariant violation attributed to the callback" do
       error =
-        assert_raise Bond.StateInvariantError, fn ->
+        assert_raise Bond.InvariantError, fn ->
           Bond.Runtime.Eval.evaluate_server_invariants(
             fn -> Counter.__bond_state_invariant_check__(%{count: -1}) end,
             {:handle_call, 3}
@@ -202,14 +202,14 @@ defmodule Bond.ServerTest do
     test "init/1 establishes the invariant (creation check)" do
       Process.flag(:trap_exit, true)
 
-      assert {:error, {%Bond.StateInvariantError{} = err, _stack}} =
+      assert {:error, {%Bond.InvariantError{} = err, _stack}} =
                GenServer.start_link(Bank, -5)
 
       assert Exception.message(err) =~ "state invariant violated after"
       assert Exception.message(err) =~ "init/1"
     end
 
-    test "handle_call violation raises StateInvariantError attributed to the callback" do
+    test "handle_call violation raises a state-invariant violation attributed to the callback" do
       {:ok, pid} = GenServer.start_link(Bank, 100)
       Process.flag(:trap_exit, true)
       Process.link(pid)
@@ -218,7 +218,7 @@ defmodule Bond.ServerTest do
       # server_reason is {exception, stacktrace}.
       {{err, _stacktrace}, _call_info} = catch_exit(GenServer.call(pid, {:withdraw, 250}))
 
-      assert %Bond.StateInvariantError{
+      assert %Bond.InvariantError{
                label: :non_negative_balance,
                function: {:handle_call, 3},
                binding: [state: %{balance: -150}]
@@ -231,7 +231,7 @@ defmodule Bond.ServerTest do
       Process.link(pid)
 
       send(pid, :corrupt)
-      assert_receive {:EXIT, ^pid, {%Bond.StateInvariantError{function: {:handle_info, 2}}, _}}
+      assert_receive {:EXIT, ^pid, {%Bond.InvariantError{function: {:handle_info, 2}}, _}}
     end
   end
 
@@ -268,7 +268,7 @@ defmodule Bond.ServerTest do
       assert Probe.code_change(:v0, %{n: 0}, {:set, 5}) == {:ok, %{n: 5}}
     end
 
-    test "a violating result raises StateInvariantError attributed to that callback" do
+    test "a violating result raises a state-invariant violation attributed to that callback" do
       for {invoke, fa} <- [
             {fn -> Probe.init(-1) end, {:init, 1}},
             {fn -> Probe.handle_call({:set, -1}, :from, %{n: 0}) end, {:handle_call, 3}},
@@ -277,7 +277,7 @@ defmodule Bond.ServerTest do
             {fn -> Probe.handle_continue({:set, -1}, %{n: 0}) end, {:handle_continue, 2}},
             {fn -> Probe.code_change(:v0, %{n: 0}, {:set, -1}) end, {:code_change, 3}}
           ] do
-        error = assert_raise Bond.StateInvariantError, invoke
+        error = assert_raise Bond.InvariantError, invoke
         assert error.function == fa
         assert error.label == :non_negative
       end
@@ -301,11 +301,11 @@ defmodule Bond.ServerTest do
     test "all invariants are enforced; the violated one is reported" do
       assert Ranged.handle_cast({:set, 50}, %{n: 0}) == {:noreply, %{n: 50}}
 
-      assert_raise Bond.StateInvariantError, ~r/label: :lower/, fn ->
+      assert_raise Bond.InvariantError, ~r/label: :lower/, fn ->
         Ranged.handle_cast({:set, -1}, %{n: 0})
       end
 
-      assert_raise Bond.StateInvariantError, ~r/label: :upper/, fn ->
+      assert_raise Bond.InvariantError, ~r/label: :upper/, fn ->
         Ranged.handle_cast({:set, 101}, %{n: 0})
       end
     end
@@ -412,17 +412,18 @@ defmodule Bond.ServerTest do
       assert TransOnly.handle_cast({:set, 5}, %{n: 3}) == {:noreply, %{n: 5}}
 
       error =
-        assert_raise Bond.TransitionInvariantError, fn ->
+        assert_raise Bond.InvariantError, fn ->
           TransOnly.handle_cast({:set, 2}, %{n: 3})
         end
 
+      assert error.kind == :transition_invariant
       assert error.function == {:handle_cast, 2}
       assert error.label == :monotonic
       assert error.binding == [new_state: %{n: 2}, old_state: %{n: 3}]
     end
 
     test "old_state is the incoming state across each transition callback" do
-      assert_raise Bond.TransitionInvariantError, ~r/handle_call\/3/, fn ->
+      assert_raise Bond.InvariantError, ~r/handle_call\/3/, fn ->
         TransOnly.handle_call({:set, 1}, :from, %{n: 9})
       end
     end
@@ -437,16 +438,22 @@ defmodule Bond.ServerTest do
       assert Both.handle_cast({:set, 5}, %{n: 3}) == {:noreply, %{n: 5}}
 
       # Below zero: the state invariant fails before the transition invariant is considered.
-      assert_raise Bond.StateInvariantError, fn -> Both.handle_cast({:set, -1}, %{n: 3}) end
+      state_error =
+        assert_raise Bond.InvariantError, fn -> Both.handle_cast({:set, -1}, %{n: 3}) end
+
+      assert state_error.kind == :state_invariant
 
       # Non-negative but decreasing: state passes, transition fails.
-      assert_raise Bond.TransitionInvariantError, fn -> Both.handle_cast({:set, 2}, %{n: 3}) end
+      transition_error =
+        assert_raise Bond.InvariantError, fn -> Both.handle_cast({:set, 2}, %{n: 3}) end
+
+      assert transition_error.kind == :transition_invariant
     end
 
     test "init/1 still enforces @state_invariant in a combined server" do
       Process.flag(:trap_exit, true)
 
-      assert {:error, {%Bond.StateInvariantError{function: {:init, 1}}, _}} =
+      assert {:error, {%Bond.InvariantError{kind: :state_invariant, function: {:init, 1}}, _}} =
                GenServer.start_link(Both, -1)
     end
 
@@ -486,7 +493,7 @@ defmodule Bond.ServerTest do
             {fn -> AllTransitions.handle_continue({:set, 0}, %{n: 5}) end, {:handle_continue, 2}}
           ] do
         assert AllTransitions.handle_cast({:set, 6}, %{n: 5}) == {:noreply, %{n: 6}}
-        error = assert_raise Bond.TransitionInvariantError, invoke
+        error = assert_raise Bond.InvariantError, invoke
         assert error.function == fa
         assert error.label == :monotonic
       end
@@ -495,7 +502,7 @@ defmodule Bond.ServerTest do
     test "all transition invariants are enforced; the violated one is reported" do
       # Monotonic holds (10 >= 5) but step_max_1 does not (10 - 5 > 1).
       error =
-        assert_raise Bond.TransitionInvariantError, fn ->
+        assert_raise Bond.InvariantError, fn ->
           AllTransitions.handle_cast({:set, 10}, %{n: 5})
         end
 

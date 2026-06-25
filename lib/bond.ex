@@ -31,7 +31,13 @@ defmodule Bond do
   require Bond.Compiler.AnnotatedFunction
 
   @typedoc false
-  @type assertion_kind :: :precondition | :postcondition | :check | :invariant
+  @type assertion_kind ::
+          :precondition
+          | :postcondition
+          | :check
+          | :invariant
+          | :state_invariant
+          | :transition_invariant
 
   @typedoc """
   Type to represent a label for an assertion, which must be a compile-time atom or string.

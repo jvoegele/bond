@@ -5,6 +5,7 @@ defmodule Bond.AssertionError do
     quote generated: true do
       defexception [
         :label,
+        :kind,
         :expression,
         :file,
         :line,
@@ -21,6 +22,11 @@ defmodule Bond.AssertionError do
       @typedoc """
       The `#{inspect(__MODULE__)}` exception type.
 
+      `:kind` is the assertion kind (`:precondition`, `:postcondition`, `:invariant`,
+      `:state_invariant`, `:transition_invariant`, or `:check`). For `Bond.InvariantError` it
+      distinguishes a struct `@invariant` from a `Bond.Server` `@state_invariant` /
+      `@transition_invariant`; for the others it is redundant with the struct type.
+
       `:source_behaviour` is the behaviour module an inherited contract came from (see
       `Bond.Behaviour`), or `nil` for a contract declared directly on the function.
 
@@ -36,6 +42,7 @@ defmodule Bond.AssertionError do
       """
       @type t :: %__MODULE__{
               label: Bond.assertion_label(),
+              kind: Bond.assertion_kind(),
               expression: Bond.assertion_expression(),
               file: Path.t(),
               line: integer(),
@@ -62,6 +69,7 @@ defmodule Bond.AssertionError do
 
         %__MODULE__{
           label: assertion.label,
+          kind: assertion.kind,
           expression: assertion.code,
           file: assertion_env.file,
           line: assertion_env.line,
@@ -211,64 +219,26 @@ end
 
 defmodule Bond.InvariantError do
   @moduledoc """
-  Exception raised when an `@invariant` for a struct module is violated.
+  Exception raised when an invariant is violated.
 
-  Invariants are checked when a public function in the struct's defining module receives or
-  returns a value of the struct. The error's `:function` field identifies the function the
-  invariant was checked around; `:module` is always the struct's module.
+  Covers all three invariant flavours, distinguished by the `:kind` field:
+
+    * a struct `@invariant` (`:kind` `:invariant`) — checked when a public function in the struct's
+      defining module receives or returns a value of the struct (`:function` is that function);
+    * a `Bond.Server` `@state_invariant` (`:kind` `:state_invariant`) — checked after every
+      state-transition callback returns a new state (`:function` is that callback);
+    * a `Bond.Server` `@transition_invariant` (`:kind` `:transition_invariant`) — checked across
+      every transition callback, relating `old_state` to `new_state` (`:function` is that callback).
   """
 
   use Bond.AssertionError
 
   @impl Exception
-  def message(%{module: module, function: {function, arity}} = error) do
-    Bond.AssertionError.message(
-      error,
-      "invariant violated around #{inspect(module)}.#{function}/#{arity}"
-    )
+  def message(%{kind: kind, module: module, function: {function, arity}} = error) do
+    Bond.AssertionError.message(error, headline(kind, "#{inspect(module)}.#{function}/#{arity}"))
   end
-end
 
-defmodule Bond.StateInvariantError do
-  @moduledoc """
-  Exception raised when a `@state_invariant` declared with `Bond.Server` is violated.
-
-  A state invariant constrains the state of a `Bond.Server` process and is checked after every
-  state-transition callback returns a new state — `init/1`, `handle_call/3`, `handle_cast/2`,
-  `handle_info/2`, `handle_continue/2`, and `code_change/3`. The error's `:function` field
-  identifies the callback the invariant was checked after; `:module` is the server module.
-  """
-
-  use Bond.AssertionError
-
-  @impl Exception
-  def message(%{module: module, function: {function, arity}} = error) do
-    Bond.AssertionError.message(
-      error,
-      "state invariant violated after #{inspect(module)}.#{function}/#{arity}"
-    )
-  end
-end
-
-defmodule Bond.TransitionInvariantError do
-  @moduledoc """
-  Exception raised when a `@transition_invariant` declared with `Bond.Server` is violated.
-
-  A transition invariant relates the prior state (`old_state`) and the next state (`new_state`)
-  across a state transition, and is checked across every transition callback — `handle_call/3`,
-  `handle_cast/2`, `handle_info/2`, and `handle_continue/2`. (`init/1` and `code_change/3` are
-  treated as re-creations: they establish a new state but have no comparable prior state, so they
-  are checked by `@state_invariant` only.) The error's `:function` field identifies the callback
-  the transition occurred in; `:module` is the server module.
-  """
-
-  use Bond.AssertionError
-
-  @impl Exception
-  def message(%{module: module, function: {function, arity}} = error) do
-    Bond.AssertionError.message(
-      error,
-      "transition invariant violated across #{inspect(module)}.#{function}/#{arity}"
-    )
-  end
+  defp headline(:state_invariant, mfa), do: "state invariant violated after #{mfa}"
+  defp headline(:transition_invariant, mfa), do: "transition invariant violated across #{mfa}"
+  defp headline(_struct_invariant, mfa), do: "invariant violated around #{mfa}"
 end

@@ -24,7 +24,7 @@ defmodule Bond.ServerConfigTest do
 
   test "state invariants are enforced by default" do
     Process.flag(:trap_exit, true)
-    assert {:error, {%Bond.StateInvariantError{}, _}} = GenServer.start_link(Ledger, -1)
+    assert {:error, {%Bond.InvariantError{}, _}} = GenServer.start_link(Ledger, -1)
   end
 
   test "Bond.Config.disable(:invariants) skips state-invariant checks at runtime" do
@@ -45,7 +45,7 @@ defmodule Bond.ServerConfigTest do
     Bond.Config.enable(:invariants)
     Process.flag(:trap_exit, true)
 
-    assert {:error, {%Bond.StateInvariantError{}, _}} = GenServer.start_link(Ledger, -1)
+    assert {:error, {%Bond.InvariantError{}, _}} = GenServer.start_link(Ledger, -1)
   end
 
   defmodule Monotonic do
@@ -62,7 +62,7 @@ defmodule Bond.ServerConfigTest do
 
   test "transition invariants share the :invariants gate" do
     # Enforced by default.
-    assert_raise Bond.TransitionInvariantError, fn ->
+    assert_raise Bond.InvariantError, fn ->
       Monotonic.handle_cast({:set, 0}, %{n: 5})
     end
 

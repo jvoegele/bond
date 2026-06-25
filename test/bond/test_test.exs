@@ -114,17 +114,19 @@ defmodule Bond.TestTest do
     def handle_cast({:set, n}, s), do: {:noreply, %{s | n: n}}
   end
 
-  describe "assert_state_invariant_violation/2" do
-    test "passes when the expected state-invariant violation is raised" do
-      error = assert_state_invariant_violation(ServerFixture.handle_cast({:set, -1}, %{n: 0}))
+  describe "assert_invariant_violation/2 with Bond.Server state invariants" do
+    test "passes when a state-invariant violation is raised" do
+      error = assert_invariant_violation(ServerFixture.handle_cast({:set, -1}, %{n: 0}))
 
-      assert is_struct(error, Bond.StateInvariantError)
+      assert is_struct(error, Bond.InvariantError)
+      assert error.kind == :state_invariant
       assert error.label == :non_negative
       assert error.function == {:handle_cast, 2}
     end
 
-    test "passes when expected fields match exactly" do
-      assert_state_invariant_violation(ServerFixture.handle_cast({:set, -1}, %{n: 0}),
+    test "kind: filters to a state-invariant violation specifically" do
+      assert_invariant_violation(ServerFixture.handle_cast({:set, -1}, %{n: 0}),
+        kind: :state_invariant,
         label: :non_negative,
         expression: "state.n >= 0"
       )
@@ -132,24 +134,29 @@ defmodule Bond.TestTest do
 
     test "fails when no state-invariant violation occurs" do
       assert_raise ExUnit.AssertionError, fn ->
-        assert_state_invariant_violation(ServerFixture.handle_cast({:set, 1}, %{n: 0}))
+        assert_invariant_violation(ServerFixture.handle_cast({:set, 1}, %{n: 0}))
       end
     end
   end
 
-  describe "assert_transition_invariant_violation/2" do
-    test "passes when the expected transition-invariant violation is raised" do
+  describe "assert_invariant_violation/2 with Bond.Server transition invariants" do
+    test "kind: filters to a transition-invariant violation specifically" do
       # State invariant holds (2 >= 0); the transition invariant does not (2 < 5).
-      error = assert_transition_invariant_violation(ServerFixture.handle_cast({:set, 2}, %{n: 5}))
+      error =
+        assert_invariant_violation(ServerFixture.handle_cast({:set, 2}, %{n: 5}),
+          kind: :transition_invariant
+        )
 
-      assert is_struct(error, Bond.TransitionInvariantError)
       assert error.label == :monotonic
       assert error.binding == [new_state: %{n: 2}, old_state: %{n: 5}]
     end
 
-    test "fails when the transition holds" do
-      assert_raise ExUnit.AssertionError, fn ->
-        assert_transition_invariant_violation(ServerFixture.handle_cast({:set, 9}, %{n: 5}))
+    test "the kind: filter fails when the wrong kind is raised" do
+      assert_raise ExUnit.AssertionError, ~r/kind/, fn ->
+        # This raises a state-invariant violation, not a transition one.
+        assert_invariant_violation(ServerFixture.handle_cast({:set, -1}, %{n: 0}),
+          kind: :transition_invariant
+        )
       end
     end
   end

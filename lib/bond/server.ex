@@ -22,7 +22,8 @@ defmodule Bond.Server do
 
   A `@state_invariant` is checked after every state-transition callback returns a new state —
   `init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`, `handle_continue/2`, and
-  `code_change/3` — and a violation raises `Bond.StateInvariantError`. Unlike a struct
+  `code_change/3` — and a violation raises `Bond.InvariantError` (with `:kind`
+  `:state_invariant`). Unlike a struct
   `@invariant`, this fires even when a callback mutates state inline (the common case), because
   Bond wraps the callbacks themselves rather than relying on the state flowing through a
   contracted pure function.
@@ -42,7 +43,9 @@ defmodule Bond.Server do
       @transition_invariant monotonic: new_state.count >= old_state.count
 
   It is checked across every transition callback — `handle_call/3`, `handle_cast/2`,
-  `handle_info/2`, `handle_continue/2` — and a violation raises `Bond.TransitionInvariantError`.
+  `handle_info/2`, `handle_continue/2` — and a violation raises `Bond.InvariantError` (with
+  `:kind` `:transition_invariant`). A transition invariant is what the Design-by-Contract
+  literature calls a *history constraint* (Liskov & Wing).
   `init/1` and `code_change/3` are treated as re-creations: they establish a new state (checked by
   `@state_invariant`) but have no comparable prior state, so transition invariants do not apply to
   them.

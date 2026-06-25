@@ -58,8 +58,10 @@ defmodule Bond.Runtime.Eval do
     postcondition: Bond.PostconditionError,
     check: Bond.CheckError,
     invariant: Bond.InvariantError,
-    state_invariant: Bond.StateInvariantError,
-    transition_invariant: Bond.TransitionInvariantError
+    # State and transition invariants share Bond.InvariantError; the granular `kind` (kept for
+    # telemetry) selects the message headline. See Bond.InvariantError.
+    state_invariant: Bond.InvariantError,
+    transition_invariant: Bond.InvariantError
   }
 
   # Single persistent_term key holding the runtime modes map. Atom key (not a tuple) so the
