@@ -237,9 +237,58 @@ modules that operate on the struct can't declare invariants for it —
 this matches Eiffel's class-locality and keeps cross-module ownership
 clean.
 
-Process-level invariants (for `GenServer`/`Agent` state) aren't a
-separate feature. The recommended pattern is to keep the process state
-in a struct and declare invariants on that struct's module. See the
+For a **`GenServer`**'s process state, `Bond.Server` adds `@state_invariant`
+and `@transition_invariant` — see "Stateful contracts for processes" below. For
+**`Agent`** state and other state shared across processes there is no separate
+feature: keep the state in a struct and declare invariants on that struct's
+module. The [Contracts in a Concurrent World](guides/contracts-and-concurrency.md)
+guide works through both.
+
+## Stateful contracts for processes
+
+A struct `@invariant` constrains every *value* of a type. `Bond.Server` constrains
+the *state of a running `GenServer`*: do `use GenServer` and `use Bond.Server`
+(in that order), then declare module-wide invariants Bond checks around the
+server's callbacks.
+
+```elixir
+defmodule Counter do
+  use GenServer
+  use Bond.Server
+
+  @state_invariant      non_negative: state.count >= 0
+  @transition_invariant monotonic:    new_state.count >= old_state.count
+
+  @impl true
+  def init(n), do: {:ok, %{count: n}}
+
+  @impl true
+  def handle_call(:inc, _from, state), do: {:reply, :ok, %{state | count: state.count + 1}}
+
+  @impl true
+  def handle_cast(:dec, state), do: {:noreply, %{state | count: state.count - 1}}
+end
+```
+
+- **`@state_invariant`** (binding `state`) is checked after every state-transition
+  callback returns a new state — `init/1`, `handle_call/3`, `handle_cast/2`,
+  `handle_info/2`, `handle_continue/2`, `code_change/3`. A violation raises
+  `Bond.StateInvariantError`.
+- **`@transition_invariant`** (bindings `old_state`, `new_state`) relates the prior
+  state to the next across every transition — `handle_call/3`, `handle_cast/2`,
+  `handle_info/2`, `handle_continue/2`. `init/1` and `code_change/3` are re-creations
+  and are exempt. A violation raises `Bond.TransitionInvariantError`.
+
+Unlike a struct `@invariant` — which only fires when the struct flows through a
+function of its own module — these wrap the callbacks themselves, so they catch the
+common case of a callback mutating state inline. Because the checks run inside the
+serialized server process, even a temporal property like "the counter never
+decreases" is race-free: the `:dec` cast above raises `Bond.TransitionInvariantError`.
+
+`@state_invariant`/`@transition_invariant` share the `:invariants` configuration kind —
+they honour the contract-checking chain, toggle with `Bond.Config.disable(:invariants)`,
+and compile out under `invariants: :purge`. Declaring either outside a `Bond.Server`
+module is a compile warning. See `Bond.Server` and the
 [Contracts in a Concurrent World](guides/contracts-and-concurrency.md) guide.
 
 ## Contract inheritance for behaviours
@@ -576,10 +625,11 @@ end
 ## Telemetry
 
 Bond emits a [`:telemetry`](https://hexdocs.pm/telemetry/readme.html)
-event whenever a `@pre`, `@post`, `@invariant`, or `check` assertion is
-violated. The event fires once per failure, immediately before the
-corresponding `Bond.PreconditionError` / `Bond.PostconditionError` /
-`Bond.InvariantError` / `Bond.CheckError` is raised.
+event whenever a `@pre`, `@post`, `@invariant`, `@state_invariant`,
+`@transition_invariant`, or `check` assertion is violated. The event fires once
+per failure, immediately before the corresponding `Bond.PreconditionError` /
+`Bond.PostconditionError` / `Bond.InvariantError` / `Bond.StateInvariantError` /
+`Bond.TransitionInvariantError` / `Bond.CheckError` is raised.
 
 **Event:** `[:bond, :assertion, :failure]`
 
@@ -590,7 +640,7 @@ corresponding `Bond.PreconditionError` / `Bond.PostconditionError` /
 
 **Metadata:**
 
-- `:kind` — `:precondition | :postcondition | :invariant | :check`
+- `:kind` — `:precondition | :postcondition | :invariant | :state_invariant | :transition_invariant | :check`
 - `:module` — module the assertion is attached to
 - `:function` — `{name, arity}` of the function containing the assertion
 - `:label` — the keyword label, or `nil` if unlabelled
@@ -668,6 +718,9 @@ use Bond.Test
 
 assert_precondition_violation(Math.sqrt(-1), label: :non_negative_x)
 ```
+
+(`Bond.Server`'s `Bond.StateInvariantError` / `Bond.TransitionInvariantError`
+have no dedicated macro yet — assert them with `assert_raise/2`.)
 
 **Property-based, with `Bond.PropertyTest`** — feed random inputs through the
 instrumented code and let the contracts be the oracle. Three macros:
