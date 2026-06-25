@@ -216,20 +216,6 @@ the same telemetry event (`[:bond, :assertion, :failure]` with
 `:kind => :invariant`). Test with
 `Bond.Test.assert_invariant_violation/2`.
 
-### Generated documentation
-
-Modules that declare `@invariant`s get an auto-generated `## Invariants`
-section appended to their `@moduledoc`. The section names the struct,
-explains the `subject` binding, lists each invariant in the same
-`label: expression` format as per-function contract docs, and notes
-when the invariants fire. Users who haven't written a `@moduledoc`
-themselves get one synthesised; users who wrote `@moduledoc false`
-have their decision respected.
-
-When `:invariants` is `:purge`d (compile-time disable), the
-auto-generated section is suppressed — matching the per-function
-contract-doc suppression rule.
-
 ### What's not supported
 
 Invariants are scoped to the **struct's own defining module**. External
@@ -469,6 +455,13 @@ editors that show function docs on hover (VS Code, Vim's `K`, etc.).
 Auto-generated contract sections appear whether or not you wrote a `@doc`
 yourself — Bond synthesises one when needed.
 
+`@invariant`s are documented at the **module** level: a module that declares
+invariants gets a `## Invariants` section appended to its `@moduledoc`, naming the
+struct, explaining the `subject` binding, listing each invariant in the same
+`label: expression` format, and noting when the invariants fire. As with
+per-function docs, Bond synthesises a `@moduledoc` when you haven't written one,
+and respects `@moduledoc false`.
+
 > #### Conditional compilation and docs {: .info}
 >
 > When a function has **all** of its contracts `:purge`d (see
@@ -477,7 +470,8 @@ yourself — Bond synthesises one when needed.
 > contract sections are also suppressed. If you want the contract
 > documentation visible in production builds, leave at least one of
 > `:preconditions` or `:postconditions` set to `true` or `false` (both
-> emit the override; only `:purge` removes it).
+> emit the override; only `:purge` removes it). Likewise, setting
+> `:invariants` to `:purge` suppresses the generated `## Invariants` section.
 
 ## Conditional compilation
 
