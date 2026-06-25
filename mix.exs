@@ -97,14 +97,14 @@ defmodule Bond.MixProject do
         "guides/getting-started.md",
         "guides/contract-inheritance.md",
         "guides/reusable-contracts.md",
+        "guides/contracts-and-concurrency.md",
         "guides/testing-contracts.md",
         "guides/stability.md",
         "guides/public-api.md",
         "guides/overhead.md",
         "guides/faq.md",
         "guides/about.md",
-        "guides/history.md",
-        "guides/contracts-and-concurrency.md"
+        "guides/history.md"
       ],
       filter_modules: fn _module, meta ->
         # This allows us to tag modules as internal and exclude them from the API docs as follows:
