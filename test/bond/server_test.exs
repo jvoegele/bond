@@ -342,6 +342,22 @@ defmodule Bond.ServerTest do
       assert warning =~ "does not `use Bond.Server`"
     end
 
+    test "warns when @transition_invariant is declared in a plain `use Bond` module" do
+      warning =
+        capture_io(:stderr, fn ->
+          Code.compile_string("""
+          defmodule BondTest.OrphanTransitionInvariant do
+            use Bond
+            @transition_invariant monotonic: new_state.x >= old_state.x
+            def identity(x), do: x
+          end
+          """)
+        end)
+
+      assert warning =~ "@transition_invariant was declared in BondTest.OrphanTransitionInvariant"
+      assert warning =~ "does not `use Bond.Server`"
+    end
+
     test "a real Bond.Server module does not warn" do
       warning =
         capture_io(:stderr, fn ->
@@ -439,6 +455,70 @@ defmodule Bond.ServerTest do
       GenServer.cast(pid, {:set, 5})
       assert :sys.get_state(pid) == %{n: 5}
       GenServer.stop(pid)
+    end
+  end
+
+  defmodule AllTransitions do
+    use GenServer
+    use Bond.Server
+
+    @transition_invariant monotonic: new_state.n >= old_state.n
+    @transition_invariant step_max_1: new_state.n - old_state.n <= 1
+
+    @impl true
+    def init(n), do: {:ok, %{n: n}}
+    @impl true
+    def handle_call({:set, n}, _from, s), do: {:reply, :ok, %{s | n: n}}
+    @impl true
+    def handle_cast({:set, n}, s), do: {:noreply, %{s | n: n}}
+    @impl true
+    def handle_info({:set, n}, s), do: {:noreply, %{s | n: n}}
+    @impl true
+    def handle_continue({:set, n}, s), do: {:noreply, %{s | n: n}}
+  end
+
+  describe "@transition_invariant across every transition callback (H4)" do
+    test "a valid step passes; a decrease raises, attributed to each callback" do
+      for {invoke, fa} <- [
+            {fn -> AllTransitions.handle_call({:set, 0}, :from, %{n: 5}) end, {:handle_call, 3}},
+            {fn -> AllTransitions.handle_cast({:set, 0}, %{n: 5}) end, {:handle_cast, 2}},
+            {fn -> AllTransitions.handle_info({:set, 0}, %{n: 5}) end, {:handle_info, 2}},
+            {fn -> AllTransitions.handle_continue({:set, 0}, %{n: 5}) end, {:handle_continue, 2}}
+          ] do
+        assert AllTransitions.handle_cast({:set, 6}, %{n: 5}) == {:noreply, %{n: 6}}
+        error = assert_raise Bond.TransitionInvariantError, invoke
+        assert error.function == fa
+        assert error.label == :monotonic
+      end
+    end
+
+    test "all transition invariants are enforced; the violated one is reported" do
+      # Monotonic holds (10 >= 5) but step_max_1 does not (10 - 5 > 1).
+      error =
+        assert_raise Bond.TransitionInvariantError, fn ->
+          AllTransitions.handle_cast({:set, 10}, %{n: 5})
+        end
+
+      assert error.label == :step_max_1
+    end
+  end
+
+  defmodule PurgedTrans do
+    use GenServer
+    use Bond.Server, invariants: :purge
+
+    @transition_invariant monotonic: new_state.n >= old_state.n
+
+    @impl true
+    def init(n), do: {:ok, %{n: n}}
+    @impl true
+    def handle_cast({:set, n}, s), do: {:noreply, %{s | n: n}}
+  end
+
+  describe "invariants: :purge compiles transition checks out too (H4)" do
+    test "no transition check defp; a violating transition passes through" do
+      refute function_exported?(PurgedTrans, :__bond_transition_invariant_check__, 2)
+      assert PurgedTrans.handle_cast({:set, -5}, %{n: 0}) == {:noreply, %{n: -5}}
     end
   end
 
