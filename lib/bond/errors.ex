@@ -228,3 +228,24 @@ defmodule Bond.InvariantError do
     )
   end
 end
+
+defmodule Bond.StateInvariantError do
+  @moduledoc """
+  Exception raised when a `@state_invariant` declared with `Bond.Server` is violated.
+
+  A state invariant constrains the state of a `Bond.Server` process and is checked after every
+  state-transition callback returns a new state — `init/1`, `handle_call/3`, `handle_cast/2`,
+  `handle_info/2`, `handle_continue/2`, and `code_change/3`. The error's `:function` field
+  identifies the callback the invariant was checked after; `:module` is the server module.
+  """
+
+  use Bond.AssertionError
+
+  @impl Exception
+  def message(%{module: module, function: {function, arity}} = error) do
+    Bond.AssertionError.message(
+      error,
+      "state invariant violated after #{inspect(module)}.#{function}/#{arity}"
+    )
+  end
+end

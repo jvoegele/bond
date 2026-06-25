@@ -57,7 +57,8 @@ defmodule Bond.Runtime.Eval do
     precondition: Bond.PreconditionError,
     postcondition: Bond.PostconditionError,
     check: Bond.CheckError,
-    invariant: Bond.InvariantError
+    invariant: Bond.InvariantError,
+    state_invariant: Bond.StateInvariantError
   }
 
   # Single persistent_term key holding the runtime modes map. Atom key (not a tuple) so the
