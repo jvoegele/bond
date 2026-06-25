@@ -20,8 +20,6 @@ The full set of modules in published API docs is the source-of-truth for
   * `Bond.PreconditionError`
   * `Bond.PostconditionError`
   * `Bond.InvariantError`
-  * `Bond.StateInvariantError`
-  * `Bond.TransitionInvariantError`
   * `Bond.CheckError`
 
 Everything under `Bond.Compiler.*` and `Bond.Runtime.*` is internal (marked
@@ -195,14 +193,15 @@ invariants on a server's process state:
     bound to the new state the callback produced. Checked after every
     state-transition callback returns a new state: `init/1`, `handle_call/3`,
     `handle_cast/2`, `handle_info/2`, `handle_continue/2`, `code_change/3`. A
-    violation raises `Bond.StateInvariantError`, whose `:function` field is the
-    callback the invariant was checked after.
+    violation raises `Bond.InvariantError` with `:kind` `:state_invariant`; its
+    `:function` field is the callback the invariant was checked after.
   * **`@transition_invariant expr`** / **`@transition_invariant label: expr, ...`**
     — same shape. The implicit bindings are `old_state` (the callback's incoming
     state) and `new_state` (the state it returned). Checked across every
     transition callback — `handle_call/3`, `handle_cast/2`, `handle_info/2`,
     `handle_continue/2` — but **not** `init/1` or `code_change/3`, which are
-    treated as re-creations. A violation raises `Bond.TransitionInvariantError`.
+    treated as re-creations. A violation raises `Bond.InvariantError` with `:kind`
+    `:transition_invariant`.
 
 Both are gated under the `:invariants` configuration kind: they honour the
 precondition ≤ postcondition ≤ invariant chain, respond to
@@ -271,9 +270,8 @@ Brought into ExUnit modules via `use Bond.Test`. Provides:
   * `assert_precondition_violation/2`
   * `assert_postcondition_violation/2`
   * `assert_check_violation/2`
-  * `assert_invariant_violation/2`
-  * `assert_state_invariant_violation/2`
-  * `assert_transition_invariant_violation/2`
+  * `assert_invariant_violation/2` (covers struct `@invariant` and `Bond.Server`
+    state/transition invariants; pass `kind:` to be specific)
 
 Each accepts an expression and a keyword list of optional fields to verify on
 the raised error struct (`:label`, `:module`, `:function`, etc.). The full
@@ -319,21 +317,22 @@ telemetry handlers see every assertion failure even when an upstream
 
 ## Error structs
 
-All six are raised by Bond, all six are catchable, all six share the same
+All four are raised by Bond, all four are catchable, all four share the same
 shape (defined by the internal `Bond.AssertionError` `__using__` macro):
 
   * `Bond.PreconditionError`
   * `Bond.PostconditionError`
-  * `Bond.InvariantError`
-  * `Bond.StateInvariantError` (raised by `Bond.Server`; see "Stateful process
-    contracts")
-  * `Bond.TransitionInvariantError` (raised by `Bond.Server`; see "Stateful
-    process contracts")
+  * `Bond.InvariantError` — covers struct `@invariant` and, for `Bond.Server`,
+    `@state_invariant` / `@transition_invariant`; the `:kind` field distinguishes them
   * `Bond.CheckError`
 
 Public fields on every error struct:
 
   * `:label` — `t:Bond.assertion_label/0` (`atom() | binary() | nil`).
+  * `:kind` — the assertion kind: `:precondition`, `:postcondition`, `:invariant`,
+    `:state_invariant`, `:transition_invariant`, or `:check`. On `Bond.InvariantError`
+    it distinguishes the three invariant flavours; on the others it is redundant with
+    the struct type.
   * `:expression` — `t:Bond.assertion_expression/0` (the AST of the asserted
     expression).
   * `:file` — `Path.t()`.

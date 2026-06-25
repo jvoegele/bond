@@ -58,9 +58,8 @@ explaining how to add it.
   * `assert_precondition_violation/2` → `Bond.PreconditionError`
   * `assert_postcondition_violation/2` → `Bond.PostconditionError`
   * `assert_check_violation/2` → `Bond.CheckError`
-  * `assert_invariant_violation/2` → `Bond.InvariantError`
-  * `assert_state_invariant_violation/2` → `Bond.StateInvariantError` (`Bond.Server`)
-  * `assert_transition_invariant_violation/2` → `Bond.TransitionInvariantError` (`Bond.Server`)
+  * `assert_invariant_violation/2` → `Bond.InvariantError` (struct `@invariant`, and
+    `Bond.Server` `@state_invariant` / `@transition_invariant` — pass `kind:` to be specific)
 
 ```elixir
 defmodule MyApp.MathTest do

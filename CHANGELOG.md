@@ -17,12 +17,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   - **`@state_invariant`** — a property of the server's state, checked after every
     state-transition callback (`init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`,
     `handle_continue/2`, `code_change/3`) returns a new state. References the implicit `state`
-    binding. A violation raises the new `Bond.StateInvariantError`.
+    binding.
   - **`@transition_invariant`** — a relation between the prior state (`old_state`) and the
     next state (`new_state`) that must hold across every transition (`handle_call/3`,
     `handle_cast/2`, `handle_info/2`, `handle_continue/2`). `init/1` and `code_change/3` are
-    treated as re-creations and are exempt. A violation raises the new
-    `Bond.TransitionInvariantError`.
+    treated as re-creations and are exempt.
+
+  Both raise `Bond.InvariantError` on violation — the same exception as a struct `@invariant`,
+  distinguished by its `:kind` field (`:state_invariant` / `:transition_invariant`).
 
   ```elixir
   defmodule Counter do
@@ -55,11 +57,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   `invariants: :purge`. Declaring either in a module that does not `use Bond.Server` emits a
   compile warning (it would otherwise be silently ignored).
 
-  New public API surface: the `Bond.Server` module, the `Bond.StateInvariantError` and
-  `Bond.TransitionInvariantError` exception structs, and the `Bond.Test` helpers
-  `assert_state_invariant_violation/2` and `assert_transition_invariant_violation/2`. The
-  `[:bond, :assertion, :failure]` telemetry event now also fires with `:kind` of
-  `:state_invariant` / `:transition_invariant`.
+  New public API surface: the `Bond.Server` module. Existing `Bond.InvariantError` and
+  `Bond.Test.assert_invariant_violation/2` cover the new invariants (filterable by `kind:`),
+  and every Bond error struct gains a `:kind` field. The `[:bond, :assertion, :failure]`
+  telemetry event now also fires with `:kind` of `:state_invariant` / `:transition_invariant`.
 
 ## [1.7.0] - 2026-06-23
 

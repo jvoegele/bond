@@ -197,22 +197,25 @@ end
 `@state_invariant` is a property of the state itself, checked after `init/1`
 establishes the initial state and after each
 `handle_call`/`handle_cast`/`handle_info`/`handle_continue`/`code_change` returns
-a new one. The `non_negative` invariant raises `Bond.StateInvariantError` from
-inside the server, naming the callback it failed after.
+a new one. The `non_negative` invariant raises `Bond.InvariantError` (with `:kind`
+`:state_invariant`) from inside the server, naming the callback it failed after.
 
 ### Transition invariants
 
 `@transition_invariant` is the temporal cousin: a relation between the prior
 state (`old_state`) and the next state (`new_state`) that must hold across *every*
 transition. It has no struct-level analog — a struct `@invariant` constrains every
-*value*, whereas a transition invariant constrains every *change*.
+*value*, whereas a transition invariant constrains every *change*. (In
+Design-by-Contract terms it is a *history constraint*, in the sense of Liskov &
+Wing — but Bond treats it as one more flavour of invariant.)
 
 The `monotonic` invariant above — "the counter never decreases" — is exactly the
 kind of property the racy `Agent` counter at the start of this guide could *not*
 soundly assert: there, a concurrent update could slip between the `old` snapshot
 and the comparison. Inside a `GenServer`, transitions are serialized, so the
 relation is meaningful. The `:dec` callback violates it and raises
-`Bond.TransitionInvariantError`, naming the transition it failed across.
+`Bond.InvariantError` (with `:kind` `:transition_invariant`), naming the transition
+it failed across.
 
 Transition invariants are checked across the four message-handling callbacks
 (`handle_call`/`handle_cast`/`handle_info`/`handle_continue`). `init/1` and

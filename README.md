@@ -272,18 +272,20 @@ end
 
 - **`@state_invariant`** (binding `state`) is checked after every state-transition
   callback returns a new state — `init/1`, `handle_call/3`, `handle_cast/2`,
-  `handle_info/2`, `handle_continue/2`, `code_change/3`. A violation raises
-  `Bond.StateInvariantError`.
+  `handle_info/2`, `handle_continue/2`, `code_change/3`.
 - **`@transition_invariant`** (bindings `old_state`, `new_state`) relates the prior
   state to the next across every transition — `handle_call/3`, `handle_cast/2`,
   `handle_info/2`, `handle_continue/2`. `init/1` and `code_change/3` are re-creations
-  and are exempt. A violation raises `Bond.TransitionInvariantError`.
+  and are exempt. (A transition invariant is what the Design-by-Contract literature
+  calls a *history constraint*.)
 
+Both raise `Bond.InvariantError` on violation — the same error as a struct `@invariant`,
+distinguished by its `:kind` field (`:state_invariant` / `:transition_invariant`).
 Unlike a struct `@invariant` — which only fires when the struct flows through a
 function of its own module — these wrap the callbacks themselves, so they catch the
 common case of a callback mutating state inline. Because the checks run inside the
 serialized server process, even a temporal property like "the counter never
-decreases" is race-free: the `:dec` cast above raises `Bond.TransitionInvariantError`.
+decreases" is race-free: the `:dec` cast above raises it across `handle_cast/2`.
 
 `@state_invariant`/`@transition_invariant` share the `:invariants` configuration kind —
 they honour the contract-checking chain, toggle with `Bond.Config.disable(:invariants)`,
@@ -628,8 +630,7 @@ Bond emits a [`:telemetry`](https://hexdocs.pm/telemetry/readme.html)
 event whenever a `@pre`, `@post`, `@invariant`, `@state_invariant`,
 `@transition_invariant`, or `check` assertion is violated. The event fires once
 per failure, immediately before the corresponding `Bond.PreconditionError` /
-`Bond.PostconditionError` / `Bond.InvariantError` / `Bond.StateInvariantError` /
-`Bond.TransitionInvariantError` / `Bond.CheckError` is raised.
+`Bond.PostconditionError` / `Bond.InvariantError` / `Bond.CheckError` is raised.
 
 **Event:** `[:bond, :assertion, :failure]`
 
@@ -709,11 +710,10 @@ also a ready-made test oracle. Bond gives you two complementary ways to lean on 
 covered in full by the [Testing Contracts](guides/testing-contracts.md) guide.
 
 **Example-based, with `Bond.Test`** — make a call and assert a contract was violated.
-One macro per contract kind (`assert_precondition_violation`,
+One macro per error type (`assert_precondition_violation`,
 `assert_postcondition_violation`, `assert_check_violation`,
-`assert_invariant_violation`, and for `Bond.Server`,
-`assert_state_invariant_violation` and `assert_transition_invariant_violation`),
-each able to target a specific clause by `label`:
+`assert_invariant_violation` — the last also covers `Bond.Server` state/transition
+invariants, filterable by `kind:`), each able to target a specific clause by `label`:
 
 ```elixir
 use Bond.Test

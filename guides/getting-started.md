@@ -343,7 +343,7 @@ end
 
 Because the checks run inside the serialized server process, they are race-free —
 even a temporal property like "the counter never decreases". A `:dec` cast that
-drops `count` below the previous value raises `Bond.TransitionInvariantError`. See
+drops `count` below the previous value raises `Bond.InvariantError`. See
 `Bond.Server` and the
 [Contracts in a Concurrent World](contracts-and-concurrency.html) guide.
 
