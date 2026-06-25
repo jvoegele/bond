@@ -295,6 +295,43 @@ defmodule Bond.ServerTest do
     def handle_cast({:set, n}, s), do: {:noreply, %{s | n: n}}
   end
 
+  describe "@state_invariant outside Bond.Server is a loud no-op (S6)" do
+    import ExUnit.CaptureIO
+
+    test "warns when @state_invariant is declared in a plain `use Bond` module" do
+      warning =
+        capture_io(:stderr, fn ->
+          Code.compile_string("""
+          defmodule BondTest.OrphanStateInvariant do
+            use Bond
+            @state_invariant non_negative: state.x >= 0
+            def identity(x), do: x
+          end
+          """)
+        end)
+
+      assert warning =~ "@state_invariant was declared in BondTest.OrphanStateInvariant"
+      assert warning =~ "does not `use Bond.Server`"
+    end
+
+    test "a real Bond.Server module does not warn" do
+      warning =
+        capture_io(:stderr, fn ->
+          Code.compile_string("""
+          defmodule BondTest.ProperServer do
+            use GenServer
+            use Bond.Server
+            @state_invariant non_negative: state.n >= 0
+            @impl true
+            def init(n), do: {:ok, %{n: n}}
+          end
+          """)
+        end)
+
+      refute warning =~ "@state_invariant was declared"
+    end
+  end
+
   describe "invariants: :purge compiles the checks out (S6)" do
     test "no check defp is emitted" do
       refute function_exported?(Purged, :__bond_state_invariant_check__, 1)

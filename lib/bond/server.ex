@@ -64,6 +64,11 @@ defmodule Bond.Server do
       # `@state_invariant` is captured), the compile-state FSM, and the runtime contract gate.
       use Bond, unquote(opts)
 
+      # Marks this module as a Bond.Server so `Bond.Compiler.__before_compile__` knows the captured
+      # `@state_invariant`s have a consumer; without it, captured state invariants are an orphaned
+      # contract and warned about.
+      Module.put_attribute(__MODULE__, :__bond_server__, true)
+
       Module.register_attribute(__MODULE__, :bond_server_callbacks, accumulate: true)
       @on_definition Bond.Server
       @before_compile Bond.Server
