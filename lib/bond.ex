@@ -286,12 +286,12 @@ defmodule Bond do
       file: __CALLER__.file,
       line: __CALLER__.line,
       description:
-        "@invariant accepts a single argument — either a bare expression or a " <>
-          "keyword list of label: expression pairs. Got #{length(args)} arguments " <>
-          "(likely a bare expression mixed with labelled ones, e.g. " <>
-          "`@invariant subject.x >= 0, positive: subject.y > 0`). Either label every " <>
-          "expression (`@invariant non_negative: subject.x >= 0, positive: subject.y > 0`) " <>
-          "or use a separate @invariant line per bare expression."
+        invariant_arity_error_message(
+          "invariant",
+          args,
+          "@invariant subject.x >= 0, positive: subject.y > 0",
+          "@invariant non_negative: subject.x >= 0, positive: subject.y > 0"
+        )
   end
 
   # @state_invariant <expression-or-keyword-list>
@@ -311,12 +311,12 @@ defmodule Bond do
       file: __CALLER__.file,
       line: __CALLER__.line,
       description:
-        "@state_invariant accepts a single argument — either a bare expression or a " <>
-          "keyword list of label: expression pairs. Got #{length(args)} arguments " <>
-          "(likely a bare expression mixed with labelled ones, e.g. " <>
-          "`@state_invariant state.count >= 0, positive: state.total > 0`). Either label " <>
-          "every expression (`@state_invariant non_negative: state.count >= 0, positive: " <>
-          "state.total > 0`) or use a separate @state_invariant line per bare expression."
+        invariant_arity_error_message(
+          "state_invariant",
+          args,
+          "@state_invariant state.count >= 0, positive: state.total > 0",
+          "@state_invariant non_negative: state.count >= 0, positive: state.total > 0"
+        )
   end
 
   # @transition_invariant <expression-or-keyword-list>
@@ -334,13 +334,12 @@ defmodule Bond do
       file: __CALLER__.file,
       line: __CALLER__.line,
       description:
-        "@transition_invariant accepts a single argument — either a bare expression or a " <>
-          "keyword list of label: expression pairs. Got #{length(args)} arguments " <>
-          "(likely a bare expression mixed with labelled ones, e.g. " <>
-          "`@transition_invariant new_state.n >= old_state.n, capped: new_state.n <= 100`). " <>
-          "Either label every expression (`@transition_invariant monotonic: new_state.n >= " <>
-          "old_state.n, capped: new_state.n <= 100`) or use a separate @transition_invariant " <>
-          "line per bare expression."
+        invariant_arity_error_message(
+          "transition_invariant",
+          args,
+          "@transition_invariant new_state.n >= old_state.n, capped: new_state.n <= 100",
+          "@transition_invariant monotonic: new_state.n >= old_state.n, capped: new_state.n <= 100"
+        )
   end
 
   defmacro @{:doc, meta, [value]} do
@@ -584,6 +583,16 @@ defmodule Bond do
 
   defp refinement_kind(:pre_weaken), do: :precondition
   defp refinement_kind(:post_strengthen), do: :postcondition
+
+  # Shared diagnostic for the 2+-arg `@invariant` / `@state_invariant` / `@transition_invariant`
+  # shape (a bare expression mixed with labelled ones, which parses as multiple args). `bare` and
+  # `labelled` are annotation-specific example fixes.
+  defp invariant_arity_error_message(annotation, args, bare, labelled) do
+    "@#{annotation} accepts a single argument — either a bare expression or a keyword list of " <>
+      "label: expression pairs. Got #{length(args)} arguments (likely a bare expression mixed " <>
+      "with labelled ones, e.g. `#{bare}`). Either label every expression (`#{labelled}`) or use " <>
+      "a separate @#{annotation} line per bare expression."
+  end
 
   # Migration diagnostic for the positional `@pre`/`@post` label forms removed in Bond 1.0.
   defp positional_label_removed_message(pre_or_post) do
