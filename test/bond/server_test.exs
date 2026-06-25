@@ -140,4 +140,70 @@ defmodule Bond.ServerTest do
     assert GenServer.call(pid, :inc) == 2
     GenServer.stop(pid)
   end
+
+  describe "runtime enforcement around callbacks (S5)" do
+    defmodule Bank do
+      use GenServer
+      use Bond.Server
+
+      @state_invariant non_negative_balance: state.balance >= 0
+
+      @impl true
+      def init(balance), do: {:ok, %{balance: balance}}
+
+      @impl true
+      def handle_call({:withdraw, amount}, _from, %{balance: b} = s),
+        do: {:reply, :ok, %{s | balance: b - amount}}
+
+      @impl true
+      def handle_cast({:deposit, amount}, %{balance: b} = s),
+        do: {:noreply, %{s | balance: b + amount}}
+
+      @impl true
+      # Inline mutation that violates the invariant — the exact case a struct @invariant misses.
+      def handle_info(:corrupt, s), do: {:noreply, %{s | balance: -1}}
+    end
+
+    test "a satisfying transition passes through normally" do
+      {:ok, pid} = GenServer.start_link(Bank, 100)
+      assert GenServer.call(pid, {:withdraw, 40}) == :ok
+      assert :sys.get_state(pid) == %{balance: 60}
+      GenServer.stop(pid)
+    end
+
+    test "init/1 establishes the invariant (creation check)" do
+      Process.flag(:trap_exit, true)
+
+      assert {:error, {%Bond.StateInvariantError{} = err, _stack}} =
+               GenServer.start_link(Bank, -5)
+
+      assert Exception.message(err) =~ "state invariant violated after"
+      assert Exception.message(err) =~ "init/1"
+    end
+
+    test "handle_call violation raises StateInvariantError attributed to the callback" do
+      {:ok, pid} = GenServer.start_link(Bank, 100)
+      Process.flag(:trap_exit, true)
+      Process.link(pid)
+
+      # A crash mid-call exits the caller with {server_reason, call_info}, where
+      # server_reason is {exception, stacktrace}.
+      {{err, _stacktrace}, _call_info} = catch_exit(GenServer.call(pid, {:withdraw, 250}))
+
+      assert %Bond.StateInvariantError{
+               label: :non_negative_balance,
+               function: {:handle_call, 3},
+               binding: [state: %{balance: -150}]
+             } = err
+    end
+
+    test "handle_info inline-mutation violation is caught (the struct-@invariant blind spot)" do
+      {:ok, pid} = GenServer.start_link(Bank, 100)
+      Process.flag(:trap_exit, true)
+      Process.link(pid)
+
+      send(pid, :corrupt)
+      assert_receive {:EXIT, ^pid, {%Bond.StateInvariantError{function: {:handle_info, 2}}, _}}
+    end
+  end
 end

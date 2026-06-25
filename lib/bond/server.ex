@@ -34,9 +34,13 @@ defmodule Bond.Server do
   > it is installed; `use GenServer` provides default callback implementations during its own
   > expansion, so putting it first keeps those defaults out of Bond.Server's view.
 
-  This module is the in-progress foundation for issue #34. It installs the compiler hooks,
-  records which `GenServer` callbacks a module defines, and captures `@state_invariant`
-  declarations; the callback wrapping that actually evaluates them lands in a subsequent step.
+  Like Bond's other contracts, `@state_invariant` checks honour the `:invariants` configuration
+  and runtime gate: they are compiled out entirely under `invariants: :purge`, and can be toggled
+  at runtime with `Bond.Config.enable/1`/`disable/1` (state invariants share the `:invariants`
+  kind). See `Bond` and `Bond.Config`.
+
+  Transition invariants (`@transition_invariant`, relating the prior and next state across a
+  transition) are a separate, forthcoming part of issue #34.
   """
 
   # The GenServer state-transition callbacks Bond.Server reasons about. Each carries (or, for
@@ -102,6 +106,21 @@ defmodule Bond.Server do
     state_invariants = Module.get_attribute(env.module, :bond_state_invariants) || []
     reflection = Enum.map(state_invariants, fn assertion -> {assertion.label, assertion.code} end)
 
+    # State invariants are gated under the `:invariants` kind (zero new Bond.Config surface). The
+    # resolved per-module config lives in `@__bond_contract_config__` (set by `use Bond`). `:purge`
+    # compiles the checks out entirely — no check defp, no wrappers; `false`/`true` still emit the
+    # wrapper with a runtime gate, so `Bond.Config.enable/disable(:invariants)` can flip it.
+    config = Module.get_attribute(env.module, :__bond_contract_config__) || %{}
+    modes = %{invariants: Map.get(config, :invariants, true), chain: chain(config)}
+
+    runtime_ast =
+      if modes.invariants == :purge or state_invariants == [] do
+        []
+      else
+        state_invariant_check_ast(state_invariants) ++
+          callback_wrappers_ast(callbacks, modes, env)
+      end
+
     quote do
       @doc false
       def __bond_server_callbacks__, do: unquote(Macro.escape(callbacks))
@@ -109,7 +128,55 @@ defmodule Bond.Server do
       @doc false
       def __bond_state_invariants__, do: unquote(Macro.escape(reflection))
 
-      unquote_splicing(state_invariant_check_ast(state_invariants))
+      unquote_splicing(runtime_ast)
+    end
+  end
+
+  # The pre/post modes that gate the `:invariants` kind in `Bond.Runtime.Eval.should_evaluate?/3`
+  # (the pre <= post <= invariants chain), mirroring struct `@invariant`s.
+  defp chain(config) do
+    %{
+      preconditions: Map.get(config, :preconditions, true),
+      postconditions: Map.get(config, :postconditions, true)
+    }
+  end
+
+  # Wraps each user-defined GenServer callback with `defoverridable` + a wrapper that calls
+  # `super`, extracts the new state from the return, and runs the state-invariant check against it,
+  # gated under `:invariants`. `super` reaches the user's callback (the wrapping mechanism Bond uses
+  # for every function; validated for GenServer callbacks in `spikes/server_defoverridable/`). In
+  # Slice 1 every state-transition callback is wrapped identically — including `init/1` and
+  # `code_change/3`, which establish a new state on which the invariant must also hold.
+  defp callback_wrappers_ast(callbacks, modes, env) do
+    chain = Macro.escape(modes.chain)
+    mode = modes.invariants
+
+    for {name, arity} <- callbacks do
+      args = Macro.generate_arguments(arity, env.module)
+
+      quote do
+        defoverridable [{unquote(name), unquote(arity)}]
+
+        @impl true
+        def unquote(name)(unquote_splicing(args)) do
+          result = super(unquote_splicing(args))
+
+          if Bond.Runtime.Eval.should_evaluate?(:invariants, unquote(mode), unquote(chain)) do
+            case Bond.Server.Runtime.extract_state(unquote(name), result) do
+              {:state, bond_new_state} ->
+                Bond.Runtime.Eval.evaluate_state_invariants(
+                  fn -> __bond_state_invariant_check__(bond_new_state) end,
+                  unquote(Macro.escape({name, arity}))
+                )
+
+              :no_state ->
+                :ok
+            end
+          end
+
+          result
+        end
+      end
     end
   end
 
@@ -121,8 +188,8 @@ defmodule Bond.Server do
   # `Bond.Runtime.Eval.evaluate_state_invariants/2` at the call site, because these module-level
   # invariants are shared across every callback. So the passing path allocates nothing beyond the
   # boolean checks, and the defp takes only `state` (keeping the failure binding to `[state: ...]`).
-  defp state_invariant_check_ast([]), do: []
-
+  # Only called with a non-empty list (the empty/`:purge` cases are short-circuited in
+  # `__before_compile__`).
   defp state_invariant_check_ast(state_invariants) do
     # The unhygienic `state` var the normalized assertion expressions resolve to (see
     # `Bond.Compiler.register_state_invariant/4`, which strips the hygiene context off `state`).
