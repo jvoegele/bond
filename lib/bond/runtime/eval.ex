@@ -412,6 +412,19 @@ defmodule Bond.Runtime.Eval do
   end
 
   @doc """
+  Evaluates a `Bond.Server` module's `@transition_invariant` check across a state transition
+  (#34), attributing any failure to the callback the transition occurred in.
+
+  Identical to `evaluate_state_invariants/2` (the kind, `:transition_invariant`, maps to
+  `Bond.TransitionInvariantError`); separate only for symmetry and a self-documenting call site.
+  """
+  @spec evaluate_transition_invariants(assertion_fun(), {atom(), non_neg_integer()}) :: term()
+  def evaluate_transition_invariants(check_fun, function_info)
+      when is_function(check_fun, 0) and is_tuple(function_info) do
+    evaluate_assertions(check_fun, &Map.put(&1, :function, function_info))
+  end
+
+  @doc """
   Evaluates a protocol contract's assertions, attributing any failure to the protocol and the
   implementation the call resolved to.
 
