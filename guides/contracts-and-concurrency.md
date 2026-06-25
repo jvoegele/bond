@@ -170,16 +170,18 @@ processes one message at a time, and its state is touched only from inside the
 server process. There is no interleaving to defend against — which makes it the
 natural home for the strongest stateful contracts Bond offers.
 
-`Bond.Server` adds a module-wide `@state_invariant` that Bond checks after every
-state-transition callback. Because the check runs *inside the server process, on
-its own sequentially-processed state*, it is race-free by construction:
+`Bond.Server` adds two module-wide annotations that Bond checks around the
+server's state-transition callbacks. Because the checks run *inside the server
+process, on its own sequentially-processed state*, they are race-free by
+construction:
 
 ```elixir
 defmodule Counter do
   use GenServer
   use Bond.Server
 
-  @state_invariant non_negative: state.count >= 0
+  @state_invariant      non_negative: state.count >= 0
+  @transition_invariant monotonic:    new_state.count >= old_state.count
 
   @impl true
   def init(n), do: {:ok, %{count: n}}
@@ -192,11 +194,31 @@ defmodule Counter do
 end
 ```
 
-The `non_negative` invariant is checked after `init/1` establishes the initial
-state and after each `handle_call`/`handle_cast`/`handle_info`/`handle_continue`/
-`code_change` returns a new one. A `:dec` that drives `count` below zero raises
-`Bond.StateInvariantError` from inside the server, naming the callback it failed
-after.
+`@state_invariant` is a property of the state itself, checked after `init/1`
+establishes the initial state and after each
+`handle_call`/`handle_cast`/`handle_info`/`handle_continue`/`code_change` returns
+a new one. The `non_negative` invariant raises `Bond.StateInvariantError` from
+inside the server, naming the callback it failed after.
+
+### Transition invariants
+
+`@transition_invariant` is the temporal cousin: a relation between the prior
+state (`old_state`) and the next state (`new_state`) that must hold across *every*
+transition. It has no struct-level analog — a struct `@invariant` constrains every
+*value*, whereas a transition invariant constrains every *change*.
+
+The `monotonic` invariant above — "the counter never decreases" — is exactly the
+kind of property the racy `Agent` counter at the start of this guide could *not*
+soundly assert: there, a concurrent update could slip between the `old` snapshot
+and the comparison. Inside a `GenServer`, transitions are serialized, so the
+relation is meaningful. The `:dec` callback violates it and raises
+`Bond.TransitionInvariantError`, naming the transition it failed across.
+
+Transition invariants are checked across the four message-handling callbacks
+(`handle_call`/`handle_cast`/`handle_info`/`handle_continue`). `init/1` and
+`code_change/3` are treated as *re-creations* — they establish a new state but
+have no comparable prior state — so only `@state_invariant` applies to them; an
+upgrade in `code_change/3` may legitimately break a monotonic relation.
 
 ### How this relates to the State-struct pattern
 
@@ -217,7 +239,8 @@ mind:
     server. Use `@state_invariant` for properties of the *server's* state as a
     whole, and as a safety net over callbacks that change state directly.
 
-Like every Bond contract, `@state_invariant` honours configuration: it shares the
-`:invariants` kind, so `Bond.Config.disable(:invariants)` turns it off at runtime
-and `use Bond.Server, invariants: :purge` compiles it out of a production build.
+Like every Bond contract, `@state_invariant` and `@transition_invariant` honour
+configuration: they share the `:invariants` kind, so
+`Bond.Config.disable(:invariants)` turns them off at runtime and
+`use Bond.Server, invariants: :purge` compiles them out of a production build.
 See `Bond.Server` for the full reference.

@@ -47,4 +47,27 @@ defmodule Bond.ServerConfigTest do
 
     assert {:error, {%Bond.StateInvariantError{}, _}} = GenServer.start_link(Ledger, -1)
   end
+
+  defmodule Monotonic do
+    use GenServer
+    use Bond.Server
+
+    @transition_invariant monotonic: new_state.n >= old_state.n
+
+    @impl true
+    def init(n), do: {:ok, %{n: n}}
+    @impl true
+    def handle_cast({:set, n}, s), do: {:noreply, %{s | n: n}}
+  end
+
+  test "transition invariants share the :invariants gate" do
+    # Enforced by default.
+    assert_raise Bond.TransitionInvariantError, fn ->
+      Monotonic.handle_cast({:set, 0}, %{n: 5})
+    end
+
+    # Disabled along with state invariants.
+    Bond.Config.disable(:invariants)
+    assert Monotonic.handle_cast({:set, 0}, %{n: 5}) == {:noreply, %{n: 0}}
+  end
 end

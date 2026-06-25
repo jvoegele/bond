@@ -342,7 +342,7 @@ defmodule Bond.Compiler do
   @doc false
   defmacro __before_compile__(%Macro.Env{} = env) do
     :ok = FSM.module_defined(fsm(env))
-    warn_orphan_state_invariants(env)
+    warn_orphan_server_invariants(env)
 
     config =
       Module.get_attribute(env.module, :__bond_contract_config__) ||
@@ -1013,18 +1013,57 @@ defmodule Bond.Compiler do
     end)
   end
 
-  # `@state_invariant` is only consumed by `Bond.Server` (which sets `@__bond_server__`). In a
-  # plain `use Bond` module it is captured but never enforced — a silently-ignored contract. Warn
-  # so the missing `use Bond.Server` is loud rather than mysterious, pointing at the declaration.
-  defp warn_orphan_state_invariants(env) do
-    with [assertion | _] <- Module.get_attribute(env.module, :bond_state_invariants) || [],
-         false <- Module.get_attribute(env.module, :__bond_server__) == true do
-      IO.warn(
-        "@state_invariant was declared in #{inspect(env.module)}, which does not `use Bond.Server`. " <>
-          "State invariants are enforced only in a Bond.Server module; this declaration is ignored. " <>
-          "Add `use Bond.Server` (after `use GenServer`).",
-        assertion.definition_env
-      )
+  @doc false
+  # Registers a `@transition_invariant` (#34, `Bond.Server`). Like `register_state_invariant/4`,
+  # stored in the `:bond_transition_invariants` module attribute (flat, module-level, consumed by
+  # `Bond.Server.__before_compile__`). The implicit bindings are `old_state` and `new_state`,
+  # normalized so references resolve to the vars `Bond.Server` rebinds at each transition site.
+  def register_transition_invariant(expression, label, env, meta) do
+    Assertion.validate_expression!(expression, env)
+    normalized = normalize_transition_context(expression)
+    assertion = Assertion.new(:transition_invariant, label, normalized, env, meta)
+    existing = Module.get_attribute(env.module, :bond_transition_invariants) || []
+    Module.put_attribute(env.module, :bond_transition_invariants, existing ++ [assertion])
+    :ok
+  end
+
+  defp normalize_transition_context(expression) do
+    Macro.prewalk(expression, fn
+      {name, meta, ctx} when name in [:old_state, :new_state] and is_atom(ctx) ->
+        {name, meta, nil}
+
+      other ->
+        other
+    end)
+  end
+
+  # `@state_invariant` / `@transition_invariant` are only consumed by `Bond.Server` (which sets
+  # `@__bond_server__`). In a plain `use Bond` module they are captured but never enforced — a
+  # silently-ignored contract. Warn so the missing `use Bond.Server` is loud rather than
+  # mysterious, pointing at the first such declaration.
+  defp warn_orphan_server_invariants(env) do
+    unless Module.get_attribute(env.module, :__bond_server__) == true do
+      orphans =
+        (Module.get_attribute(env.module, :bond_state_invariants) || []) ++
+          (Module.get_attribute(env.module, :bond_transition_invariants) || [])
+
+      case orphans do
+        [] ->
+          :ok
+
+        [assertion | _] ->
+          attr =
+            if assertion.kind == :state_invariant,
+              do: "@state_invariant",
+              else: "@transition_invariant"
+
+          IO.warn(
+            "#{attr} was declared in #{inspect(env.module)}, which does not `use Bond.Server`. " <>
+              "State and transition invariants are enforced only in a Bond.Server module; this " <>
+              "declaration is ignored. Add `use Bond.Server` (after `use GenServer`).",
+            assertion.definition_env
+          )
+      end
     end
   end
 
