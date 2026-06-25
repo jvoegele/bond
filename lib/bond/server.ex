@@ -242,7 +242,7 @@ defmodule Bond.Server do
             result = super(unquote_splicing(args))
 
             if Bond.Runtime.Eval.should_evaluate?(:invariants, unquote(mode), unquote(chain)) do
-              case Bond.Server.Runtime.extract_state(unquote(name), result) do
+              case Bond.Runtime.Server.extract_state(unquote(name), result) do
                 {:state, unquote(new_state)} ->
                   unquote_splicing(checks)
                   :ok

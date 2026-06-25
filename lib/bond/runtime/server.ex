@@ -1,4 +1,4 @@
-defmodule Bond.Server.Runtime do
+defmodule Bond.Runtime.Server do
   @moduledoc internal: true
   @moduledoc """
   Runtime support for `Bond.Server` callback wrappers (#34).

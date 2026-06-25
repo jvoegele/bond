@@ -1,7 +1,7 @@
-defmodule Bond.Server.RuntimeTest do
+defmodule Bond.Runtime.ServerTest do
   use ExUnit.Case, async: true
 
-  import Bond.Server.Runtime, only: [extract_state: 2]
+  import Bond.Runtime.Server, only: [extract_state: 2]
 
   @state %{count: 1}
 
