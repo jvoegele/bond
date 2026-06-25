@@ -549,38 +549,37 @@ defmodule Bond do
           "`check expr, \"label\"` are no longer supported."
   end
 
-  # Shared by the `@pre`/`@post` single-argument clause and the qualified `Bond.pre/1` /
-  # `Bond.post/1` macros. Registers either a bare assertion or each entry of a keyword list of
-  # `label: assertion` pairs into the per-module FSM. Returns `:ok` so the calling macro
-  # expands to a harmless no-op expression.
-  defp register_pre_or_post(pre_or_post, expression, caller, meta) do
-    if Keyword.keyword?(expression) do
-      for {label, expr} <- expression do
-        Bond.Compiler.register_assertion(pre_or_post, expr, label, caller, meta)
-      end
+  # Dispatch a bare assertion or each `label: assertion` entry of a keyword list to `register`,
+  # which is called as `register.(expression, label)`. The shared shape behind every `@`-annotation
+  # registration helper below. Returns `:ok` so the calling macro expands to a harmless no-op.
+  defp register_each(expression_or_kw_list, register) do
+    if Keyword.keyword?(expression_or_kw_list) do
+      for {label, expr} <- expression_or_kw_list, do: register.(expr, label)
     else
-      Bond.Compiler.register_assertion(pre_or_post, expression, nil, caller, meta)
+      register.(expression_or_kw_list, nil)
     end
 
     :ok
   end
 
+  # Shared by the `@pre`/`@post` single-argument clause and the qualified `Bond.pre/1` /
+  # `Bond.post/1` macros. Registers a bare assertion or each `label: assertion` pair into the
+  # per-module FSM.
+  defp register_pre_or_post(pre_or_post, expression, caller, meta) do
+    register_each(expression, fn expr, label ->
+      Bond.Compiler.register_assertion(pre_or_post, expr, label, caller, meta)
+    end)
+  end
+
   # Shared by the `@pre_weaken`/`@post_strengthen` clause and the qualified `Bond.pre_weaken/1` /
   # `Bond.post_strengthen/1` macros. Registers each assertion tagged with its refinement role so
-  # `Bond.Compiler.merge_inherited_contract/2` folds it into the inherited contract. Mirrors
-  # `register_pre_or_post/4` but routes through `register_assertion/6`.
+  # `Bond.Compiler.merge_inherited_contract/2` folds it into the inherited contract.
   defp register_refinement(refinement, expression, caller, meta) do
     kind = refinement_kind(refinement)
 
-    if Keyword.keyword?(expression) do
-      for {label, expr} <- expression do
-        Bond.Compiler.register_assertion(kind, expr, label, caller, meta, refinement)
-      end
-    else
-      Bond.Compiler.register_assertion(kind, expression, nil, caller, meta, refinement)
-    end
-
-    :ok
+    register_each(expression, fn expr, label ->
+      Bond.Compiler.register_assertion(kind, expr, label, caller, meta, refinement)
+    end)
   end
 
   defp refinement_kind(:pre_weaken), do: :precondition
@@ -594,46 +593,25 @@ defmodule Bond do
       "punctuation, e.g. `@#{pre_or_post} \"must be positive\": x > 0`."
   end
 
-  # Shared by the `@invariant` single-argument clause and the qualified `Bond.invariant/1`
-  # macro. Same bare-or-keyword-list dispatch as `register_pre_or_post/4`.
+  # Shared by the `@invariant` single-argument clause and the qualified `Bond.invariant/1` macro.
   defp register_invariant(expression_or_kw_list, caller, meta) do
-    if Keyword.keyword?(expression_or_kw_list) do
-      for {label, expr} <- expression_or_kw_list do
-        Bond.Compiler.register_invariant(expr, label, caller, meta)
-      end
-    else
-      Bond.Compiler.register_invariant(expression_or_kw_list, nil, caller, meta)
-    end
-
-    :ok
+    register_each(expression_or_kw_list, fn expr, label ->
+      Bond.Compiler.register_invariant(expr, label, caller, meta)
+    end)
   end
 
-  # `@state_invariant` (#34). Same bare-or-keyword-list dispatch as `register_invariant/3`,
-  # routing each assertion to `Bond.Compiler.register_state_invariant/4`.
+  # `@state_invariant` (#34, `Bond.Server`).
   defp register_state_invariant(expression_or_kw_list, caller, meta) do
-    if Keyword.keyword?(expression_or_kw_list) do
-      for {label, expr} <- expression_or_kw_list do
-        Bond.Compiler.register_state_invariant(expr, label, caller, meta)
-      end
-    else
-      Bond.Compiler.register_state_invariant(expression_or_kw_list, nil, caller, meta)
-    end
-
-    :ok
+    register_each(expression_or_kw_list, fn expr, label ->
+      Bond.Compiler.register_state_invariant(expr, label, caller, meta)
+    end)
   end
 
-  # `@transition_invariant` (#34). Mirrors `register_state_invariant/3`, routing each assertion
-  # to `Bond.Compiler.register_transition_invariant/4`.
+  # `@transition_invariant` (#34, `Bond.Server`).
   defp register_transition_invariant(expression_or_kw_list, caller, meta) do
-    if Keyword.keyword?(expression_or_kw_list) do
-      for {label, expr} <- expression_or_kw_list do
-        Bond.Compiler.register_transition_invariant(expr, label, caller, meta)
-      end
-    else
-      Bond.Compiler.register_transition_invariant(expression_or_kw_list, nil, caller, meta)
-    end
-
-    :ok
+    register_each(expression_or_kw_list, fn expr, label ->
+      Bond.Compiler.register_transition_invariant(expr, label, caller, meta)
+    end)
   end
 
   # Build the AST for a `check` call honouring the per-module `:checks` config:
