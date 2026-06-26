@@ -1,6 +1,6 @@
 # About
 
-Bond is a Design By Contract library for Elixir. It lets you attach
+Bond is a Design by Contract library for Elixir. It lets you attach
 executable specifications to functions:
 
 - **`@pre`** describes what a function expects from its caller.
@@ -39,7 +39,7 @@ shape on the boundary, contracts inside).
 
 ## Background
 
-Design By Contract was developed by Bertrand Meyer for the Eiffel
+Design by Contract was developed by Bertrand Meyer for the Eiffel
 language in the mid-1980s, building on earlier formal-specification
 work by Tony Hoare and others. For prior art in the Elixir ecosystem —
 `elixir-contracts`, `ExContract`, `Oath` — and how Bond came to exist

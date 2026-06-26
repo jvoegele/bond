@@ -4,7 +4,7 @@
 
 <!-- README START -->
 
-Design By Contract for Elixir.
+Design by Contract for Elixir.
 
 Bond lets you attach preconditions and postconditions to your functions and
 verify them at runtime. A contract is a plain Elixir boolean expression with
@@ -26,7 +26,7 @@ location, and the local binding — telling you exactly what went wrong and
 where.
 
 Bond is an implementation of the
-[Design By Contract](https://en.wikipedia.org/wiki/Design_by_contract)
+[Design by Contract](https://en.wikipedia.org/wiki/Design_by_contract)
 methodology (also called _programming by contract_), introduced by Bertrand
 Meyer with the Eiffel language. See the
 [About](guides/about.md) guide for background.
@@ -262,7 +262,7 @@ end
 - **`@transition_invariant`** (bindings `old_state`, `new_state`) relates the prior
   state to the next across every transition — `handle_call/3`, `handle_cast/2`,
   `handle_info/2`, `handle_continue/2`. `init/1` and `code_change/3` are re-creations
-  and are exempt. (A transition invariant is what the Design-by-Contract literature
+  and are exempt. (A transition invariant is what the Design by Contract literature
   calls a *history constraint*.)
 
 Both raise `Bond.InvariantError` on violation — the same error as a struct `@invariant`,

@@ -20,7 +20,7 @@ defmodule Bond.MixProject do
       test_coverage: [tool: ExCoveralls],
 
       # Hex
-      description: "Design By Contract (DbC) for Elixir",
+      description: "Design by Contract (DbC) for Elixir",
       package: package(),
 
       # Docs

@@ -1,6 +1,6 @@
 defmodule Bond.Server do
   @moduledoc """
-  Design-by-Contract for `GenServer` process state.
+  Design by Contract for `GenServer` process state.
 
   Bond's struct `@invariant` constrains every *value* of a type, but the state most worth
   constraining in Elixir is the state that changes over time inside a process. `Bond.Server`
@@ -44,7 +44,7 @@ defmodule Bond.Server do
 
   It is checked across every transition callback — `handle_call/3`, `handle_cast/2`,
   `handle_info/2`, `handle_continue/2` — and a violation raises `Bond.InvariantError` (with
-  `:kind` `:transition_invariant`). A transition invariant is what the Design-by-Contract
+  `:kind` `:transition_invariant`). A transition invariant is what the Design by Contract
   literature calls a *history constraint* (Liskov & Wing).
   `init/1` and `code_change/3` are treated as re-creations: they establish a new state (checked by
   `@state_invariant`) but have no comparable prior state, so transition invariants do not apply to

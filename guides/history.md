@@ -1,6 +1,6 @@
 # History
 
-The ideas and philosophy of Design By Contract are, of course, not original to
+The ideas and philosophy of Design by Contract are, of course, not original to
 Bond, having first been developed by Bertrand Meyer in the mid 1980s. Meyer's
 work was itself based on earlier work in the field of formal specification and
 verification, by Tony Hoare and others.
@@ -28,13 +28,13 @@ from [yours truly](https://github.com/jvoegele).
 
 At ElixirConf 2019, Chris Keathley gave a talk titled
 [Contracts for Building Reliable Systems](https://www.youtube.com/watch?v=tpo3JUyVIjQ),
-which presented the ideas of Design By Contract using `ExContract` for
+which presented the ideas of Design by Contract using `ExContract` for
 its examples, as well as the distinct but related idea of data specification
 using his library [Norm](https://github.com/elixir-toniq/norm), which we'll come
 back to shortly. (I happened to be in the audience for this talk and was pleased
 to see that a library that I was actively contributing to at the time was being
 presented to the Elixir community at large.) Shortly thereafter, Keathley
-released his own library for Design By Contract in Elixir:
+released his own library for Design by Contract in Elixir:
 [Oath](https://github.com/keathley/oath). Oath supports the same basic notions
 as earlier DbC libraries of having preconditions and postconditions attached to
 functions, but does so using a different (and rather verbose) syntax based on
@@ -49,7 +49,7 @@ as of April of 2021 (22 commits in this time).
 
 ## Raison d'être
 
-After growing dissatisfied with the existing offerings for Design By Contract in
+After growing dissatisfied with the existing offerings for Design by Contract in
 Elixir, I decided to create my own.
 
 `ExContract` provided the most complete implementation and documentation, but

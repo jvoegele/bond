@@ -206,7 +206,7 @@ a new one. The `non_negative` invariant raises `Bond.InvariantError` (with `:kin
 state (`old_state`) and the next state (`new_state`) that must hold across *every*
 transition. It has no struct-level analog — a struct `@invariant` constrains every
 *value*, whereas a transition invariant constrains every *change*. (In
-Design-by-Contract terms it is a *history constraint*, in the sense of Liskov &
+Design by Contract terms it is a *history constraint*, in the sense of Liskov &
 Wing — but Bond treats it as one more flavour of invariant.)
 
 The `monotonic` invariant above — "the counter never decreases" — is exactly the
