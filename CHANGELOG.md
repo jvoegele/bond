@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Size-boundary probing in `Bond.PropertyTest.probe_contract/2`**
+  ([#43](https://github.com/jvoegele/bond/issues/43)). Preconditions that bound a collection's
+  *size* — `@pre length(items) <= 3`, `byte_size(s) > 0`, `tuple_size(t) == 3`, `map_size(m) >= 1`
+  — are now probed at their edges: Bond constructs lists, binaries, tuples, and maps of the
+  boundary sizes from your generator's output (truncating or padding by cycling elements) instead
+  of leaving those preconditions filter-only. Maps are shrunk only (new keys aren't synthesised);
+  an undersized one is left for the `@pre` filter to discard.
+
+- **`Bond.PropertyTest.FilterTooRestrictiveError`**
+  ([#43](https://github.com/jvoegele/bond/issues/43)). When a precondition discards so many
+  generated inputs that StreamData gives up, `probe_contract/2` now raises a Bond-shaped error that
+  names the function and suggests narrowing your generators (or using `StreamData.bind/2` for
+  relational preconditions), replacing StreamData's generic "too many filtered" message.
+
 ## [1.8.0] - 2026-06-26
 
 Promotes `1.8.0-rc.1` unchanged.
