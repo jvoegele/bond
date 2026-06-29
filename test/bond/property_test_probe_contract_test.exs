@@ -18,6 +18,28 @@ defmodule Bond.PropertyTest.ProbeContractFixtures do
     use Bond
     def identity(x), do: x
   end
+
+  defmodule SizedList do
+    @moduledoc false
+    use Bond
+
+    # A size-wrapper precondition (#43): boundary probes are `{:size, :length, n}` for n in 2..4,
+    # so `probe_contract` constructs lists of those lengths from the base generator and the filter
+    # discards over-long lists. The postcondition is the length-preserving oracle.
+    @pre length(items) <= 3
+    @post length(result) == length(items)
+    def trim(items), do: Enum.reverse(items)
+  end
+
+  defmodule Impossible do
+    @moduledoc false
+    use Bond
+
+    # An unsatisfiable precondition: no generated input survives the filter, so `probe_contract`
+    # exhausts StreamData's discard budget — used to exercise the FilterTooRestrictiveError path.
+    @pre x > 0 and x < 0
+    def echo(x), do: x
+  end
 end
 
 defmodule Bond.PropertyTest.ProbeContractTest do
@@ -34,12 +56,20 @@ defmodule Bond.PropertyTest.ProbeContractTest do
 
   alias Bond.PropertyTest
   alias Bond.PropertyTest.ProbeContractFixtures.Account
+  alias Bond.PropertyTest.ProbeContractFixtures.Impossible
   alias Bond.PropertyTest.ProbeContractFixtures.NoContract
+  alias Bond.PropertyTest.ProbeContractFixtures.SizedList
 
   describe "probe_contract &Mod.fun/N (passing property)" do
     # Base generator straddles the valid range so the filter discards out-of-range draws while the
     # mixed-in boundary candidates probe the edges (0 and 100). The postcondition is the oracle.
     probe_contract(&Account.deposit_fee/1, args: [StreamData.integer(-5..105)])
+
+    # Size-wrapper boundaries (#43): the base generator produces lists up to length 5, so the filter
+    # discards the over-long ones while the constructed length-2/3/4 collections probe the edge.
+    probe_contract(&SizedList.trim/1,
+      args: [StreamData.list_of(StreamData.integer(), max_length: 5)]
+    )
   end
 
   describe "__boundaries__/3" do
@@ -100,6 +130,62 @@ defmodule Bond.PropertyTest.ProbeContractTest do
       assert Enum.any?(candidates, &(&1 in sampled))
       assert Enum.all?(sampled, &(&1 in [1000 | candidates]))
     end
+
+    test "constructs collections of the target size for {:size, ...} probes (#43)" do
+      # The base generator only ever produces a 6-element list, so any other length sampled must be
+      # a constructed boundary collection, proving the size probes resize the base output.
+      base = StreamData.constant([:a, :b, :c, :d, :e, :f])
+      probes = [{:size, :length, 2}, {:size, :length, 3}, {:size, :length, 4}]
+
+      [augmented] = PropertyTest.__augment_generators__([base], %{0 => probes})
+
+      lengths =
+        augmented
+        |> Enum.take(200)
+        |> Enum.map(&length/1)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      assert 6 in lengths
+      assert Enum.any?([2, 3, 4], &(&1 in lengths))
+      assert Enum.all?(lengths, &(&1 in [2, 3, 4, 6]))
+    end
+  end
+
+  describe "__resize__/3 (size-boundary construction, #43)" do
+    test "lists: truncates when too long, pads by cycling when too short, reuses elements" do
+      assert PropertyTest.__resize__(:length, [1, 2, 3, 4], 2) == [1, 2]
+      assert PropertyTest.__resize__(:length, [1, 2], 2) == [1, 2]
+      assert PropertyTest.__resize__(:length, [1, 2], 5) == [1, 2, 1, 2, 1]
+    end
+
+    test "an empty list can't be padded — left unchanged for the @pre filter to discard" do
+      assert PropertyTest.__resize__(:length, [], 3) == []
+      assert PropertyTest.__resize__(:length, [], 0) == []
+    end
+
+    test "binaries: truncate and pad to a target byte size" do
+      assert PropertyTest.__resize__(:byte_size, "hello", 3) == "hel"
+      assert PropertyTest.__resize__(:byte_size, "ab", 5) == "ababa"
+      assert PropertyTest.__resize__(:byte_size, "", 4) == ""
+      assert byte_size(PropertyTest.__resize__(:byte_size, "xyz", 4)) == 4
+    end
+
+    test "tuples: resized via their element list" do
+      assert PropertyTest.__resize__(:tuple_size, {1, 2, 3, 4}, 2) == {1, 2}
+      assert PropertyTest.__resize__(:tuple_size, {1, 2}, 4) == {1, 2, 1, 2}
+    end
+
+    test "maps shrink only — an undersized map is left unchanged" do
+      m = %{a: 1, b: 2, c: 3}
+      assert map_size(PropertyTest.__resize__(:map_size, m, 2)) == 2
+      assert PropertyTest.__resize__(:map_size, %{a: 1}, 3) == %{a: 1}
+    end
+
+    test "a value the wrapper doesn't match is left unchanged (filtered by @pre)" do
+      assert PropertyTest.__resize__(:length, "not a list", 2) == "not a list"
+      assert PropertyTest.__resize__(:map_size, %URI{}, 1) == %URI{}
+    end
   end
 
   describe "underlying mechanism (filter discards out-of-precondition draws)" do
@@ -132,6 +218,18 @@ defmodule Bond.PropertyTest.ProbeContractTest do
       assert expanded =~ ~r"apply\("
     end
 
+    test "wraps the generation in a rescue that converts StreamData's filter-exhaustion error (#43)" do
+      ast =
+        quote do
+          probe_contract(&Account.deposit_fee/1, args: [StreamData.integer()])
+        end
+
+      expanded = ast |> Macro.expand_once(__ENV__) |> Macro.to_string()
+
+      assert expanded =~ "StreamData.FilterTooNarrowError"
+      assert expanded =~ "__reraise_too_restrictive__"
+    end
+
     test "raises ArgumentError when :args option is missing" do
       assert_raise ArgumentError, fn ->
         Code.eval_quoted(
@@ -152,6 +250,45 @@ defmodule Bond.PropertyTest.ProbeContractTest do
           end
         )
       end
+    end
+  end
+
+  describe "FilterTooRestrictiveError (over-restrictive precondition, #43)" do
+    test "the underlying filter genuinely exhausts for an unsatisfiable precondition" do
+      # No input satisfies Impossible.echo/1's `@pre`, so StreamData's filter gives up — this is the
+      # raw error `probe_contract` rescues and reshapes. (Driven via Enum, which seeds itself, since
+      # `check all` requires a `property` context.)
+      filtered =
+        StreamData.filter(StreamData.integer(), fn x ->
+          PropertyTest.__satisfies_pre__(Impossible, :echo, 1, [x])
+        end)
+
+      assert_raise StreamData.FilterTooNarrowError, fn -> Enum.take(filtered, 1) end
+    end
+
+    test "__reraise_too_restrictive__ reshapes it into a Bond error naming the function" do
+      narrow = %StreamData.FilterTooNarrowError{last_generated_value: {:value, 7}}
+
+      error =
+        assert_raise Bond.PropertyTest.FilterTooRestrictiveError, fn ->
+          PropertyTest.__reraise_too_restrictive__(narrow, Account, :deposit_fee, 1, [])
+        end
+
+      message = Exception.message(error)
+      assert message =~ "Account.deposit_fee/1"
+      assert message =~ "StreamData.bind/2"
+      assert message =~ "Last generated value: 7"
+    end
+
+    test "the message omits the last-value hint when StreamData captured none" do
+      narrow = %StreamData.FilterTooNarrowError{last_generated_value: :none}
+
+      error =
+        assert_raise Bond.PropertyTest.FilterTooRestrictiveError, fn ->
+          PropertyTest.__reraise_too_restrictive__(narrow, Account, :deposit_fee, 1, [])
+        end
+
+      refute Exception.message(error) =~ "Last generated value"
     end
   end
 end

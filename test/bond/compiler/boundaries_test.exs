@@ -88,6 +88,46 @@ defmodule Bond.Compiler.BoundariesTest do
     end
   end
 
+  describe "extract/2 — size/length-wrapper boundaries (#43)" do
+    test "`length(arg) <= n` yields straddling size probes for that arg" do
+      assert Boundaries.extract([quote(do: length(items) <= 3)], [:items]) == %{
+               0 => [{:size, :length, 2}, {:size, :length, 3}, {:size, :length, 4}]
+             }
+    end
+
+    test "candidate sizes are clamped to non-negative (no size -1)" do
+      assert Boundaries.extract([quote(do: byte_size(s) > 0)], [:s]) == %{
+               0 => [{:size, :byte_size, 0}, {:size, :byte_size, 1}]
+             }
+    end
+
+    test "all four Kernel size wrappers are recognised" do
+      assert Boundaries.extract([quote(do: tuple_size(t) == 3)], [:t]) == %{
+               0 => [{:size, :tuple_size, 2}, {:size, :tuple_size, 3}, {:size, :tuple_size, 4}]
+             }
+
+      assert Boundaries.extract([quote(do: map_size(m) >= 1)], [:m]) == %{
+               0 => [{:size, :map_size, 0}, {:size, :map_size, 1}, {:size, :map_size, 2}]
+             }
+    end
+
+    test "the wrapper may appear on either side of the operator" do
+      assert Boundaries.extract([quote(do: 3 >= length(items))], [:items]) == %{
+               0 => [{:size, :length, 2}, {:size, :length, 3}, {:size, :length, 4}]
+             }
+    end
+
+    test "maps to the correct positional index in a multi-arg function" do
+      assert Boundaries.extract([quote(do: length(items) <= 2)], [:acc, :items]) == %{
+               1 => [{:size, :length, 1}, {:size, :length, 2}, {:size, :length, 3}]
+             }
+    end
+
+    test "a wrapper over a derived expression is not recognised (filter-only)" do
+      assert Boundaries.extract([quote(do: length(tl(items)) <= 3)], [:items]) == %{}
+    end
+  end
+
   describe "extract/2 — intentionally skipped forms (filter-only)" do
     test "relational comparison (arg vs field access) yields no candidates" do
       expr = quote(do: amount <= account.balance)
@@ -97,11 +137,6 @@ defmodule Bond.Compiler.BoundariesTest do
     test "relational comparison (arg vs arg) yields no candidates" do
       expr = quote(do: lo <= hi)
       assert Boundaries.extract([expr], [:lo, :hi]) == %{}
-    end
-
-    test "size/length wrappers yield no candidates" do
-      assert Boundaries.extract([quote(do: length(items) <= 3)], [:items]) == %{}
-      assert Boundaries.extract([quote(do: byte_size(s) > 0)], [:s]) == %{}
     end
 
     test "comparison between two literals yields no candidates" do

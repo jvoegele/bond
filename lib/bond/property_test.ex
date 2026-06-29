@@ -18,9 +18,10 @@ defmodule Bond.PropertyTest do
           contract_holds &Math.sqrt/1, args: [StreamData.float(min: 0.0)]
 
     * **`probe_contract/2` — single function, boundary-driven.** Like `contract_holds/2`, but it
-      mixes the boundary values implied by the function's `@pre` into your generators and *filters*
-      out inputs that violate `@pre` (rather than failing on them), so the function's `@post` is the
-      oracle and its precondition edges are probed deliberately.
+      mixes the boundary values implied by the function's `@pre` into your generators — both value
+      edges (`@pre x >= 0`) and size edges (`@pre length(items) <= 3`, building collections of the
+      boundary size) — and *filters* out inputs that violate `@pre` (rather than failing on them),
+      so the function's `@post` is the oracle and its precondition edges are probed deliberately.
 
           probe_contract &Account.withdraw/2, args: [account_gen(), StreamData.integer()]
 
@@ -169,7 +170,15 @@ defmodule Bond.PropertyTest do
     * **Boundary probing.** Bond reads the function's `__bond_boundaries__/0` reflection (emitted
       from the literal comparisons in its `@pre`) and blends each argument's boundary candidates
       into that argument's generator, so the edges — where off-by-one postcondition bugs live —
-      are hit regularly rather than by chance.
+      are hit regularly rather than by chance. Two kinds of edge are probed:
+        * **Value boundaries** from `arg <op> literal` (e.g. `0` and its neighbours for
+          `@pre x >= 0`) are injected as values.
+        * **Size boundaries** from `length(arg) <op> literal` (and `byte_size`, `tuple_size`,
+          `map_size`) cause Bond to *construct* collections/binaries of the boundary sizes from
+          your generator's output — truncating or padding (by cycling elements) toward the target
+          size — so `@pre length(items) <= 3` is probed with length-2/3/4 lists. A map can only be
+          shrunk toward a smaller target (new keys can't be synthesised safely); an undersized one
+          is left for the `@pre` filter to discard.
     * **`@pre` as a filter, not a guard.** A generated input that violates the precondition is
       *discarded* — a generation miss, not a failure — instead of raising. `contract_holds/2`, by
       contrast, calls the function unconditionally and lets a `@pre` violation fail the property.
@@ -191,8 +200,10 @@ defmodule Bond.PropertyTest do
       `def f(%Account{} = a, n)`), your generator for that argument must produce shape-matching
       values, exactly as the function itself requires.
     * If the precondition is so restrictive that too many generated inputs are discarded,
-      StreamData raises its standard "too many filtered" error — narrow your base generators (or
-      use `StreamData.bind/2` for relational preconditions) so they produce valid inputs more often.
+      `probe_contract/2` raises `Bond.PropertyTest.FilterTooRestrictiveError`, which names the
+      function and suggests narrowing your base generators (or using `StreamData.bind/2` for
+      relational preconditions like `amount <= account.balance`, which boundary injection can't
+      probe for you).
 
   ## Options
 
@@ -217,12 +228,19 @@ defmodule Bond.PropertyTest do
     quote do
       property unquote(name) do
         mod = unquote(mod_ast)
-        boundaries = Bond.PropertyTest.__boundaries__(mod, unquote(fun), unquote(arity))
+        fun = unquote(fun)
+        arity = unquote(arity)
+        boundaries = Bond.PropertyTest.__boundaries__(mod, fun, arity)
         gens = Bond.PropertyTest.__augment_generators__(unquote(args_gens), boundaries)
 
-        check all args <- StreamData.fixed_list(gens),
-                  Bond.PropertyTest.__satisfies_pre__(mod, unquote(fun), unquote(arity), args) do
-          apply(unquote(fun_ast), args)
+        try do
+          check all args <- StreamData.fixed_list(gens),
+                    Bond.PropertyTest.__satisfies_pre__(mod, fun, arity, args) do
+            apply(unquote(fun_ast), args)
+          end
+        rescue
+          error in StreamData.FilterTooNarrowError ->
+            Bond.PropertyTest.__reraise_too_restrictive__(error, mod, fun, arity, __STACKTRACE__)
         end
       end
     end
@@ -246,6 +264,21 @@ defmodule Bond.PropertyTest do
   end
 
   @doc false
+  # Translates StreamData's generic "too many filtered" error into a Bond-shaped one that names the
+  # function whose precondition did the filtering and suggests narrowing the generators (#43). The
+  # original stacktrace is preserved so the failure still points at the user's `probe_contract` call.
+  def __reraise_too_restrictive__(error, mod, fun, arity, stacktrace) do
+    reraise Bond.PropertyTest.FilterTooRestrictiveError,
+            [
+              module: mod,
+              function: fun,
+              arity: arity,
+              last_generated_value: error.last_generated_value
+            ],
+            stacktrace
+  end
+
+  @doc false
   # The generation filter: true when `args` satisfies the function's `@pre`. Routes through the
   # non-raising `__bond_precondition__/3` shim; a module with no compiled precondition exports no
   # shim, in which case there is nothing to filter and every input passes.
@@ -258,23 +291,111 @@ defmodule Bond.PropertyTest do
   end
 
   @doc false
-  # Blends boundary candidates into each argument's base generator. An argument with candidates is
-  # drawn from its base generator ~75% of the time and a boundary value ~25% of the time, so the
-  # edges are probed regularly while the base generator still drives broad coverage. Arguments with
-  # no candidates keep their generator untouched.
+  # Blends boundary probes into each argument's base generator. An argument with probes is drawn
+  # from its base generator ~75% of the time and a boundary draw ~25% of the time, so the edges are
+  # probed regularly while the base generator still drives broad coverage. Arguments with no probes
+  # keep their generator untouched.
+  #
+  # A probe is either a bare number — a *value* boundary, injected directly via `member_of` — or a
+  # `{:size, wrapper, n}` tuple — a *size* boundary, where a value drawn from the base generator is
+  # resized to `n` (see `__resize__/3`). Value probes and size probes for the same argument are
+  # offered with equal weight inside the boundary draw.
   def __augment_generators__(arg_gens, boundaries)
       when is_list(arg_gens) and is_map(boundaries) do
     arg_gens
     |> Enum.with_index()
-    |> Enum.map(fn {gen, index} ->
-      case Map.get(boundaries, index) do
-        candidates when is_list(candidates) and candidates != [] ->
-          StreamData.frequency([{3, gen}, {1, StreamData.member_of(candidates)}])
+    |> Enum.map(fn {gen, index} -> augment_one(gen, Map.get(boundaries, index)) end)
+  end
 
-        _none ->
-          gen
-      end
-    end)
+  # Blends one argument's boundary probes into its base generator, or returns the base generator
+  # untouched when the argument has no probes (or none that could build a generator).
+  defp augment_one(base_gen, probes) when is_list(probes) and probes != [] do
+    case boundary_choices(base_gen, probes) do
+      [] -> base_gen
+      choices -> StreamData.frequency([{3, base_gen}, {1, StreamData.one_of(choices)}])
+    end
+  end
+
+  defp augment_one(base_gen, _none), do: base_gen
+
+  # Builds the list of boundary generators for one argument from its probe list: at most one
+  # `member_of` generator for all the value probes, plus one resizing generator per size wrapper.
+  defp boundary_choices(base_gen, probes) do
+    {values, sizes} = Enum.split_with(probes, &is_number/1)
+
+    value_choice = if values == [], do: [], else: [StreamData.member_of(values)]
+
+    size_choices =
+      sizes
+      |> Enum.group_by(fn {:size, wrapper, _n} -> wrapper end, fn {:size, _w, n} -> n end)
+      |> Enum.map(fn {wrapper, ns} ->
+        targets = ns |> Enum.uniq() |> Enum.sort()
+
+        StreamData.bind(base_gen, fn value ->
+          StreamData.member_of(Enum.map(targets, &__resize__(wrapper, value, &1)))
+        end)
+      end)
+
+    value_choice ++ size_choices
+  end
+
+  @doc false
+  # Resizes a value drawn from the base generator to a target size `n` for a size boundary, reusing
+  # the value's own elements/bytes so they still satisfy any element-level precondition:
+  #
+  #   * too large → truncate to the first `n`;
+  #   * too small → pad by cycling the existing elements/bytes;
+  #   * empty and `n > 0` → left unchanged (nothing to cycle), so the `@pre` filter discards it as a
+  #     generation miss rather than fabricating elements that might violate the contract;
+  #   * a map that needs to *grow* → left unchanged (new unique keys can't be synthesised safely);
+  #   * a type the wrapper doesn't match (the base generator produced something unexpected) → left
+  #     unchanged, to be caught by the `@pre` filter.
+  #
+  # Leaving a value unchanged is always safe: the precondition is still the oracle, so a value that
+  # can't be coerced to the boundary is simply filtered out rather than probed.
+  def __resize__(:length, value, n) when is_list(value), do: resize_list(value, n)
+  def __resize__(:byte_size, value, n) when is_binary(value), do: resize_binary(value, n)
+
+  def __resize__(:tuple_size, value, n) when is_tuple(value) do
+    value |> Tuple.to_list() |> resize_list(n) |> List.to_tuple()
+  end
+
+  def __resize__(:map_size, value, n) when is_map(value) and not is_struct(value) do
+    resize_map(value, n)
+  end
+
+  def __resize__(_wrapper, value, _n), do: value
+
+  defp resize_list(list, n) do
+    len = length(list)
+
+    cond do
+      len == n -> list
+      len > n -> Enum.take(list, n)
+      list == [] -> list
+      true -> list |> Stream.cycle() |> Enum.take(n)
+    end
+  end
+
+  defp resize_binary(binary, n) do
+    size = byte_size(binary)
+
+    cond do
+      size == n -> binary
+      size > n -> binary_part(binary, 0, n)
+      size == 0 -> binary
+      true -> binary |> :binary.copy(div(n, size) + 1) |> binary_part(0, n)
+    end
+  end
+
+  # Maps can only be shrunk: padding would require fabricating new unique keys, which risks
+  # violating the contract, so an undersized map is left as-is and filtered by `@pre`.
+  defp resize_map(map, n) do
+    if map_size(map) >= n do
+      map |> Enum.take(n) |> Map.new()
+    else
+      map
+    end
   end
 
   @doc """

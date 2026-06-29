@@ -5,11 +5,21 @@ defmodule Bond.Compiler.Boundaries do
   expressions, for contract-driven property testing (#36).
 
   Given a function's precondition expressions and its positional parameter names, `extract/2`
-  finds every comparison of the form `arg <op> literal` (`>=`, `>`, `<=`, `<`, `==`, `!=`, and
-  `arg in low..high`) and maps the argument's *positional index* to a small set of candidate
-  values straddling the boundary — the literal `n` itself plus its neighbours `n - 1` and
-  `n + 1`. `Bond.PropertyTest` later mixes these candidates into the user-supplied generator for
-  that argument so the property is probed exactly at its precondition edges, where off-by-one
+  finds two kinds of boundary and maps the argument's *positional index* to a list of *probes*:
+
+    * **Value boundaries** — `arg <op> literal` (`>=`, `>`, `<=`, `<`, `==`, `!=`, and
+      `arg in low..high`) contribute the bare numbers straddling the boundary: the literal `n`
+      itself plus its neighbours `n - 1` and `n + 1`.
+    * **Size boundaries** — `wrapper(arg) <op> literal`, where `wrapper` is one of `length`,
+      `byte_size`, `tuple_size`, or `map_size`, contribute `{:size, wrapper, n}` tuples for the
+      target sizes straddling the boundary (clamped to `n >= 0` — a collection can't have negative
+      size). `Bond.PropertyTest` constructs collections/binaries of those sizes from the
+      user-supplied generator's output.
+
+  An argument's probe list therefore mixes plain numbers (value probes) and `{:size, …}` tuples
+  (size probes); in practice an argument is one or the other, since a value can't be both a number
+  and a sized collection. `Bond.PropertyTest` mixes these probes into the user-supplied generator
+  for that argument so the property is probed exactly at its precondition edges, where off-by-one
   postcondition bugs live.
 
   ## Why straddle the boundary instead of computing the valid side
@@ -25,12 +35,11 @@ defmodule Bond.Compiler.Boundaries do
 
     * **Relational comparisons** — `amount <= account.balance`: neither side is an `arg <op>
       literal`, so there is no literal boundary to inject. The argument is still exercised through
-      its base generator and filtered by `@pre`.
-    * **Size/length wrappers** — `length(items) <= 10`, `byte_size(s) > 0`: the boundary is on a
-      derived quantity, not on the argument's own value, so no value can be injected directly.
-      (Constructing collections of a target size is a possible future refinement.)
+      its base generator and filtered by `@pre`. (#43)
     * **Stepped ranges** — `arg in low..high//step`: only the plain two-element `low..high` form is
       recognised.
+    * **Wrappers over a derived expression** — `length(tl(items)) <= 3`, `byte_size(a <> b) > 0`:
+      only a wrapper applied *directly* to a bare argument is recognised as a size boundary.
 
   These omissions are safe: a skipped comparison costs only the boundary *probe*, never
   correctness — the precondition is still enforced as the test oracle at every call.
@@ -41,26 +50,38 @@ defmodule Bond.Compiler.Boundaries do
   # for `x != 5` the reverse. The `@pre` filter makes the per-operator semantics fall out for free.
   @comparison_ops [:>=, :>, :<=, :<, :==, :!=]
 
+  # Kernel size/length introspection functions whose argument's *size* a literal comparison bounds
+  # (#43). Each maps to a collection type `Bond.PropertyTest` knows how to resize: `length` → list,
+  # `byte_size` → binary, `tuple_size` → tuple, `map_size` → map.
+  @size_wrappers [:length, :byte_size, :tuple_size, :map_size]
+
   @doc """
-  Extracts boundary candidate values from a list of precondition `expression` ASTs.
+  Extracts boundary probes from a list of precondition `expression` ASTs.
 
   `arg_names` is the function's parameter names in positional order — e.g. `[:account, :amount]`
   for `def withdraw(account, amount)`. Returns a map of `arg_index => sorted, unique list of
-  candidate values`. Arguments that no precondition constrains against a literal are absent from
-  the map (the caller leaves their generator untouched).
+  probes`, where a probe is either a bare number (a *value* boundary) or a `{:size, wrapper, n}`
+  tuple (a *size* boundary — construct a collection of size `n`). Arguments that no precondition
+  constrains against a literal are absent from the map (the caller leaves their generator
+  untouched).
 
       iex> alias Bond.Compiler.Boundaries
       iex> Boundaries.extract([quote(do: amount >= 0)], [:account, :amount])
       %{1 => [-1, 0, 1]}
+
+      iex> alias Bond.Compiler.Boundaries
+      iex> Boundaries.extract([quote(do: length(items) <= 3)], [:items])
+      %{0 => [{:size, :length, 2}, {:size, :length, 3}, {:size, :length, 4}]}
   """
-  @spec extract([Macro.t()], [atom()]) :: %{optional(non_neg_integer()) => [number()]}
+  @type probe :: number() | {:size, atom(), non_neg_integer()}
+  @spec extract([Macro.t()], [atom()]) :: %{optional(non_neg_integer()) => [probe()]}
   def extract(expressions, arg_names) when is_list(expressions) and is_list(arg_names) do
     index_by_name = arg_names |> Enum.with_index() |> Map.new()
 
     expressions
     |> Enum.flat_map(&boundary_pairs(&1, index_by_name))
-    |> Enum.group_by(fn {index, _value} -> index end, fn {_index, value} -> value end)
-    |> Map.new(fn {index, values} -> {index, values |> Enum.uniq() |> Enum.sort()} end)
+    |> Enum.group_by(fn {index, _probe} -> index end, fn {_index, probe} -> probe end)
+    |> Map.new(fn {index, probes} -> {index, probes |> Enum.uniq() |> Enum.sort()} end)
   end
 
   # Walks one expression collecting every `{arg_index, candidate_value}` pair. `Macro.prewalk`
@@ -83,11 +104,21 @@ defmodule Bond.Compiler.Boundaries do
     end
   end
 
-  # `arg <op> literal` (in either operand order).
+  # `arg <op> literal` (value boundary) or `wrapper(arg) <op> literal` (size boundary), in either
+  # operand order. A bare argument yields straddling value probes; a size wrapper yields
+  # `{:size, wrapper, n}` probes for the target sizes.
   defp boundary_at_node({op, _meta, [lhs, rhs]}, index_by_name) when op in @comparison_ops do
-    case arg_literal(lhs, rhs, index_by_name) do
-      nil -> []
-      {index, value} -> Enum.map(candidates(value), &{index, &1})
+    cond do
+      pair = arg_literal(lhs, rhs, index_by_name) ->
+        {index, value} = pair
+        Enum.map(candidates(value), &{index, &1})
+
+      spec = wrapper_literal(lhs, rhs, index_by_name) ->
+        {index, wrapper, value} = spec
+        Enum.map(size_candidates(value), &{index, {:size, wrapper, &1}})
+
+      true ->
+        []
     end
   end
 
@@ -104,6 +135,31 @@ defmodule Bond.Compiler.Boundaries do
   defp pair(nil, _value), do: nil
   defp pair(_index, nil), do: nil
   defp pair(index, value), do: {index, value}
+
+  # Finds the `{arg_index, wrapper, literal}` triple of a comparison where one side is a size
+  # wrapper applied to a bare argument (`length(items) <= 3`) and the other is a numeric literal,
+  # trying each operand order. Returns `nil` when no side is such a wrapper-over-argument call.
+  defp wrapper_literal(lhs, rhs, index_by_name) do
+    wrapper_triple(wrapper_arg(lhs, index_by_name), literal_value(rhs)) ||
+      wrapper_triple(wrapper_arg(rhs, index_by_name), literal_value(lhs))
+  end
+
+  defp wrapper_triple(nil, _value), do: nil
+  defp wrapper_triple(_wrapper_arg, nil), do: nil
+  defp wrapper_triple({index, wrapper}, value), do: {index, wrapper, value}
+
+  # A size wrapper applied directly to a bare argument — `length(items)`, `byte_size(s)`, etc. The
+  # argument node must itself be a bare parameter (same shape rule as `arg_index/2`); a wrapper over
+  # a derived expression like `length(tl(items))` is not recognised. Returns `{arg_index, wrapper}`
+  # or `nil`.
+  defp wrapper_arg({wrapper, _meta, [arg]}, index_by_name) when wrapper in @size_wrappers do
+    case arg_index(arg, index_by_name) do
+      nil -> nil
+      index -> {index, wrapper}
+    end
+  end
+
+  defp wrapper_arg(_other, _index_by_name), do: nil
 
   # A bare argument reference is a variable node `{name, meta, context}` whose name is one of the
   # function's parameters and whose context is an atom (distinguishing it from a call like
@@ -133,4 +189,13 @@ defmodule Bond.Compiler.Boundaries do
   # possible future refinement.
   defp candidates(value) when is_integer(value), do: [value - 1, value, value + 1]
   defp candidates(value) when is_float(value), do: [value - 1.0, value, value + 1.0]
+
+  # Target sizes for a size boundary `n`: `n - 1`, `n`, `n + 1`, clamped to non-negative — a
+  # collection can't have negative size, so `byte_size(s) > 0` (boundary `0`) probes sizes `0` and
+  # `1` only. A non-integer size literal (`length(x) <= 1.5`, nonsensical) yields no probes.
+  defp size_candidates(value) when is_integer(value) do
+    [value - 1, value, value + 1] |> Enum.filter(&(&1 >= 0))
+  end
+
+  defp size_candidates(_value), do: []
 end
