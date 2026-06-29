@@ -152,13 +152,24 @@ generate broadly and let Bond filter, use `probe_contract/2`.
 
 ### `probe_contract/2` — one function, boundary-driven
 
-`probe_contract/2` reads the literal comparisons in a function's `@pre`
-(e.g. `amount >= 0`, `amount <= 100`) and mixes the implied **boundary values** into
-your generators, so the property hits the edges — where off-by-one postcondition bugs
-live — deliberately rather than by chance. It also uses the precondition as a
-**filter**: an input that violates `@pre` is *discarded* (a generation miss, not a
-failure) instead of failing the property, leaving the `@post`/`check` contracts as the
-oracle on the inputs that survive.
+`probe_contract/2` reads the literal comparisons in a function's `@pre` and mixes the
+implied **boundaries** into your generators, so the property hits the edges — where
+off-by-one postcondition bugs live — deliberately rather than by chance. Two kinds of
+edge are probed:
+
+  * **Value boundaries** from `arg <op> literal` (e.g. `amount >= 0`, `amount <= 100`)
+    are injected as values straddling the literal.
+  * **Size boundaries** from `length(arg) <op> literal` (and `byte_size`, `tuple_size`,
+    `map_size`) cause Bond to *construct* collections/binaries of the boundary sizes from
+    your generator's output — so `@pre length(items) <= 3` is probed with length-2/3/4
+    lists. Bond reuses the generated elements (truncating, or padding by cycling them) so
+    they still satisfy any element-level precondition. A map is only ever *shrunk* toward a
+    smaller target, since new unique keys can't be synthesised safely; an undersized one is
+    left for the `@pre` filter to discard.
+
+It also uses the precondition as a **filter**: an input that violates `@pre` is
+*discarded* (a generation miss, not a failure) instead of failing the property, leaving
+the `@post`/`check` contracts as the oracle on the inputs that survive.
 
 ```elixir
 defmodule MyApp.AccountTest do
@@ -217,10 +228,13 @@ raises an `ArgumentError`.
     earns its keep.
 
   * **`probe_contract/2` and over-restrictive preconditions.** Because it filters by
-    `@pre`, a precondition that rejects most generated inputs will make StreamData raise
-    its standard "too many filtered" error. Narrow your base generators toward the valid
-    range (as with `StreamData.integer(-5..105)` above), or use `StreamData.bind/2` for
-    relational preconditions, so valid inputs are produced often enough.
+    `@pre`, a precondition that rejects most generated inputs will raise
+    `Bond.PropertyTest.FilterTooRestrictiveError` — a Bond-shaped error that names the
+    function and points at the fix, rather than StreamData's generic "too many filtered"
+    message. Narrow your base generators toward the valid range (as with
+    `StreamData.integer(-5..105)` above), or use `StreamData.bind/2` for relational
+    preconditions like `amount <= account.balance` (which boundary injection can't probe
+    for you), so valid inputs are produced often enough.
 
   * **Destructuring heads.** If a single-clause function destructures an argument in its
     head (e.g. `def f(%Account{} = a, n)`), the generator for that argument must produce
