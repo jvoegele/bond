@@ -227,12 +227,32 @@ defmodule Bond.Compiler.Clauses do
       |> MapSet.new()
 
     referenced =
-      Enum.reduce(assertions, MapSet.new(), fn %{expression: expr}, acc ->
-        MapSet.union(acc, collect_var_names(expr))
+      Enum.reduce(assertions, MapSet.new(), fn assertion, acc ->
+        MapSet.union(acc, assertion_referenced_names(assertion))
       end)
 
     MapSet.intersection(referenced, candidates)
   end
+
+  # The parameter names an assertion references. For an ordinary assertion that's just the free
+  # names of its expression. For an assertion scoped to a `where`/`whenever` binding group (#47),
+  # the expression is evaluated *inside* the `case` clause that binds the pattern's names, so:
+  #
+  #   * names bound by the binding pattern are NOT parameter references — they shadow any
+  #     same-named parameter (which is why keeping the parameter would otherwise produce an
+  #     "unused variable" warning), so subtract them; and
+  #   * the binding source IS evaluated in the parameter scope, so its free names ARE references
+  #     (e.g. `whenever({:ok, x} <- acc)` must keep `acc`, or a multi-clause lifted defp would
+  #     drop it).
+  defp assertion_referenced_names(%{
+         binding: %{pattern: pattern, source: source},
+         expression: expr
+       }) do
+    member_refs = MapSet.difference(collect_var_names(expr), pattern_binding_names(pattern))
+    MapSet.union(member_refs, collect_var_names(source))
+  end
+
+  defp assertion_referenced_names(%{expression: expr}), do: collect_var_names(expr)
 
   # For every clause's top-level name, include both `_name` and `name` in the
   # candidate set so contracts referencing either spelling are recognised
