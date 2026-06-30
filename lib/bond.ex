@@ -628,51 +628,13 @@ defmodule Bond do
     )
   end
 
-  # The keyword fixes the arrow, so the two reinforce each other: `where` => `=` (assert the
-  # shape) and `whenever` => `<-` (conditional). A mismatched pair — or a non-binding argument —
-  # is a compile error.
-  defp parse_binding!(:where, {:=, _, [pattern, source]}, _caller), do: {:assert, pattern, source}
+  # Binding-clause parsing lives in `Bond.Compiler.Assertion` so the direct path here and the
+  # inherited-contract capture path (`Bond.Compiler.InheritedContracts`) share one implementation.
+  defp parse_binding!(binder, binding, caller),
+    do: Bond.Compiler.Assertion.parse_binding!(binder, binding, caller)
 
-  defp parse_binding!(:whenever, {:<-, _, [pattern, source]}, _caller),
-    do: {:conditional, pattern, source}
-
-  defp parse_binding!(binder, binding, caller) do
-    {arrow, example} =
-      if binder == :where,
-        do: {"=", "where(pattern = source)"},
-        else: {"<-", "whenever(pattern <- source)"}
-
-    raise CompileError,
-      file: caller.file,
-      line: caller.line,
-      description:
-        "`#{binder}` requires a `pattern #{arrow} source` binding, e.g. `#{example}`. " <>
-          "Got: #{Macro.to_string(binding)}. (`where` uses `=` and asserts the shape; " <>
-          "`whenever` uses `<-` and is conditional.)"
-  end
-
-  # The scoped assertions of a `where`/`whenever` form: the args after the binding, handled
-  # exactly like a normal `@pre`/`@post` body — bare positional assertions and/or a trailing
-  # keyword list of `label: assertion`. Returns `[{label, expression}]` with `label` `nil` for a
-  # bare assertion. At least one is required (a bare shape check is `<~`).
-  defp parse_scoped_assertions!(binder, [], caller) do
-    raise CompileError,
-      file: caller.file,
-      line: caller.line,
-      description:
-        "`#{binder}` needs at least one assertion after the binding. For a bare shape check " <>
-          "with no further assertions, use `<~` instead, e.g. `@post {:ok, _} <~ result`."
-  end
-
-  defp parse_scoped_assertions!(_binder, scoped, _caller) do
-    Enum.flat_map(scoped, fn arg ->
-      if Keyword.keyword?(arg) do
-        Enum.map(arg, fn {label, expr} -> {label, expr} end)
-      else
-        [{nil, arg}]
-      end
-    end)
-  end
+  defp parse_scoped_assertions!(binder, scoped, caller),
+    do: Bond.Compiler.Assertion.parse_scoped_assertions!(binder, scoped, caller)
 
   # Shared by the `@pre_weaken`/`@post_strengthen` clause and the qualified `Bond.pre_weaken/1` /
   # `Bond.post_strengthen/1` macros. Registers each assertion tagged with its refinement role so

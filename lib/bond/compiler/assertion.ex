@@ -162,6 +162,61 @@ defmodule Bond.Compiler.Assertion do
     %{assertion | binding: binding}
   end
 
+  @doc false
+  # Parses a `where`/`whenever` binding clause into `{mode, pattern, source}`. The keyword fixes
+  # the arrow, so the two reinforce each other: `where` => `=` (`:assert` — the result *is* this
+  # shape, a mismatch fails) and `whenever` => `<-` (`:conditional` — a mismatch is vacuous). A
+  # mismatched pair or a non-binding argument raises a `CompileError` at `env`'s location.
+  # Shared by the direct `@pre`/`@post`/… path (`lib/bond.ex`) and the inherited-contract capture
+  # path (`Bond.Compiler.InheritedContracts`).
+  @spec parse_binding!(:where | :whenever, Macro.t(), Macro.Env.t()) ::
+          {:assert | :conditional, Macro.t(), Macro.t()}
+  def parse_binding!(:where, {:=, _, [pattern, source]}, _env), do: {:assert, pattern, source}
+
+  def parse_binding!(:whenever, {:<-, _, [pattern, source]}, _env),
+    do: {:conditional, pattern, source}
+
+  def parse_binding!(binder, binding, %Macro.Env{} = env) do
+    {arrow, example} =
+      if binder == :where,
+        do: {"=", "where(pattern = source)"},
+        else: {"<-", "whenever(pattern <- source)"}
+
+    raise CompileError,
+      file: env.file,
+      line: env.line,
+      description:
+        "`#{binder}` requires a `pattern #{arrow} source` binding, e.g. `#{example}`. " <>
+          "Got: #{Macro.to_string(binding)}. (`where` uses `=` and asserts the shape; " <>
+          "`whenever` uses `<-` and is conditional.)"
+  end
+
+  @doc false
+  # The scoped assertions of a `where`/`whenever` form: the args after the binding, handled exactly
+  # like a normal contract body — bare positional assertions and/or a trailing keyword list of
+  # `label: assertion`. Returns `[{label, expression}]` with `label` `nil` for a bare assertion. At
+  # least one is required (a bare shape check is `<~`).
+  @spec parse_scoped_assertions!(:where | :whenever, [Macro.t()], Macro.Env.t()) ::
+          [{Bond.assertion_label() | nil, Macro.t()}]
+  def parse_scoped_assertions!(binder, [], %Macro.Env{} = env) do
+    raise CompileError,
+      file: env.file,
+      line: env.line,
+      description:
+        "`#{binder}` needs at least one assertion after the binding. For a bare shape check " <>
+          "with no further assertions, use `<~` instead, e.g. `@post {:ok, _} <~ result`."
+  end
+
+  def parse_scoped_assertions!(_binder, scoped, %Macro.Env{} = _env) do
+    Enum.flat_map(scoped, fn arg ->
+      if Keyword.keyword?(arg) do
+        Enum.map(arg, fn {label, expr} -> {label, expr} end)
+      else
+        [{nil, arg}]
+      end
+    end)
+  end
+
   @doc """
   Validates that `expression` is a valid assertion expression — a quoted Elixir
   AST node satisfying `is_assertion_expression/1`. Returns `:ok` on success;
