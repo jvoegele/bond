@@ -605,10 +605,27 @@ defmodule Bond do
   # `Bond.post/1` macros. Registers a bare assertion or each `label: assertion` pair into the
   # per-module FSM.
   defp register_pre_or_post(pre_or_post, expression, caller, meta) do
-    register_each(expression, fn expr, label ->
-      Bond.Compiler.register_assertion(pre_or_post, expr, label, caller, meta)
-    end)
+    case binding_expression(expression) do
+      {binder, binding, scoped} ->
+        register_binding_form(pre_or_post, binder, binding, scoped, caller, meta)
+
+      nil ->
+        register_each(expression, fn expr, label ->
+          Bond.Compiler.register_assertion(pre_or_post, expr, label, caller, meta)
+        end)
+    end
   end
+
+  # Recognises the "all-inside" `where`/`whenever` form — `where(binding, assertion…)` as a single
+  # expression — used by the call-style entry points (`Bond.pre`/`Bond.post`/`Bond.invariant`, and
+  # the single-arg `@pre`/`@post`/`@invariant` clause). The `@`-prefix form `@post where(binding),
+  # assertion…` is matched directly by the `@` clauses instead and never reaches here. Returns
+  # `{binder, binding_clause, scoped_assertions}` or `nil`. Call macros are fixed-arity so they
+  # can't take the trailing-assertions shape; the assertions ride inside the `where(…)` call.
+  defp binding_expression({binder, _, [binding | scoped]}) when binder in [:where, :whenever],
+    do: {binder, binding, scoped}
+
+  defp binding_expression(_expression), do: nil
 
   # `@pre`/`@post where(...)`/`whenever(...)` (#47): parse + validate the binding clause, collect
   # the scoped assertions, and hand them to `Bond.Compiler.register_binding_group/7` to register
@@ -670,9 +687,15 @@ defmodule Bond do
 
   # Shared by the `@invariant` single-argument clause and the qualified `Bond.invariant/1` macro.
   defp register_invariant(expression_or_kw_list, caller, meta) do
-    register_each(expression_or_kw_list, fn expr, label ->
-      Bond.Compiler.register_invariant(expr, label, caller, meta)
-    end)
+    case binding_expression(expression_or_kw_list) do
+      {binder, binding, scoped} ->
+        register_invariant_binding_form(binder, binding, scoped, caller, meta)
+
+      nil ->
+        register_each(expression_or_kw_list, fn expr, label ->
+          Bond.Compiler.register_invariant(expr, label, caller, meta)
+        end)
+    end
   end
 
   # `@invariant where(...)`/`whenever(...)` (#47): same parse/validate as `@pre`/`@post`, routed to
