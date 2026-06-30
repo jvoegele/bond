@@ -102,6 +102,21 @@ defmodule Bond.Behaviour do
   """
   defmacro @pre_post_callback_or_other
 
+  # `where`/`whenever` binding forms (#47) are not yet supported in inherited (behaviour)
+  # contracts. Catch them here with a clear message rather than letting `@post where(...), …`
+  # fall through to `Kernel.@/1`'s cryptic "expected 0 or 1 argument for @post" arity error.
+  defmacro @{pre_or_post, _meta, [{binder, _, [_]} | _]}
+           when pre_or_post in [:pre, :post] and binder in [:where, :whenever] do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description:
+        "Bond: `#{binder}` binding forms are not supported in `Bond.Behaviour` callback " <>
+          "contracts (yet — #47 covers direct `@pre`/`@post`/`@invariant`/server invariants " <>
+          "only). Use a plain shape assertion with the `<~` operator, e.g. " <>
+          "`@post ({:ok, x} when is_integer(x)) <~ result`."
+  end
+
   # `@pre`/`@post`: accumulate as pending contracts for the next `@callback`. Supports the bare
   # form (`@pre amount > 0`) and the keyword-list form (`@pre positive: amount > 0`), mirroring
   # the `use Bond` syntax. Expands to `:ok` — the contract is stashed in a module attribute at

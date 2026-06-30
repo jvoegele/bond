@@ -249,5 +249,37 @@ defmodule Bond.AssertionSyntaxErrorsTest do
         Code.eval_string(code)
       end
     end
+
+    test "raises a clear (not-yet-supported) error in a Bond.Behaviour contract" do
+      code = """
+      defmodule Bond.AssertionSyntaxErrorsTest.BehWhere do
+        use Bond.Behaviour
+        @post where({:ok, x} = result), pos: x > 0
+        @callback f() :: {:ok, integer()}
+      end
+      """
+
+      assert_raise CompileError,
+                   ~r/`where` binding forms are not supported in `Bond.Behaviour`/,
+                   fn ->
+                     Code.eval_string(code)
+                   end
+    end
+
+    test "raises a clear (not-yet-supported) error in a Bond.Protocol contract" do
+      code = """
+      defprotocol Bond.AssertionSyntaxErrorsTest.ProtoWhenever do
+        use Bond.Protocol
+        @post whenever({:ok, x} <- result), pos: x > 0
+        def f(t)
+      end
+      """
+
+      assert_raise CompileError,
+                   ~r/`whenever` binding forms are not supported in `Bond.Protocol`/,
+                   fn ->
+                     Code.eval_string(code)
+                   end
+    end
   end
 end
