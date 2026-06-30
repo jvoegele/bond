@@ -36,7 +36,18 @@ defmodule Bond.Compiler.Assertion do
     # `nil` for an ordinary `@pre`/`@post`. Set by `Bond.Compiler.register_assertion/6` from
     # the `@pre_weaken`/`@post_strengthen` macros; consumed by `merge_inherited_contract/2` to
     # partition impl assertions and fold them per the Eiffel variance rules (#16).
-    :refinement
+    :refinement,
+    # The destructuring binding group this assertion is scoped to, or `nil` for an ordinary
+    # assertion. A `where`/`whenever` contract form (#47) binds a pattern from a source value and
+    # scopes a run of assertions to it; every assertion in that run shares one `binding` map:
+    #
+    #   %{mode: :assert | :conditional, pattern: Macro.t(), source: Macro.t(), group_id: String.t()}
+    #
+    # `:assert` (`where`, arrow `=`) makes a non-match a contract violation; `:conditional`
+    # (`whenever`, arrow `<-`) makes a non-match vacuously satisfied. `group_id` ties the run's
+    # members together so `assertions_eval_list/3` can wrap them in a single `case` over `source`
+    # that binds `pattern`'s names for the members. Set by `Bond.Compiler.register_binding_group/6`.
+    :binding
   ]
 
   @type t :: t(Bond.assertion_kind())
@@ -51,7 +62,19 @@ defmodule Bond.Compiler.Assertion do
           meta: list(),
           source_behaviour: module() | nil,
           source_contract: {module(), atom()} | nil,
-          refinement: :pre_weaken | :post_strengthen | nil
+          refinement: :pre_weaken | :post_strengthen | nil,
+          binding: binding() | nil
+        }
+
+  @typedoc """
+  A destructuring binding group shared by every assertion scoped to one `where`/`whenever`
+  contract form (#47). See the `:binding` field on `t:t/0`.
+  """
+  @type binding :: %{
+          mode: :assert | :conditional,
+          pattern: Macro.t(),
+          source: Macro.t(),
+          group_id: String.t()
         }
 
   @type function_info :: {atom(), non_neg_integer()}
@@ -124,6 +147,19 @@ defmodule Bond.Compiler.Assertion do
   def put_refinement(%__MODULE__{} = assertion, refinement)
       when refinement in [:pre_weaken, :post_strengthen] do
     %{assertion | refinement: refinement}
+  end
+
+  @doc """
+  Tags an assertion with the `where`/`whenever` destructuring binding group it belongs to (#47).
+
+  Every assertion scoped to one `where`/`whenever` form shares the same `binding` map; the common
+  `group_id` lets `assertions_eval_list/3` wrap the run's members in a single `case` over the
+  bound `source`. Used by `Bond.Compiler.register_binding_group/6`.
+  """
+  @spec put_binding(t(), binding()) :: t()
+  def put_binding(%__MODULE__{} = assertion, %{mode: mode, group_id: group_id} = binding)
+      when mode in [:assert, :conditional] and is_binary(group_id) do
+    %{assertion | binding: binding}
   end
 
   @doc """
