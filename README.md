@@ -852,7 +852,7 @@ on is safe across upgrades, those two guides are the source of truth.
 ```elixir
 def deps do
   [
-    {:bond, "~> 1.9"}
+    {:bond, "~> 1.10"}
   ]
 end
 ```
