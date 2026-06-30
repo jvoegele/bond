@@ -927,6 +927,41 @@ defmodule Bond.Compiler do
     do: Assertion.put_refinement(assertion, refinement)
 
   @doc false
+  # Registers the assertions scoped to one `where`/`whenever` destructuring form (#47). Each
+  # `{label, expression}` becomes an ordinary `%Assertion{}` (so it keeps its own id, label,
+  # telemetry, and Dialyzer-laundering) tagged with a shared `binding` group — `mode` is `:assert`
+  # for `where` (`=`, a non-match is a violation) or `:conditional` for `whenever` (`<-`, a
+  # non-match is vacuous), and `pattern`/`source` are the destructuring pattern and the value it
+  # is matched against. The common `group_id` lets `Assertion.assertions_eval_list/3` recognise
+  # the run's members and wrap them in a single `case` over `source`. Members are registered
+  # contiguously so they stay adjacent in the FSM's accumulation order.
+  def register_binding_group(pre_or_post, mode, pattern, source, labelled_assertions, env, meta)
+      when pre_or_post in [:pre, :post] and mode in [:assert, :conditional] do
+    kind = if pre_or_post == :pre, do: :precondition, else: :postcondition
+
+    binding = %{
+      mode: mode,
+      pattern: pattern,
+      source: source,
+      group_id: Assertion.generate_group_id()
+    }
+
+    fsm_event = if kind == :precondition, do: :precondition_def, else: :postcondition_def
+
+    for {label, expression} <- labelled_assertions do
+      Assertion.validate_expression!(expression, env)
+
+      assertion =
+        Assertion.new(kind, label, expression, env, meta)
+        |> Assertion.put_binding(binding)
+
+      apply(FSM, fsm_event, [fsm(env), assertion])
+    end
+
+    :ok
+  end
+
+  @doc false
   # Records an `@apply_contract` reference against the next function definition. The reference
   # normalises to `{:local, name}` or `{:remote, module, name}` (the module alias is expanded in
   # the caller's context now, establishing the compile-time dependency for the cross-module read

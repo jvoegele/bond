@@ -549,6 +549,16 @@ defmodule Bond.Compiler.Assertion do
     end
   end
 
+  @doc """
+  Generates a fresh, stable identifier for a `where`/`whenever` binding group (#47).
+
+  Every assertion scoped to one `where`/`whenever` form is tagged (via `put_binding/2`) with a
+  `binding` map carrying this shared `group_id`, so `assertions_eval_list/3` can recognise the
+  run's members and wrap them in a single `case`.
+  """
+  @spec generate_group_id() :: String.t()
+  def generate_group_id, do: generate_unique_id()
+
   @id_chars ~c"0123456789abcdefghijklmnopqrstuvwxyz"
 
   defp generate_unique_id do
