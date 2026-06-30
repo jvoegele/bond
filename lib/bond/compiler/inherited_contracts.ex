@@ -36,13 +36,57 @@ defmodule Bond.Compiler.InheritedContracts do
   end
 
   @doc """
-  Validates and stores a single pending assertion under the context's pending attribute for
-  `kind`.
+  Stashes the assertions scoped to one `where`/`whenever` binding form (#47) as pending contracts
+  for the next callback/protocol function.
+
+  Mirrors `Bond.Compiler.register_binding_group/7` for the inherited-contract path: each member
+  becomes an ordinary pending `%Assertion{}` tagged with a shared binding group (so it round-trips
+  through the behaviour/protocol reflection and re-materialises in the implementer via the same
+  grouped codegen as a direct `@pre`/`@post`). `binder` is `:where` (asserts the shape) or
+  `:whenever` (conditional); `binding_ast` is the `pattern = source` / `pattern <- source` clause;
+  `scoped` is the remaining bare/labelled assertion args.
   """
-  def stash_assertion(%Context{} = ctx, kind, expression, label, %Macro.Env{} = env, meta) do
+  def accumulate_pending_binding_group(
+        %Context{} = ctx,
+        kind,
+        binder,
+        binding_ast,
+        scoped,
+        %Macro.Env{} = env,
+        meta
+      ) do
+    {mode, pattern, source} = Assertion.parse_binding!(binder, binding_ast, env)
+    members = Assertion.parse_scoped_assertions!(binder, scoped, env)
+
+    binding = %{
+      mode: mode,
+      pattern: pattern,
+      source: source,
+      group_id: Assertion.generate_group_id()
+    }
+
+    for {label, expr} <- members, do: stash_assertion(ctx, kind, expr, label, env, meta, binding)
+    :ok
+  end
+
+  @doc """
+  Validates and stores a single pending assertion under the context's pending attribute for
+  `kind`. `binding` tags it as a member of a `where`/`whenever` group (`nil` for an ordinary
+  assertion).
+  """
+  def stash_assertion(
+        %Context{} = ctx,
+        kind,
+        expression,
+        label,
+        %Macro.Env{} = env,
+        meta,
+        binding \\ nil
+      ) do
     Assertion.validate_expression!(expression, env)
 
     assertion = Assertion.new(kind, label, expression, env, meta)
+    assertion = if binding, do: Assertion.put_binding(assertion, binding), else: assertion
 
     # `env.module` is the behaviour module itself — the origin of this inherited contract.
     assertion =
@@ -119,10 +163,10 @@ defmodule Bond.Compiler.InheritedContracts do
          env,
          kind
        ) do
-    for %Assertion{expression: expression} = assertion <- assertions do
+    for %Assertion{} = assertion <- assertions do
       unknown =
-        expression
-        |> Clauses.expression_var_names()
+        assertion
+        |> referenced_names()
         |> MapSet.difference(allowed)
         |> Enum.sort()
 
@@ -133,6 +177,27 @@ defmodule Bond.Compiler.InheritedContracts do
           description: unknown_reference_message(ctx, unknown, {name, arity}, arg_names, kind)
       end
     end
+  end
+
+  # The argument/`result` names an assertion references. For a `where`/`whenever` group member
+  # (#47) the expression is evaluated inside the binding's `case`, so the pattern-bound names are
+  # *not* references (subtract them — they shadow nothing here, they're locally bound) while the
+  # binding source *is* evaluated in the operation's scope (add its references). Mirrors
+  # `Bond.Compiler.Clauses.referenced_param_names/2`'s binding-awareness.
+  defp referenced_names(%Assertion{binding: nil, expression: expression}),
+    do: Clauses.expression_var_names(expression)
+
+  defp referenced_names(%Assertion{
+         binding: %{pattern: pattern, source: source},
+         expression: expression
+       }) do
+    member_refs =
+      MapSet.difference(
+        Clauses.expression_var_names(expression),
+        Clauses.pattern_binding_names(pattern)
+      )
+
+    MapSet.union(member_refs, Clauses.expression_var_names(source))
   end
 
   # Only genuinely named positions are referenceable; unnamed positions get a generated

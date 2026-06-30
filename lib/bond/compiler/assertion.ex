@@ -36,7 +36,18 @@ defmodule Bond.Compiler.Assertion do
     # `nil` for an ordinary `@pre`/`@post`. Set by `Bond.Compiler.register_assertion/6` from
     # the `@pre_weaken`/`@post_strengthen` macros; consumed by `merge_inherited_contract/2` to
     # partition impl assertions and fold them per the Eiffel variance rules (#16).
-    :refinement
+    :refinement,
+    # The destructuring binding group this assertion is scoped to, or `nil` for an ordinary
+    # assertion. A `where`/`whenever` contract form (#47) binds a pattern from a source value and
+    # scopes a run of assertions to it; every assertion in that run shares one `binding` map:
+    #
+    #   %{mode: :assert | :conditional, pattern: Macro.t(), source: Macro.t(), group_id: String.t()}
+    #
+    # `:assert` (`where`, arrow `=`) makes a non-match a contract violation; `:conditional`
+    # (`whenever`, arrow `<-`) makes a non-match vacuously satisfied. `group_id` ties the run's
+    # members together so `assertions_eval_list/3` can wrap them in a single `case` over `source`
+    # that binds `pattern`'s names for the members. Set by `Bond.Compiler.register_binding_group/6`.
+    :binding
   ]
 
   @type t :: t(Bond.assertion_kind())
@@ -51,7 +62,19 @@ defmodule Bond.Compiler.Assertion do
           meta: list(),
           source_behaviour: module() | nil,
           source_contract: {module(), atom()} | nil,
-          refinement: :pre_weaken | :post_strengthen | nil
+          refinement: :pre_weaken | :post_strengthen | nil,
+          binding: binding() | nil
+        }
+
+  @typedoc """
+  A destructuring binding group shared by every assertion scoped to one `where`/`whenever`
+  contract form (#47). See the `:binding` field on `t:t/0`.
+  """
+  @type binding :: %{
+          mode: :assert | :conditional,
+          pattern: Macro.t(),
+          source: Macro.t(),
+          group_id: String.t()
         }
 
   @type function_info :: {atom(), non_neg_integer()}
@@ -124,6 +147,74 @@ defmodule Bond.Compiler.Assertion do
   def put_refinement(%__MODULE__{} = assertion, refinement)
       when refinement in [:pre_weaken, :post_strengthen] do
     %{assertion | refinement: refinement}
+  end
+
+  @doc """
+  Tags an assertion with the `where`/`whenever` destructuring binding group it belongs to (#47).
+
+  Every assertion scoped to one `where`/`whenever` form shares the same `binding` map; the common
+  `group_id` lets `assertions_eval_list/3` wrap the run's members in a single `case` over the
+  bound `source`. Used by `Bond.Compiler.register_binding_group/6`.
+  """
+  @spec put_binding(t(), binding()) :: t()
+  def put_binding(%__MODULE__{} = assertion, %{mode: mode, group_id: group_id} = binding)
+      when mode in [:assert, :conditional] and is_binary(group_id) do
+    %{assertion | binding: binding}
+  end
+
+  @doc false
+  # Parses a `where`/`whenever` binding clause into `{mode, pattern, source}`. The keyword fixes
+  # the arrow, so the two reinforce each other: `where` => `=` (`:assert` — the result *is* this
+  # shape, a mismatch fails) and `whenever` => `<-` (`:conditional` — a mismatch is vacuous). A
+  # mismatched pair or a non-binding argument raises a `CompileError` at `env`'s location.
+  # Shared by the direct `@pre`/`@post`/… path (`lib/bond.ex`) and the inherited-contract capture
+  # path (`Bond.Compiler.InheritedContracts`).
+  @spec parse_binding!(:where | :whenever, Macro.t(), Macro.Env.t()) ::
+          {:assert | :conditional, Macro.t(), Macro.t()}
+  def parse_binding!(:where, {:=, _, [pattern, source]}, _env), do: {:assert, pattern, source}
+
+  def parse_binding!(:whenever, {:<-, _, [pattern, source]}, _env),
+    do: {:conditional, pattern, source}
+
+  def parse_binding!(binder, binding, %Macro.Env{} = env) do
+    {arrow, example} =
+      if binder == :where,
+        do: {"=", "where(pattern = source)"},
+        else: {"<-", "whenever(pattern <- source)"}
+
+    raise CompileError,
+      file: env.file,
+      line: env.line,
+      description:
+        "`#{binder}` requires a `pattern #{arrow} source` binding, e.g. `#{example}`. " <>
+          "Got: #{Macro.to_string(binding)}. (`where` uses `=` and asserts the shape; " <>
+          "`whenever` uses `<-` and is conditional.)"
+  end
+
+  @doc false
+  # The scoped assertions of a `where`/`whenever` form: the args after the binding, handled exactly
+  # like a normal contract body — bare positional assertions and/or a trailing keyword list of
+  # `label: assertion`. Returns `[{label, expression}]` with `label` `nil` for a bare assertion. At
+  # least one is required (a bare shape check is `<~`).
+  @spec parse_scoped_assertions!(:where | :whenever, [Macro.t()], Macro.Env.t()) ::
+          [{Bond.assertion_label() | nil, Macro.t()}]
+  def parse_scoped_assertions!(binder, [], %Macro.Env{} = env) do
+    raise CompileError,
+      file: env.file,
+      line: env.line,
+      description:
+        "`#{binder}` needs at least one assertion after the binding. For a bare shape check " <>
+          "with no further assertions, use `<~` instead, e.g. `@post {:ok, _} <~ result`."
+  end
+
+  def parse_scoped_assertions!(_binder, scoped, %Macro.Env{} = _env) do
+    Enum.flat_map(scoped, fn arg ->
+      if Keyword.keyword?(arg) do
+        Enum.map(arg, fn {label, expr} -> {label, expr} end)
+      else
+        [{nil, arg}]
+      end
+    end)
   end
 
   @doc """
@@ -205,48 +296,140 @@ defmodule Bond.Compiler.Assertion do
   @spec assertions_eval_list([t()], function_info(), module() | nil) :: [Macro.t()]
   def assertions_eval_list(assertions, function_info, function_module \\ nil)
       when is_list(assertions) and is_tuple(function_info) do
-    for %Assertion{expression: expression, definition_env: assertion_env} = assertion <-
-          assertions do
-      assertion_info = %{
-        assertion_id: assertion.id,
-        kind: assertion.kind,
-        label: assertion.label,
-        expression: assertion.code,
-        file: assertion_env.file,
-        line: assertion_env.line,
-        # The MFA module is the module the function is *compiled into* (the implementer for
-        # inherited contracts), not where the assertion text was written. They coincide for
-        # contracts declared directly on the function, so `function_module` is only passed
-        # explicitly for inherited contracts; otherwise fall back to the assertion's env.
-        module: function_module || assertion_env.module,
-        function: function_info,
-        source_behaviour: assertion.source_behaviour,
-        source_contract: assertion.source_contract
-      }
+    grouped_eval(
+      assertions,
+      &build_single_eval(&1, function_info, function_module),
+      &post_shape_mismatch(&1, &2, function_info, function_module)
+    )
+  end
 
-      # Delegate the truthiness check and throw-on-failure to
-      # `Bond.Runtime.Eval.check_assertion/3`, where `result` is typed `term()`. Emitting
-      # `if expression do :ok else throw(...) end` directly here would let Dialyzer prove
-      # the falsy branch unreachable when the user's expression is statically `true`
-      # (e.g. `@pre is_binary(x)` on a `@spec`-narrowed argument), producing Pattern:
-      # `false`, Type: `true` warnings in downstream apps.
-      #
-      # The failure binding is passed as a 0-arity thunk, not an eager `binding()`. A bare
-      # `binding()` builds a keyword list of every variable in this defp's scope (the whole
-      # parameter list, plus `result` and every `old(...)` capture) on EVERY successful
-      # evaluation and discards it unless the assertion fails — ~8 ns per in-scope variable
-      # of pure waste on the hot path. Wrapping it in `fn -> binding() end` captures the
-      # variables cheaply (pointers, ~1 ns each) but defers the list construction to
-      # `check_assertion/3`'s failure clauses, which almost never run. Error contents are
-      # identical; see the bench `bench/runtime_check_overhead.exs` decomposition section.
-      quote do
-        Bond.Runtime.Eval.check_assertion(
-          unquote(expression),
-          unquote(Macro.escape(assertion_info)),
-          fn -> binding() end
-        )
+  @doc false
+  # Shared grouping for every contract kind: `@pre`/`@post`/`@invariant` (via
+  # `assertions_eval_list/3`) and `Bond.Server` state/transition invariants (via
+  # `Bond.Compiler.Server`). Ungrouped assertions (`:binding == nil`) emit one check each via
+  # `build_single`. A run of assertions scoped to a `where`/`whenever` form (#47) shares one
+  # `binding.group_id` and is registered contiguously, so chunking by `group_id` keeps each group
+  # together and wraps it in a single `case` over the bound source. `build_single` builds the
+  # quoted check for one assertion; `build_mismatch` builds the non-match branch for an `:assert`
+  # (`where`) group — it receives the binding and the anchor (first member) — while a
+  # `:conditional` (`whenever`) group's non-match is vacuously `:ok`.
+  @spec grouped_eval([t()], (t() -> Macro.t()), (binding(), t() -> Macro.t())) :: [Macro.t()]
+  def grouped_eval(assertions, build_single, build_mismatch)
+      when is_list(assertions) and is_function(build_single, 1) and is_function(build_mismatch, 2) do
+    assertions
+    |> Enum.chunk_by(fn %Assertion{binding: binding} -> binding && binding.group_id end)
+    |> Enum.flat_map(fn
+      [%Assertion{binding: nil} | _] = singles ->
+        Enum.map(singles, build_single)
+
+      [%Assertion{binding: %{mode: mode} = binding} | _] = group ->
+        mismatch =
+          if mode == :conditional, do: quote(do: :ok), else: build_mismatch.(binding, hd(group))
+
+        [wrap_binding_group(binding, Enum.map(group, build_single), mismatch)]
+    end)
+  end
+
+  # Builds the quoted `check_assertion/3` call for a single assertion. The failure binding is
+  # passed as a 0-arity thunk, not an eager `binding()`. A bare `binding()` builds a keyword list
+  # of every variable in this defp's scope (the whole parameter list, plus `result` and every
+  # `old(...)` capture) on EVERY successful evaluation and discards it unless the assertion fails
+  # — ~8 ns per in-scope variable of pure waste on the hot path. Wrapping it in `fn -> binding()
+  # end` captures the variables cheaply (pointers, ~1 ns each) but defers the list construction
+  # to `check_assertion/3`'s failure clauses, which almost never run. Error contents are
+  # identical; see the bench `bench/runtime_check_overhead.exs` decomposition section.
+  #
+  # Delegating the truthiness check and throw-on-failure to `Bond.Runtime.Eval.check_assertion/3`
+  # (where `result` is typed `term()`) rather than emitting `if expression do :ok else throw(...)
+  # end` here keeps Dialyzer from proving the falsy branch unreachable when the user's expression
+  # is statically `true` (e.g. `@pre is_binary(x)` on a `@spec`-narrowed argument), which would
+  # otherwise produce Pattern: `false`, Type: `true` warnings in downstream apps.
+  defp build_single_eval(
+         %Assertion{expression: expression} = assertion,
+         function_info,
+         function_module
+       ) do
+    assertion_info = assertion_info(assertion, function_info, function_module)
+
+    quote do
+      Bond.Runtime.Eval.check_assertion(
+        unquote(expression),
+        unquote(Macro.escape(assertion_info)),
+        fn -> binding() end
+      )
+    end
+  end
+
+  # Wraps a `where`/`whenever` binding group in a single `case` over the destructured `source`,
+  # whose matching clause binds `pattern`'s names and runs the group's member checks (`member_evals`
+  # — each an ordinary `check_assertion/3` call, so members keep their own labels, telemetry, and
+  # deferred failure binding). `source` flows through `Bond.Predicates.__opaque__/1` — the same
+  # Dialyzer-laundering `<~` uses — so a typespec-implied match can't make the `_` clause look
+  # unreachable. `mismatch` is the non-match branch.
+  defp wrap_binding_group(%{pattern: pattern, source: source}, member_evals, mismatch) do
+    quote do
+      case Bond.Predicates.__opaque__(unquote(source)) do
+        unquote(pattern) ->
+          unquote_splicing(member_evals)
+          :ok
+
+        _ ->
+          unquote(mismatch)
       end
     end
+  end
+
+  # The `:assert` (`where`) non-match branch for `@pre`/`@post`/`@invariant`: a contract violation
+  # raised through the normal failure path by handing `check_assertion/3` a laundered `false` (so
+  # the member kind's error struct and the deferred `binding()` snapshot come for free), with a
+  # `:shape`-labelled info rendering the violated `pattern = source`.
+  defp post_shape_mismatch(binding, anchor, function_info, function_module) do
+    shape_info =
+      anchor
+      |> assertion_info(function_info, function_module)
+      |> Map.put(:label, :shape)
+      |> Map.put(:expression, shape_code(binding))
+
+    quote do
+      Bond.Runtime.Eval.check_assertion(
+        Bond.Predicates.__opaque__(false),
+        unquote(Macro.escape(shape_info)),
+        fn -> binding() end
+      )
+    end
+  end
+
+  # The `binding()` -> single-assertion failure-info map. The MFA module is the module the
+  # function is *compiled into* (the implementer for inherited contracts), not where the assertion
+  # text was written. They coincide for contracts declared directly on the function, so
+  # `function_module` is only passed explicitly for inherited contracts; otherwise fall back to
+  # the assertion's env.
+  defp assertion_info(
+         %Assertion{definition_env: env} = assertion,
+         function_info,
+         function_module
+       ) do
+    %{
+      assertion_id: assertion.id,
+      kind: assertion.kind,
+      label: assertion.label,
+      expression: assertion.code,
+      file: env.file,
+      line: env.line,
+      module: function_module || env.module,
+      function: function_info,
+      source_behaviour: assertion.source_behaviour,
+      source_contract: assertion.source_contract
+    }
+  end
+
+  @doc false
+  # Rendered form of a failed `where` shape match. The error reads, e.g.,
+  # "shape: {:noreply, %{keys: nk}} = result" so the violated pattern is visible. Public so
+  # `Bond.Compiler.Server` renders server-invariant shape failures identically.
+  @spec shape_code(binding()) :: String.t()
+  def shape_code(%{pattern: pattern, source: source}) do
+    Macro.to_string(quote do: unquote(pattern) = unquote(source))
   end
 
   @doc """
@@ -349,42 +532,17 @@ defmodule Bond.Compiler.Assertion do
       when is_list(invariants) and is_tuple(function_info) do
     subject_var = Macro.var(:subject, nil)
 
-    invariants_eval =
-      for %Assertion{
-            kind: :invariant,
-            expression: expression,
-            definition_env: env
-          } = invariant <- invariants do
-        assertion_info = %{
-          assertion_id: invariant.id,
-          kind: :invariant,
-          label: invariant.label,
-          expression: invariant.code,
-          file: env.file,
-          line: env.line,
-          module: env.module,
-          function: function_info
-        }
-
-        # See the corresponding comment in `assertions_body/2` — the if/throw lives in
-        # `Bond.Runtime.Eval.check_assertion/3` so Dialyzer can't prove the falsy branch
-        # unreachable for tautological invariants, and the failure binding is deferred via a
-        # `fn -> binding() end` thunk so the snapshot is only built when an invariant fails.
-        quote do
-          unquote(subject_var) = var!(bond_invariant_value)
-
-          Bond.Runtime.Eval.check_assertion(
-            unquote(expression),
-            unquote(Macro.escape(assertion_info)),
-            fn -> binding() end
-          )
-        end
-      end
-
+    # `subject` is bound once at the top of the body (rather than per invariant) so it is in scope
+    # for every eval — including the member assertions nested inside a `where`/`whenever` group's
+    # `case`, whose source typically destructures `subject`. The actual evaluation reuses
+    # `assertions_eval_list/3`, so invariants get binding-group grouping (#47) on the same code
+    # path as `@pre`/`@post`. See the Dialyzer/deferred-binding note on `build_single_eval/3`.
     quote do
       import Bond.Predicates
 
-      (unquote_splicing(invariants_eval))
+      unquote(subject_var) = var!(bond_invariant_value)
+
+      (unquote_splicing(assertions_eval_list(invariants, function_info)))
     end
   end
 
@@ -428,6 +586,85 @@ defmodule Bond.Compiler.Assertion do
       )
     end
   end
+
+  @doc """
+  Builds the body for a `check where(...)`/`whenever(...)` binding group (#47) — the all-inside
+  form `check(where(binding, assertion…))`.
+
+  Reuses `grouped_eval/3` so the members run inside the same `case` over the bound source as every
+  other contract kind. The bindings are therefore **scoped** (a `case` clause head does not leak),
+  consistent with `@pre`/`@post`. Members evaluate as `:check` assertions, so a violation (or a
+  `where` shape mismatch) throws and is re-raised as a `Bond.CheckError` by the enclosing
+  `Bond.Runtime.Eval.evaluate_check/1`; a `whenever` non-match is vacuously satisfied. The group
+  evaluates to `:ok` (the value-returning behaviour of a bare `check expr` is unaffected).
+  """
+  @spec check_group_body(:where | :whenever, Macro.t(), [Macro.t()], Macro.Env.t(), keyword()) ::
+          Macro.t()
+  def check_group_body(binder, binding_clause, scoped, %Macro.Env{} = env, meta) do
+    {mode, pattern, source} = parse_binding!(binder, binding_clause, env)
+    members_kw = parse_scoped_assertions!(binder, scoped, env)
+
+    binding = %{mode: mode, pattern: pattern, source: source, group_id: generate_group_id()}
+
+    members =
+      for {label, expression} <- members_kw do
+        validate_expression!(expression, env)
+        new(:check, label, expression, env, meta) |> put_binding(binding)
+      end
+
+    eval = grouped_eval(members, &check_single_eval/1, &check_shape_mismatch/2)
+
+    quote do
+      import Bond.Predicates
+
+      (unquote_splicing(eval))
+    end
+  end
+
+  defp check_single_eval(%__MODULE__{expression: expression} = assertion) do
+    quote do
+      Bond.Runtime.Eval.check_assertion(
+        unquote(expression),
+        unquote(Macro.escape(check_group_info(assertion, assertion.code))),
+        fn -> binding() end
+      )
+    end
+  end
+
+  defp check_shape_mismatch(binding, anchor) do
+    info = anchor |> check_group_info(shape_code(binding)) |> Map.put(:label, :shape)
+
+    quote do
+      Bond.Runtime.Eval.check_assertion(
+        Bond.Predicates.__opaque__(false),
+        unquote(Macro.escape(info)),
+        fn -> binding() end
+      )
+    end
+  end
+
+  defp check_group_info(%__MODULE__{definition_env: env} = assertion, expression) do
+    %{
+      assertion_id: assertion.id,
+      kind: :check,
+      label: assertion.label,
+      expression: expression,
+      file: env.file,
+      line: env.line,
+      module: env.module,
+      function: env.function
+    }
+  end
+
+  @doc """
+  Generates a fresh, stable identifier for a `where`/`whenever` binding group (#47).
+
+  Every assertion scoped to one `where`/`whenever` form is tagged (via `put_binding/2`) with a
+  `binding` map carrying this shared `group_id`, so `assertions_eval_list/3` can recognise the
+  run's members and wrap them in a single `case`.
+  """
+  @spec generate_group_id() :: String.t()
+  def generate_group_id, do: generate_unique_id()
 
   @id_chars ~c"0123456789abcdefghijklmnopqrstuvwxyz"
 

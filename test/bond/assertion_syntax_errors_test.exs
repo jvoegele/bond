@@ -178,4 +178,79 @@ defmodule Bond.AssertionSyntaxErrorsTest do
       assert {{:module, _, _, _}, _} = Code.eval_string(code)
     end
   end
+
+  describe "where/whenever (#47) binding-form diagnostics" do
+    test "where with a `<-` arrow raises (where uses `=`)" do
+      code = """
+      defmodule Bond.AssertionSyntaxErrorsTest.WhereWrongArrow do
+        use Bond
+        @post where({:ok, x} <- result), pos: x > 0
+        def f, do: {:ok, 1}
+      end
+      """
+
+      assert_raise CompileError, ~r/`where` requires a `pattern = source` binding/, fn ->
+        Code.eval_string(code)
+      end
+    end
+
+    test "whenever with a `=` arrow raises (whenever uses `<-`)" do
+      code = """
+      defmodule Bond.AssertionSyntaxErrorsTest.WheneverWrongArrow do
+        use Bond
+        @post whenever({:ok, x} = result), pos: x > 0
+        def f, do: {:ok, 1}
+      end
+      """
+
+      assert_raise CompileError, ~r/`whenever` requires a `pattern <- source` binding/, fn ->
+        Code.eval_string(code)
+      end
+    end
+
+    test "where with no scoped assertions raises, pointing at `<~`" do
+      code = """
+      defmodule Bond.AssertionSyntaxErrorsTest.WhereNoBody do
+        use Bond
+        @post where({:ok, _x} = result)
+        def f, do: {:ok, 1}
+      end
+      """
+
+      assert_raise CompileError, ~r/needs at least one assertion.*<~/s, fn ->
+        Code.eval_string(code)
+      end
+    end
+
+    test "a non-binding argument to where raises the binding diagnostic" do
+      code = """
+      defmodule Bond.AssertionSyntaxErrorsTest.WhereNonBinding do
+        use Bond
+        @post where(is_tuple(result)), ok: is_tuple(result)
+        def f, do: {:ok, 1}
+      end
+      """
+
+      assert_raise CompileError, ~r/`where` requires a `pattern = source` binding/, fn ->
+        Code.eval_string(code)
+      end
+    end
+
+    test "the same diagnostics apply on @pre" do
+      code = """
+      defmodule Bond.AssertionSyntaxErrorsTest.PreWhereWrongArrow do
+        use Bond
+        @pre where({:ok, x} <- arg), pos: x > 0
+        def f(arg), do: arg
+      end
+      """
+
+      assert_raise CompileError, ~r/`where` requires a `pattern = source` binding/, fn ->
+        Code.eval_string(code)
+      end
+    end
+
+    # where/whenever IS supported in behaviour/protocol contracts (#47); the inheritance behaviour
+    # and its validation diagnostics are covered in where_whenever_inheritance_test.exs.
+  end
 end

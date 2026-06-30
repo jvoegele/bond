@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Destructuring bindings in contracts: `where` and `whenever`**
+  ([#47](https://github.com/jvoegele/bond/issues/47)). Two new contract forms let assertions use
+  Bond's full assertion syntax — `exists`/`forall`, function calls, comparisons — on names
+  destructured from a value, closing the gap where `<~`'s pattern bindings are trapped and only
+  constrainable via a `when` guard. `where(pattern = source)` asserts the shape (a non-match is a
+  contract violation); `whenever(pattern <- source)` is conditional (a non-match is vacuously
+  satisfied, so case analysis is one `whenever` per shape). The scoped assertions follow as
+  ordinary bare-or-labelled arguments and are each reported individually:
+
+  ```elixir
+  @post where({:noreply, %{keys: new_keys, timer: timer}} = result),
+        timer_ref:  is_reference(timer),
+        has_target: exists(k <- new_keys, k.key == "a")
+  ```
+
+  Available in `@pre`, `@post`, `@invariant`, the `Bond.Server` `@state_invariant` /
+  `@transition_invariant`, **inherited contracts** (`Bond.Behaviour` callbacks and
+  `Bond.Protocol` functions), the qualified `Bond.pre`/`Bond.post`/`Bond.invariant` forms
+  (`at_annotations: false`), and `check/1`. The fixed-arity call forms (qualified + `check`) take
+  the *all-inside* shape `where(binding, assertion…)`; in `check/1` the bindings are scoped (they
+  do not leak past the check). Generated documentation renders each group under a header naming the
+  binding. (The `@pre_weaken`/`@post_strengthen` refinement forms are not yet supported.)
+
+- **`forall`/`exists` in inherited contracts.** A quantifier in a `Bond.Behaviour` or
+  `Bond.Protocol` contract no longer flags its generator variable (`i` in `forall(i <- xs, …)`)
+  as an unknown reference.
+
 ## [1.9.0] - 2026-06-29
 
 ### Added

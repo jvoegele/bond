@@ -37,6 +37,8 @@ defmodule Bond.Compiler.Server do
   # invariant would be meaningless or spurious across them.
   @transition_callbacks [handle_call: 3, handle_cast: 2, handle_info: 2, handle_continue: 2]
 
+  alias Bond.Compiler.Assertion
+
   @doc false
   def __on_definition__(env, kind, fun, params, _guards, body) when kind in [:def, :defp] do
     fa = {fun, length(params)}
@@ -243,30 +245,55 @@ defmodule Bond.Compiler.Server do
     ]
   end
 
-  # The per-assertion `check_assertion/3` calls shared by the check-defp builder. `:function` is
-  # omitted (added on the failure path by the `evaluate_server_invariants/2` catcher); the binding
-  # is deferred via a `fn -> binding() end` thunk so it is built only on failure.
+  # The per-assertion `check_assertion/3` calls shared by the check-defp builder, with
+  # `where`/`whenever` binding groups (#47) wrapped in a `case` via `Assertion.grouped_eval/3`
+  # (the same grouping `@pre`/`@post`/`@invariant` use). `:function` is omitted (added on the
+  # failure path by the `evaluate_server_invariants/2` catcher); the binding is deferred via a
+  # `fn -> binding() end` thunk so it is built only on failure.
   defp assertion_check_calls(assertions, kind) do
-    for assertion <- assertions do
-      env = assertion.definition_env
+    Assertion.grouped_eval(
+      assertions,
+      &server_check_call(&1, kind),
+      &server_shape_mismatch(&1, &2, kind)
+    )
+  end
 
-      assertion_info = %{
-        assertion_id: assertion.id,
-        kind: kind,
-        label: assertion.label,
-        expression: assertion.code,
-        file: env.file,
-        line: env.line,
-        module: env.module
-      }
-
-      quote do
-        Bond.Runtime.Eval.check_assertion(
-          unquote(assertion.expression),
-          unquote(Macro.escape(assertion_info)),
-          fn -> binding() end
-        )
-      end
+  defp server_check_call(assertion, kind) do
+    quote do
+      Bond.Runtime.Eval.check_assertion(
+        unquote(assertion.expression),
+        unquote(Macro.escape(server_assertion_info(assertion, kind, assertion.code))),
+        fn -> binding() end
+      )
     end
+  end
+
+  # The `:assert` (`where`) non-match branch for a server invariant: a laundered `false` through
+  # `check_assertion/3` (so the `:shape` violation flows through `evaluate_server_invariants/2`
+  # identically), rendering the violated `pattern = source`.
+  defp server_shape_mismatch(binding, anchor, kind) do
+    info = server_assertion_info(anchor, kind, Assertion.shape_code(binding), :shape)
+
+    quote do
+      Bond.Runtime.Eval.check_assertion(
+        Bond.Predicates.__opaque__(false),
+        unquote(Macro.escape(info)),
+        fn -> binding() end
+      )
+    end
+  end
+
+  defp server_assertion_info(assertion, kind, expression, label \\ nil) do
+    env = assertion.definition_env
+
+    %{
+      assertion_id: assertion.id,
+      kind: kind,
+      label: label || assertion.label,
+      expression: expression,
+      file: env.file,
+      line: env.line,
+      module: env.module
+    }
   end
 end

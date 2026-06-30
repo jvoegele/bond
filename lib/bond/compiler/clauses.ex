@@ -227,12 +227,32 @@ defmodule Bond.Compiler.Clauses do
       |> MapSet.new()
 
     referenced =
-      Enum.reduce(assertions, MapSet.new(), fn %{expression: expr}, acc ->
-        MapSet.union(acc, collect_var_names(expr))
+      Enum.reduce(assertions, MapSet.new(), fn assertion, acc ->
+        MapSet.union(acc, assertion_referenced_names(assertion))
       end)
 
     MapSet.intersection(referenced, candidates)
   end
+
+  # The parameter names an assertion references. For an ordinary assertion that's just the free
+  # names of its expression. For an assertion scoped to a `where`/`whenever` binding group (#47),
+  # the expression is evaluated *inside* the `case` clause that binds the pattern's names, so:
+  #
+  #   * names bound by the binding pattern are NOT parameter references — they shadow any
+  #     same-named parameter (which is why keeping the parameter would otherwise produce an
+  #     "unused variable" warning), so subtract them; and
+  #   * the binding source IS evaluated in the parameter scope, so its free names ARE references
+  #     (e.g. `whenever({:ok, x} <- acc)` must keep `acc`, or a multi-clause lifted defp would
+  #     drop it).
+  defp assertion_referenced_names(%{
+         binding: %{pattern: pattern, source: source},
+         expression: expr
+       }) do
+    member_refs = MapSet.difference(collect_var_names(expr), pattern_binding_names(pattern))
+    MapSet.union(member_refs, collect_var_names(source))
+  end
+
+  defp assertion_referenced_names(%{expression: expr}), do: collect_var_names(expr)
 
   # For every clause's top-level name, include both `_name` and `name` in the
   # candidate set so contracts referencing either spelling are recognised
@@ -292,16 +312,23 @@ defmodule Bond.Compiler.Clauses do
     MapSet.difference(collect_var_names(ast), match_pattern_bound_names(ast))
   end
 
-  # Collects the names bound by the left-hand pattern of every `<~` match operator in `ast`
-  # (at any depth — e.g. nested inside a `~>` implication). For each `pattern <~ _expr`, only
-  # the pattern's variables are bound; if the pattern carries a `when` guard, the guard's
-  # references are excluded from the binding set so a guard reference to an outer name still
-  # surfaces as free in `expression_var_names/1`.
+  # Collects the names bound *locally* by the binding forms in `ast` (at any depth — e.g. nested
+  # inside a `~>` implication): the left-hand pattern of every `<~` match operator, and the
+  # generator pattern of every `forall`/`exists` quantifier (`i` in `forall(i <- xs, …)`). For a
+  # `<~` pattern carrying a `when` guard, the guard's references are excluded from the binding set
+  # so a guard reference to an outer name still surfaces as free in `expression_var_names/1`.
   defp match_pattern_bound_names(ast) do
     {_, patterns} =
       Macro.prewalk(ast, [], fn
-        {:<~, _, [lhs, _rhs]} = node, acc -> {node, [pattern_of(lhs) | acc]}
-        node, acc -> {node, acc}
+        {:<~, _, [lhs, _rhs]} = node, acc ->
+          {node, [pattern_of(lhs) | acc]}
+
+        {quant, _, [{:<-, _, [pattern, _enum]}, _pred]} = node, acc
+        when quant in [:forall, :exists] ->
+          {node, [pattern | acc]}
+
+        node, acc ->
+          {node, acc}
       end)
 
     Enum.reduce(patterns, MapSet.new(), fn pattern, acc ->
@@ -314,10 +341,12 @@ defmodule Bond.Compiler.Clauses do
   defp pattern_of({:when, _, [pattern, _guard]}), do: pattern
   defp pattern_of(pattern), do: pattern
 
+  @doc false
   # Variable names a pattern binds. Every bare variable in a pattern is a binding *except* a
   # pinned `^var`, which is a reference to an outer value — neutralise pinned subtrees (replace
-  # them with a non-variable node) before collecting so the pinned name stays free.
-  defp pattern_binding_names(pattern) do
+  # them with a non-variable node) before collecting so the pinned name stays free. Public so the
+  # inherited-contract validator can exclude a `where`/`whenever` group pattern's names (#47).
+  def pattern_binding_names(pattern) do
     pattern
     |> Macro.prewalk(fn
       {:^, _, [_pinned]} -> {:__bond_pinned__, [], []}

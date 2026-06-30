@@ -927,6 +927,41 @@ defmodule Bond.Compiler do
     do: Assertion.put_refinement(assertion, refinement)
 
   @doc false
+  # Registers the assertions scoped to one `where`/`whenever` destructuring form (#47). Each
+  # `{label, expression}` becomes an ordinary `%Assertion{}` (so it keeps its own id, label,
+  # telemetry, and Dialyzer-laundering) tagged with a shared `binding` group — `mode` is `:assert`
+  # for `where` (`=`, a non-match is a violation) or `:conditional` for `whenever` (`<-`, a
+  # non-match is vacuous), and `pattern`/`source` are the destructuring pattern and the value it
+  # is matched against. The common `group_id` lets `Assertion.assertions_eval_list/3` recognise
+  # the run's members and wrap them in a single `case` over `source`. Members are registered
+  # contiguously so they stay adjacent in the FSM's accumulation order.
+  def register_binding_group(pre_or_post, mode, pattern, source, labelled_assertions, env, meta)
+      when pre_or_post in [:pre, :post] and mode in [:assert, :conditional] do
+    kind = if pre_or_post == :pre, do: :precondition, else: :postcondition
+
+    binding = %{
+      mode: mode,
+      pattern: pattern,
+      source: source,
+      group_id: Assertion.generate_group_id()
+    }
+
+    fsm_event = if kind == :precondition, do: :precondition_def, else: :postcondition_def
+
+    for {label, expression} <- labelled_assertions do
+      Assertion.validate_expression!(expression, env)
+
+      assertion =
+        Assertion.new(kind, label, expression, env, meta)
+        |> Assertion.put_binding(binding)
+
+      apply(FSM, fsm_event, [fsm(env), assertion])
+    end
+
+    :ok
+  end
+
+  @doc false
   # Records an `@apply_contract` reference against the next function definition. The reference
   # normalises to `{:local, name}` or `{:remote, module, name}` (the module alias is expanded in
   # the caller's context now, establishing the compile-time dependency for the cross-module read
@@ -974,6 +1009,37 @@ defmodule Bond.Compiler do
     normalized = normalize_var_context(expression, [:subject])
     invariant = Assertion.new(:invariant, label, normalized, env, meta)
     FSM.invariant_def(fsm(env), invariant)
+  end
+
+  @doc false
+  # Registers the invariants scoped to one `@invariant where(...)`/`whenever(...)` form (#47).
+  # Like `register_binding_group/7` but for the invariant kind: each member becomes an
+  # `:invariant` `%Assertion{}` tagged with a shared binding group, and — as in
+  # `register_invariant/4` — both the binding source and every member expression have their
+  # `subject` references stripped of hygiene context so they resolve to the `subject` rebound by
+  # `Assertion.invariants_body/2`. The destructuring pattern binds fresh names, so it is left as
+  # written.
+  def register_invariant_binding_group(mode, pattern, source, labelled_assertions, env, meta)
+      when mode in [:assert, :conditional] do
+    binding = %{
+      mode: mode,
+      pattern: pattern,
+      source: normalize_var_context(source, [:subject]),
+      group_id: Assertion.generate_group_id()
+    }
+
+    for {label, expression} <- labelled_assertions do
+      Assertion.validate_expression!(expression, env)
+      normalized = normalize_var_context(expression, [:subject])
+
+      assertion =
+        Assertion.new(:invariant, label, normalized, env, meta)
+        |> Assertion.put_binding(binding)
+
+      FSM.invariant_def(fsm(env), assertion)
+    end
+
+    :ok
   end
 
   # Strip the hygiene context off every reference to an implicit binding (`subject`, `state`,
@@ -1040,6 +1106,93 @@ defmodule Bond.Compiler do
     :ok
   end
 
+  @doc false
+  # `@state_invariant where(...)`/`whenever(...)` (#47): bind from the implicit `state`.
+  def register_state_invariant_binding_group(
+        mode,
+        pattern,
+        source,
+        labelled_assertions,
+        env,
+        meta
+      ) do
+    register_server_invariant_binding_group(
+      :state_invariant,
+      :bond_state_invariants,
+      [:state],
+      mode,
+      pattern,
+      source,
+      labelled_assertions,
+      env,
+      meta
+    )
+  end
+
+  @doc false
+  # `@transition_invariant where(...)`/`whenever(...)` (#47): bind from `old_state`/`new_state`.
+  def register_transition_invariant_binding_group(
+        mode,
+        pattern,
+        source,
+        labelled_assertions,
+        env,
+        meta
+      ) do
+    register_server_invariant_binding_group(
+      :transition_invariant,
+      :bond_transition_invariants,
+      [:old_state, :new_state],
+      mode,
+      pattern,
+      source,
+      labelled_assertions,
+      env,
+      meta
+    )
+  end
+
+  # Shared body: like `register_server_invariant/7` but for a `where`/`whenever` binding group —
+  # each member is stored (newest-last) tagged with the shared binding group, and both the source
+  # and every member expression have their implicit `state`/`old_state`/`new_state` references
+  # normalised (the destructuring pattern binds fresh names, so it is left as written).
+  defp register_server_invariant_binding_group(
+         kind,
+         attr,
+         var_names,
+         mode,
+         pattern,
+         source,
+         labelled_assertions,
+         env,
+         meta
+       )
+       when mode in [:assert, :conditional] do
+    binding = %{
+      mode: mode,
+      pattern: pattern,
+      source: normalize_var_context(source, var_names),
+      group_id: Assertion.generate_group_id()
+    }
+
+    for {label, expression} <- labelled_assertions do
+      Assertion.validate_expression!(expression, env)
+      normalized = normalize_var_context(expression, var_names)
+
+      assertion =
+        Assertion.new(kind, label, normalized, env, meta)
+        |> Assertion.put_binding(binding)
+
+      Module.put_attribute(
+        env.module,
+        attr,
+        (Module.get_attribute(env.module, attr) || []) ++ [assertion]
+      )
+    end
+
+    :ok
+  end
+
   # `@state_invariant` / `@transition_invariant` are only consumed by `Bond.Server` (which sets
   # `@__bond_server__`). In a plain `use Bond` module they are captured but never enforced — a
   # silently-ignored contract. Warn so the missing `use Bond.Server` is loud rather than
@@ -1077,8 +1230,7 @@ defmodule Bond.Compiler do
 
   @doc false
   def check_assertion(expression, label, env, meta, mode) when mode in [true, false] do
-    check = Assertion.new(:check, label, expression, env, meta)
-    body = Assertion.check_body(check)
+    body = check_body(expression, label, env, meta)
 
     quote do
       if Bond.Runtime.Eval.should_evaluate?(:checks, unquote(mode)) do
@@ -1087,6 +1239,18 @@ defmodule Bond.Compiler do
         :ok
       end
     end
+  end
+
+  # `check where(binding, …)`/`whenever(binding, …)` (#47): the all-inside binding form, evaluated
+  # as a scoped group (members run inside the `case`, so the bindings don't leak). Any other
+  # expression is an ordinary single check.
+  defp check_body({binder, _, [binding | scoped]}, _label, env, meta)
+       when binder in [:where, :whenever] do
+    Assertion.check_group_body(binder, binding, scoped, env, meta)
+  end
+
+  defp check_body(expression, label, env, meta) do
+    Assertion.check_body(Assertion.new(:check, label, expression, env, meta))
   end
 
   @spec fsm(Macro.Env.t()) :: FSM.server_ref()

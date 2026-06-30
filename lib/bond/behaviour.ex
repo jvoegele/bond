@@ -102,6 +102,26 @@ defmodule Bond.Behaviour do
   """
   defmacro @pre_post_callback_or_other
 
+  # `@pre`/`@post where(...)`/`whenever(...)` (#47): accumulate the binding group as pending
+  # contracts for the next `@callback`, mirroring the direct path. Matched before the single-arg
+  # clause so a no-body `@post where(...)` is diagnosed by the shared parser rather than stashed.
+  defmacro @{pre_or_post, meta, [{binder, _, [binding]} | scoped]}
+           when pre_or_post in [:pre, :post] and binder in [:where, :whenever] do
+    kind = if pre_or_post == :pre, do: :precondition, else: :postcondition
+
+    InheritedContracts.accumulate_pending_binding_group(
+      ctx(),
+      kind,
+      binder,
+      binding,
+      scoped,
+      __CALLER__,
+      meta
+    )
+
+    :ok
+  end
+
   # `@pre`/`@post`: accumulate as pending contracts for the next `@callback`. Supports the bare
   # form (`@pre amount > 0`) and the keyword-list form (`@pre positive: amount > 0`), mirroring
   # the `use Bond` syntax. Expands to `:ok` — the contract is stashed in a module attribute at

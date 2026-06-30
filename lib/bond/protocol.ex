@@ -89,6 +89,25 @@ defmodule Bond.Protocol do
   @doc false
   defmacro @pre_post_or_other
 
+  # `@pre`/`@post where(...)`/`whenever(...)` (#47): accumulate the binding group as a pending
+  # contract for the next protocol function, mirroring the direct path.
+  defmacro @{pre_or_post, meta, [{binder, _, [binding]} | scoped]}
+           when pre_or_post in [:pre, :post] and binder in [:where, :whenever] do
+    kind = if pre_or_post == :pre, do: :precondition, else: :postcondition
+
+    InheritedContracts.accumulate_pending_binding_group(
+      ctx(),
+      kind,
+      binder,
+      binding,
+      scoped,
+      __CALLER__,
+      meta
+    )
+
+    :ok
+  end
+
   defmacro @{pre_or_post, meta, [expression]} when pre_or_post in [:pre, :post] do
     kind = if pre_or_post == :pre, do: :precondition, else: :postcondition
     InheritedContracts.accumulate_pending(ctx(), kind, expression, __CALLER__, meta)

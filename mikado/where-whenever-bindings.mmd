@@ -1,0 +1,60 @@
+flowchart TD
+%% Mikado graph for destructuring bindings in contracts (GitHub #47).
+%%
+%% Two new contract forms let assertions use Bond's FULL syntax on names bound
+%% from a destructured value (the `<~` operator binds pattern names but they
+%% can't escape its `case`, so today they're only constrainable via a `when`
+%% guard). Both wrap ONLY the binding; the scoped assertions follow as ordinary
+%% (optionally-labelled) @pre/@post args:
+%%
+%%   @post where({:ok, %{urls: u}} = result),   nonempty: length(u) > 0
+%%   @post whenever({:ok, %{urls: u}} <- result), nonempty: length(u) > 0
+%%
+%% `where` (arrow `=`) ASSERTS the shape — a mismatch is a contract violation.
+%% `whenever` (arrow `<-`) is CONDITIONAL — a mismatch is vacuously satisfied,
+%% so case analysis is one `whenever` per shape (no `or {:error,_}` boilerplate).
+%% The keyword carries the semantics lexically (source + docs); the arrow
+%% reinforces it (fixed pairing, mismatch = compile error).
+%%
+%% MECHANISM: each scoped assertion is registered as a first-class %Assertion{}
+%% tagged with a shared binding group {mode, pattern, source, group_id}. At
+%% codegen, `assertions_eval_list/3` chunks a group's members and wraps their
+%% `check_assertion` calls in `case __opaque__(source) do pattern -> members;
+%% _ -> (assert: throw shape-failure | conditional: :ok) end`. Reuses the
+%% existing per-assertion info/telemetry/Dialyzer-laundering pipeline wholesale,
+%% so labels and docs come for free.
+%%
+%% v1 SCOPE: @pre/@post/@invariant/@state_invariant/@transition_invariant.
+%% DEFERRED (fast-follows): check/1 (inline-expression arity model) and the
+%% refinement annotations @pre_weaken/@post_strengthen (or/and fold path).
+%%
+%% Each numbered node is a commit-sized step. Arrows point goal -> prerequisites;
+%% leaves (green) have no further prerequisites. Depth-first per Mikado: pick a
+%% leaf, finish it, commit (suite stays green), repeat.
+
+    G(["**Goal**<br/>where/whenever destructuring bindings (#47)"])
+
+    G --> S9[9. Docs: guide section + moduledoc + public-api freeze + CHANGELOG]
+    S9 --> S8[8. Tests: pre/post assert+conditional, bare/labelled/mixed, multi-line case analysis, mismatch errors + attribution, invariants/state/transition, docs rendering, purge/runtime-toggle]
+    S8 --> S5
+    S8 --> S6[6. ContractDocs: render binding-group header + indented members]
+    S8 --> S7[7. Diagnostics: arrow mismatch, no-body, non-leading binding, bare single-arg where/whenever]
+
+    S6 --> S4
+    S7 --> S4
+    S5[5. Extend to @invariant/@state_invariant/@transition_invariant: invariants_body grouping + bond.ex clauses + Bond.Compiler.Server body path] --> S4
+
+    S4[4. bond.ex @pre/@post leading where/whenever clauses: parse+validate binding, register `rest` as grouped assertions via Compiler.register_binding_group] --> S3
+    S4 --> S2
+
+    S3[3. assertions_eval_list/3: chunk by binding group; extract build_single_eval; add build_group_eval emitting the `case` + mismatch branch] --> S2
+
+    S2[2. Assertion struct: add :binding field {mode, pattern, source, group_id} + put_binding/2; typespec] --> S1
+
+    S1[1. Mikado graph]
+
+    classDef leaf fill:#e7f5e7,stroke:#2e7d32,stroke-width:2px;
+
+    style G fill:#90EE90
+    style S1 fill:#90EE90
+    style S2 fill:#90EE90

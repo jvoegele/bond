@@ -56,6 +56,28 @@ The keyword-list form is the only labelling syntax. The positional forms
 labelled assertion in a single annotation (e.g. `@pre is_binary(x), positive:
 x > 0`) likewise raises a `CompileError` with a specific diagnostic.
 
+#### Destructuring binding forms
+
+  * `@pre where(pattern = source), <assertions>` — asserts the shape (a
+    non-match is a contract violation) and scopes `<assertions>` to the names
+    `pattern` binds.
+  * `@pre whenever(pattern <- source), <assertions>` — conditional (a non-match
+    is vacuously satisfied).
+  * `<assertions>` are ordinary bare and/or labelled assertions, exactly as
+    above. `@post` accepts both forms (binding from `result` or arguments), as
+    do `@invariant` (from `subject`), the `Bond.Server` `@state_invariant` /
+    `@transition_invariant`, and inherited contracts (`Bond.Behaviour` callbacks
+    and `Bond.Protocol` functions). The keyword fixes the arrow (`where` ⇒ `=`,
+    `whenever` ⇒ `<-`); a mismatched pair, a non-binding argument, or an empty
+    body each raise a `CompileError`. See the `Bond` moduledoc for semantics and
+    rendering.
+  * **All-inside form** — `where(pattern = source, <assertions>)`, with the
+    assertions inside the call. Used by the fixed-arity call macros:
+    `Bond.pre`/`Bond.post`/`Bond.invariant` (`at_annotations: false`) and
+    `check/1`. Also accepted in the `@` annotations as an alias of the prefix
+    form. In `check/1` the bindings are scoped (they do not leak past the check)
+    and a violation raises `Bond.CheckError`.
+
 ### `@invariant`
 
   * `@invariant expr` — single expression. Implicit binding `subject`

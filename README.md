@@ -146,6 +146,90 @@ assertion expressions, so you can use these operators directly:
 
 See `Bond.Predicates` for the full list of predicates and operators.
 
+## Destructuring bindings: `where` and `whenever`
+
+The `<~` operator matches a pattern but its bindings don't escape — names
+bound in the pattern can only be constrained by a `when` guard, and guards
+are a closed sublanguage (no `exists`/`forall`, no function calls, no
+comparisons against computed values). When you need Bond's **full** assertion
+syntax on a value nested inside a result — a list inside a map inside a tuple,
+say — reach for `where` or `whenever`.
+
+Both wrap a destructuring binding and scope a set of ordinary (optionally
+labelled) assertions to the names it binds:
+
+```elixir
+# `where` (=) asserts the shape: a non-match is a contract violation.
+@post where({:noreply, %{keys: new_keys, timer: timer}} = result),
+      timer_ref:  is_reference(timer),
+      has_target: exists(k <- new_keys, k.key == "a")
+
+# `whenever` (<-) is conditional: a non-match is vacuously satisfied.
+@post whenever({:ok, %{urls: urls}} <- result),
+      non_empty: urls != [],
+      all_https: forall(u <- urls, String.starts_with?(u, "https"))
+```
+
+The keyword carries the semantics and the arrow reinforces it: **`where` uses
+`=`** (the result *is* this shape — a mismatch fails, exactly like `=` raising
+a `MatchError`), and **`whenever` uses `<-`** (the result *might* match — like
+a `with`/`for` generator, a mismatch is skipped). A mismatched keyword/arrow
+pair is a compile error.
+
+Because `whenever` is vacuous on a non-match, **case analysis is one `whenever`
+per shape** — no `or {:error, _}` boilerplate. Each line checks only its own
+case:
+
+```elixir
+@post whenever({:ok, payload} <- result), valid: valid?(payload)
+@post whenever({:error, reason} <- result), known: reason in [:timeout, :refused]
+```
+
+A nice side effect: each scoped assertion has its own label, so a violation
+pinpoints exactly which shape and constraint failed, rather than reporting a
+single lumped label for a `<~`-with-`when`-guard alternation. If you migrate an
+existing guarded `<~` contract to per-shape `whenever` clauses this way, expect
+the reported violation labels to become more specific — handy in practice, but
+something to update if you have tests asserting on the old label.
+
+The scoped assertions are ordinary assertions — bare or labelled, using any
+predicate, operator, quantifier, or function call — and each is reported
+individually on failure. The forms work in `@pre` (binding from arguments),
+`@post` (and `result`), `@invariant` (from `subject`), and the `Bond.Server`
+`@state_invariant` / `@transition_invariant` (from `state` /
+`old_state`/`new_state`). They are also available in **inherited contracts** —
+`Bond.Behaviour` callback contracts and `Bond.Protocol` function contracts —
+where the binding source references the callback/function's argument names (and
+`result`), exactly like a plain inherited `@pre`/`@post`.
+
+### The all-inside form (call contexts)
+
+The prefix form above (`@post where(binding), assertion…`) relies on the `@`
+syntax. The **call-style** entry points — `Bond.pre`/`Bond.post`/`Bond.invariant`
+(used with `at_annotations: false`) and `check/1` — are ordinary fixed-arity
+macros, so they take the *all-inside* form, where the assertions live inside the
+`where(…)`/`whenever(…)` call:
+
+```elixir
+# at_annotations: false
+Bond.post(where({:ok, items} = result, nonempty: items != []))
+
+# inline check — bindings are scoped to the check (they don't leak), and a
+# violation raises `Bond.CheckError`; a `whenever` non-match is a no-op
+check whenever({:ok, payload} <- fetch(), valid: valid?(payload))
+```
+
+The all-inside form also works in the `@` annotations as an alias of the prefix
+form (`@post where({:ok, x} = result, pos: x > 0)`).
+
+> #### Known limitation {: .info}
+>
+> If a `where`/`whenever` pattern binds a name identical to a top-level
+> function parameter (e.g. a parameter `keys` and a pattern `%{keys: keys}`),
+> that parameter is shadowed inside the group and Elixir emits an "unused
+> variable" warning. The contract is still correct; rename the parameter or
+> the bound name to silence it.
+
 ## `@invariant` for struct modules
 
 `@invariant` declarations specify properties that hold for every value of
