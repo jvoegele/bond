@@ -312,16 +312,23 @@ defmodule Bond.Compiler.Clauses do
     MapSet.difference(collect_var_names(ast), match_pattern_bound_names(ast))
   end
 
-  # Collects the names bound by the left-hand pattern of every `<~` match operator in `ast`
-  # (at any depth — e.g. nested inside a `~>` implication). For each `pattern <~ _expr`, only
-  # the pattern's variables are bound; if the pattern carries a `when` guard, the guard's
-  # references are excluded from the binding set so a guard reference to an outer name still
-  # surfaces as free in `expression_var_names/1`.
+  # Collects the names bound *locally* by the binding forms in `ast` (at any depth — e.g. nested
+  # inside a `~>` implication): the left-hand pattern of every `<~` match operator, and the
+  # generator pattern of every `forall`/`exists` quantifier (`i` in `forall(i <- xs, …)`). For a
+  # `<~` pattern carrying a `when` guard, the guard's references are excluded from the binding set
+  # so a guard reference to an outer name still surfaces as free in `expression_var_names/1`.
   defp match_pattern_bound_names(ast) do
     {_, patterns} =
       Macro.prewalk(ast, [], fn
-        {:<~, _, [lhs, _rhs]} = node, acc -> {node, [pattern_of(lhs) | acc]}
-        node, acc -> {node, acc}
+        {:<~, _, [lhs, _rhs]} = node, acc ->
+          {node, [pattern_of(lhs) | acc]}
+
+        {quant, _, [{:<-, _, [pattern, _enum]}, _pred]} = node, acc
+        when quant in [:forall, :exists] ->
+          {node, [pattern | acc]}
+
+        node, acc ->
+          {node, acc}
       end)
 
     Enum.reduce(patterns, MapSet.new(), fn pattern, acc ->
@@ -334,10 +341,12 @@ defmodule Bond.Compiler.Clauses do
   defp pattern_of({:when, _, [pattern, _guard]}), do: pattern
   defp pattern_of(pattern), do: pattern
 
+  @doc false
   # Variable names a pattern binds. Every bare variable in a pattern is a binding *except* a
   # pinned `^var`, which is a reference to an outer value — neutralise pinned subtrees (replace
-  # them with a non-variable node) before collecting so the pinned name stays free.
-  defp pattern_binding_names(pattern) do
+  # them with a non-variable node) before collecting so the pinned name stays free. Public so the
+  # inherited-contract validator can exclude a `where`/`whenever` group pattern's names (#47).
+  def pattern_binding_names(pattern) do
     pattern
     |> Macro.prewalk(fn
       {:^, _, [_pinned]} -> {:__bond_pinned__, [], []}
