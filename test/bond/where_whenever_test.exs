@@ -162,6 +162,33 @@ defmodule Bond.WhereWheneverTest do
     end
   end
 
+  describe "generated documentation renders binding groups" do
+    defp fetch_fun_doc(mod, fun, arity) do
+      {:docs_v1, _, _, _, _, _, docs} = Code.fetch_docs(mod)
+
+      Enum.find_value(docs, fn
+        {{:function, ^fun, ^arity}, _, _, %{"en" => doc}, _} -> doc
+        _ -> nil
+      end)
+    end
+
+    test "whenever renders a 'matches' header with indented members" do
+      doc = fetch_fun_doc(BondTest.WhereWheneverDocs, :run, 1)
+
+      assert doc =~ "#### Postconditions"
+      assert doc =~ "whenever result matches {:ok, %{urls: urls}}:"
+      assert doc =~ "url_count: length(urls) > 0"
+      assert doc =~ "all_https: forall(u <- urls, String.starts_with?(u, \"https\"))"
+    end
+
+    test "where renders an 'is' header" do
+      doc = fetch_fun_doc(BondTest.WhereWheneverDocs, :run, 1)
+
+      assert doc =~ "where result is {:ok, payload}:"
+      assert doc =~ "tagged: is_map(payload)"
+    end
+  end
+
   describe "multi-clause function binding the source from an argument" do
     defmodule MultiClause do
       use Bond

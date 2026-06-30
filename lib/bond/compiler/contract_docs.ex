@@ -108,19 +108,40 @@ defmodule Bond.Compiler.ContractDocs do
   defp generate_assertion_docs(assertions, opts) do
     header = if header = opts[:header], do: header <> "\n\n", else: ""
 
-    assertions
-    |> Enum.reduce([], fn
-      %{label: nil, code: code}, acc ->
-        [code | acc]
+    lines =
+      assertions
+      |> Enum.chunk_by(fn assertion -> assertion.binding && assertion.binding.group_id end)
+      |> Enum.flat_map(fn
+        [%{binding: nil} | _] = singles -> Enum.map(singles, &assertion_doc_line/1)
+        [%{binding: binding} | _] = group -> binding_group_doc_lines(binding, group)
+      end)
 
-      assertion, acc ->
-        label = assertion.label |> inspect() |> String.trim_leading(":")
-        [[label, ": ", assertion.code] | acc]
-    end)
-    |> Enum.reverse()
-    |> List.insert_at(0, header)
-    |> Enum.intersperse("\n    ")
+    [header | lines] |> Enum.intersperse("\n    ")
   end
+
+  # One documentation line for an assertion: the rendered `code`, prefixed with `label: ` when
+  # labelled.
+  defp assertion_doc_line(%{label: nil, code: code}), do: code
+  defp assertion_doc_line(%{label: label, code: code}), do: [label_string(label), ": ", code]
+
+  # A `where`/`whenever` binding group (#47): a header naming the binding, then its members
+  # indented one extra level beneath it.
+  defp binding_group_doc_lines(binding, members) do
+    member_lines = Enum.map(members, fn member -> ["  ", assertion_doc_line(member)] end)
+    [binding_doc_header(binding) | member_lines]
+  end
+
+  # "where <source> is <pattern>:" (assert) or "whenever <source> matches <pattern>:"
+  # (conditional) — the leading keyword carries the semantics, matching the source.
+  defp binding_doc_header(%{mode: :assert, pattern: pattern, source: source}) do
+    ["where ", Macro.to_string(source), " is ", Macro.to_string(pattern), ":"]
+  end
+
+  defp binding_doc_header(%{mode: :conditional, pattern: pattern, source: source}) do
+    ["whenever ", Macro.to_string(source), " matches ", Macro.to_string(pattern), ":"]
+  end
+
+  defp label_string(label), do: label |> inspect() |> String.trim_leading(":")
 
   @doc """
   Returns a markdown section documenting a module's `@invariant` declarations,
@@ -150,7 +171,15 @@ defmodule Bond.Compiler.ContractDocs do
 
     invariant_lines =
       invariants
-      |> Enum.map(&format_invariant_line/1)
+      |> Enum.chunk_by(fn invariant -> invariant.binding && invariant.binding.group_id end)
+      |> Enum.flat_map(fn
+        [%{binding: nil} | _] = singles ->
+          Enum.map(singles, &format_invariant_line/1)
+
+        [%{binding: binding} | _] = group ->
+          header = IO.iodata_to_binary(binding_doc_header(binding))
+          [header | Enum.map(group, fn member -> "  " <> format_invariant_line(member) end)]
+      end)
       |> Enum.map(&("    " <> &1))
       |> Enum.join("\n")
 
