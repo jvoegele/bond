@@ -196,6 +196,12 @@ defmodule Bond.PropertyTest do
     * Functions whose `@pre` has no literal comparison (or no `@pre` at all) are still exercised:
       there are simply no boundary candidates to inject and nothing to filter, so `probe_contract`
       degrades gracefully to plain generated testing.
+    * **Boundaries come only from `@pre` literal comparisons** — not from constants in the
+      function body. A behaviourally significant value buried in the implementation (e.g. the `5`
+      in `Enum.split(items, 5)`, or a threshold the body branches on) is invisible to
+      `probe_contract`, because Bond reads boundaries from the *precondition*, not the body. If a
+      body constant marks an interesting edge, generate around it yourself (e.g. lists whose length
+      straddles it), or lift it into a `@pre` if it is genuinely part of the contract.
     * If a single-clause function destructures an argument in its head (e.g.
       `def f(%Account{} = a, n)`), your generator for that argument must produce shape-matching
       values, exactly as the function itself requires.

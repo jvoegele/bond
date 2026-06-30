@@ -191,7 +191,10 @@ The difference from `contract_holds/2` is one of intent:
 
 Functions whose `@pre` has no literal comparison (or no `@pre` at all) are still
 exercised — there are simply no boundary candidates to inject and nothing to filter, so
-`probe_contract/2` degrades gracefully to plain generated testing.
+`probe_contract/2` degrades gracefully to plain generated testing. Note that boundaries are
+read from the `@pre` only: a significant constant in the function *body* (the `5` in
+`Enum.split(items, 5)`, say) is invisible to `probe_contract/2`, so generate around such an edge
+yourself — or lift it into a `@pre` if it is genuinely part of the contract.
 
 ### `invariants_hold/2` — stateful module sequences
 
