@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.10.1] - 2026-06-30
+
+A formatter fix: downstream projects that put `:bond` in their `:import_deps` no longer have
+`mix format` re-parenthesise their contracts.
+
+### Fixed
+
+- **Exported formatter rules now cover every contract macro**
+  ([#53](https://github.com/jvoegele/bond/pull/53)). The exported
+  `locals_without_parens` only listed `check`/`old`, so in any project doing
+  `import_deps: [:bond]`, `mix format` re-parenthesised multi-argument contracts — labelled
+  `@post`, every `@state_invariant`/`@invariant`/`@transition_invariant`, and all
+  `where`/`whenever` forms. `@post where(...), a, b` parses as `@(post(where(...), [a, b]))`,
+  and the formatter only omits the parens around the inner `post(...)` call when `post` is in
+  the *formatting* project's `locals_without_parens`; the `@`-prefix special case spares only
+  the single-argument form. Bond now exports the full contract-macro set (`pre`, `post`,
+  `invariant`, `state_invariant`, `transition_invariant`, `check`) at any arity, so
+  hand-written paren-free contracts survive `mix format`. (`mix format` reindents wrapped
+  continuation lines to a hanging indent, and never *strips* parens already present — existing
+  over-parenthesised contracts need a one-time manual cleanup.)
+
+### Documentation
+
+- The concurrency guide now notes that a `Bond.Server` `@state_invariant` guards the state a
+  callback *produces*, not the one passed into it (the inductive model), with the practical
+  consequence for tests: calling a callback directly with a hand-built bad state is not rejected
+  on entry.
+
+### Requirements
+
+- Unchanged. Elixir `~> 1.16`.
+
 ## [1.10.0] - 2026-06-30
 
 Adds the `where`/`whenever` destructuring binding forms — use Bond's full assertion syntax
