@@ -89,18 +89,23 @@ defmodule Bond.Protocol do
   @doc false
   defmacro @pre_post_or_other
 
-  # `where`/`whenever` binding forms (#47) are not yet supported in protocol contracts. Catch
-  # them with a clear message rather than falling through to `Kernel.@/1`'s arity error.
-  defmacro @{pre_or_post, _meta, [{binder, _, [_]} | _]}
+  # `@pre`/`@post where(...)`/`whenever(...)` (#47): accumulate the binding group as a pending
+  # contract for the next protocol function, mirroring the direct path.
+  defmacro @{pre_or_post, meta, [{binder, _, [binding]} | scoped]}
            when pre_or_post in [:pre, :post] and binder in [:where, :whenever] do
-    raise CompileError,
-      file: __CALLER__.file,
-      line: __CALLER__.line,
-      description:
-        "Bond: `#{binder}` binding forms are not supported in `Bond.Protocol` contracts (yet — " <>
-          "#47 covers direct `@pre`/`@post`/`@invariant`/server invariants only). Use a plain " <>
-          "shape assertion with the `<~` operator, e.g. " <>
-          "`@post ({:ok, x} when is_integer(x)) <~ result`."
+    kind = if pre_or_post == :pre, do: :precondition, else: :postcondition
+
+    InheritedContracts.accumulate_pending_binding_group(
+      ctx(),
+      kind,
+      binder,
+      binding,
+      scoped,
+      __CALLER__,
+      meta
+    )
+
+    :ok
   end
 
   defmacro @{pre_or_post, meta, [expression]} when pre_or_post in [:pre, :post] do

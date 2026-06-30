@@ -102,19 +102,24 @@ defmodule Bond.Behaviour do
   """
   defmacro @pre_post_callback_or_other
 
-  # `where`/`whenever` binding forms (#47) are not yet supported in inherited (behaviour)
-  # contracts. Catch them here with a clear message rather than letting `@post where(...), …`
-  # fall through to `Kernel.@/1`'s cryptic "expected 0 or 1 argument for @post" arity error.
-  defmacro @{pre_or_post, _meta, [{binder, _, [_]} | _]}
+  # `@pre`/`@post where(...)`/`whenever(...)` (#47): accumulate the binding group as pending
+  # contracts for the next `@callback`, mirroring the direct path. Matched before the single-arg
+  # clause so a no-body `@post where(...)` is diagnosed by the shared parser rather than stashed.
+  defmacro @{pre_or_post, meta, [{binder, _, [binding]} | scoped]}
            when pre_or_post in [:pre, :post] and binder in [:where, :whenever] do
-    raise CompileError,
-      file: __CALLER__.file,
-      line: __CALLER__.line,
-      description:
-        "Bond: `#{binder}` binding forms are not supported in `Bond.Behaviour` callback " <>
-          "contracts (yet — #47 covers direct `@pre`/`@post`/`@invariant`/server invariants " <>
-          "only). Use a plain shape assertion with the `<~` operator, e.g. " <>
-          "`@post ({:ok, x} when is_integer(x)) <~ result`."
+    kind = if pre_or_post == :pre, do: :precondition, else: :postcondition
+
+    InheritedContracts.accumulate_pending_binding_group(
+      ctx(),
+      kind,
+      binder,
+      binding,
+      scoped,
+      __CALLER__,
+      meta
+    )
+
+    :ok
   end
 
   # `@pre`/`@post`: accumulate as pending contracts for the next `@callback`. Supports the bare
