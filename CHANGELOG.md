@@ -25,10 +25,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   ```
 
   Available in `@pre`, `@post`, `@invariant`, the `Bond.Server` `@state_invariant` /
-  `@transition_invariant`, and in **inherited contracts** — `Bond.Behaviour` callbacks and
-  `Bond.Protocol` functions. Generated documentation renders each group under a header naming the
-  binding. (`check/1` and the `@pre_weaken`/`@post_strengthen` refinement forms are not yet
-  supported.)
+  `@transition_invariant`, **inherited contracts** (`Bond.Behaviour` callbacks and
+  `Bond.Protocol` functions), the qualified `Bond.pre`/`Bond.post`/`Bond.invariant` forms
+  (`at_annotations: false`), and `check/1`. The fixed-arity call forms (qualified + `check`) take
+  the *all-inside* shape `where(binding, assertion…)`; in `check/1` the bindings are scoped (they
+  do not leak past the check). Generated documentation renders each group under a header naming the
+  binding. (The `@pre_weaken`/`@post_strengthen` refinement forms are not yet supported.)
 
 - **`forall`/`exists` in inherited contracts.** A quantifier in a `Bond.Behaviour` or
   `Bond.Protocol` contract no longer flags its generator variable (`i` in `forall(i <- xs, …)`)

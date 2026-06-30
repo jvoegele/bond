@@ -195,6 +195,26 @@ individually on failure. The forms work in `@pre` (binding from arguments),
 where the binding source references the callback/function's argument names (and
 `result`), exactly like a plain inherited `@pre`/`@post`.
 
+### The all-inside form (call contexts)
+
+The prefix form above (`@post where(binding), assertion…`) relies on the `@`
+syntax. The **call-style** entry points — `Bond.pre`/`Bond.post`/`Bond.invariant`
+(used with `at_annotations: false`) and `check/1` — are ordinary fixed-arity
+macros, so they take the *all-inside* form, where the assertions live inside the
+`where(…)`/`whenever(…)` call:
+
+```elixir
+# at_annotations: false
+Bond.post(where({:ok, items} = result, nonempty: items != []))
+
+# inline check — bindings are scoped to the check (they don't leak), and a
+# violation raises `Bond.CheckError`; a `whenever` non-match is a no-op
+check whenever({:ok, payload} <- fetch(), valid: valid?(payload))
+```
+
+The all-inside form also works in the `@` annotations as an alias of the prefix
+form (`@post where({:ok, x} = result, pos: x > 0)`).
+
 > #### Known limitation {: .info}
 >
 > If a `where`/`whenever` pattern binds a name identical to a top-level

@@ -292,4 +292,81 @@ defmodule Bond.WhereWheneverTest do
       assert {:ok, -1} = Purged.f(-1)
     end
   end
+
+  describe "all-inside form: where(binding, assertions)" do
+    defmodule AllInside do
+      use Bond
+      import Bond.Predicates
+
+      # Same group as the prefix form, but with the assertions inside the where(...) call.
+      @post where({:ok, x} = result, pos: x > 0, listy: is_integer(x))
+      def f(v), do: {:ok, v}
+    end
+
+    test "works as an alias of the prefix form in @post" do
+      assert {:ok, 5} = AllInside.f(5)
+      error = assert_raise Bond.PostconditionError, fn -> AllInside.f(-1) end
+      assert error.label == :pos
+    end
+  end
+
+  describe "qualified forms (at_annotations: false)" do
+    defmodule Qualified do
+      use Bond, at_annotations: false
+      import Bond.Predicates
+
+      Bond.pre(where({:req, n} = req, positive: n > 0))
+      Bond.post(where({:ok, items} = result, nonempty: items != []))
+      def handle(req), do: {:ok, build(req)}
+      defp build({:req, n}), do: Enum.to_list(1..n)
+    end
+
+    test "Bond.pre/Bond.post accept the all-inside binding form" do
+      assert {:ok, [1, 2, 3]} = Qualified.handle({:req, 3})
+    end
+
+    test "a qualified-form precondition violation raises" do
+      error = assert_raise Bond.PreconditionError, fn -> Qualified.handle({:req, 0}) end
+      assert error.label == :positive
+    end
+  end
+
+  describe "check/1 with where/whenever (scoped)" do
+    defmodule Checked do
+      use Bond
+      import Bond.Predicates
+
+      def assert_ok(v) do
+        check where({:ok, x} = v, pos: x > 0, listy: is_integer(x))
+        :done
+      end
+
+      def maybe_ok(v) do
+        check whenever({:ok, x} <- v, pos: x > 0)
+        :done
+      end
+    end
+
+    test "check where passes for a matching shape with valid members" do
+      assert :done = Checked.assert_ok({:ok, 5})
+    end
+
+    test "check where member violation raises a CheckError" do
+      error = assert_raise Bond.CheckError, fn -> Checked.assert_ok({:ok, -1}) end
+      assert error.label == :pos
+    end
+
+    test "check where shape mismatch is a :shape CheckError" do
+      error = assert_raise Bond.CheckError, fn -> Checked.assert_ok(:nope) end
+      assert error.label == :shape
+    end
+
+    test "check whenever is vacuous on a non-matching shape" do
+      assert :done = Checked.maybe_ok(:nope)
+    end
+
+    test "check whenever member violation raises a CheckError" do
+      assert_raise Bond.CheckError, fn -> Checked.maybe_ok({:ok, -1}) end
+    end
+  end
 end

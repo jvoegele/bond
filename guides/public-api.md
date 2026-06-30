@@ -71,6 +71,12 @@ x > 0`) likewise raises a `CompileError` with a specific diagnostic.
     `whenever` ⇒ `<-`); a mismatched pair, a non-binding argument, or an empty
     body each raise a `CompileError`. See the `Bond` moduledoc for semantics and
     rendering.
+  * **All-inside form** — `where(pattern = source, <assertions>)`, with the
+    assertions inside the call. Used by the fixed-arity call macros:
+    `Bond.pre`/`Bond.post`/`Bond.invariant` (`at_annotations: false`) and
+    `check/1`. Also accepted in the `@` annotations as an alias of the prefix
+    form. In `check/1` the bindings are scoped (they do not leak past the check)
+    and a violation raises `Bond.CheckError`.
 
 ### `@invariant`
 
