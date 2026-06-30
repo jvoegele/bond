@@ -1230,8 +1230,7 @@ defmodule Bond.Compiler do
 
   @doc false
   def check_assertion(expression, label, env, meta, mode) when mode in [true, false] do
-    check = Assertion.new(:check, label, expression, env, meta)
-    body = Assertion.check_body(check)
+    body = check_body(expression, label, env, meta)
 
     quote do
       if Bond.Runtime.Eval.should_evaluate?(:checks, unquote(mode)) do
@@ -1240,6 +1239,18 @@ defmodule Bond.Compiler do
         :ok
       end
     end
+  end
+
+  # `check where(binding, …)`/`whenever(binding, …)` (#47): the all-inside binding form, evaluated
+  # as a scoped group (members run inside the `case`, so the bindings don't leak). Any other
+  # expression is an ordinary single check.
+  defp check_body({binder, _, [binding | scoped]}, _label, env, meta)
+       when binder in [:where, :whenever] do
+    Assertion.check_group_body(binder, binding, scoped, env, meta)
+  end
+
+  defp check_body(expression, label, env, meta) do
+    Assertion.check_body(Assertion.new(:check, label, expression, env, meta))
   end
 
   @spec fsm(Macro.Env.t()) :: FSM.server_ref()

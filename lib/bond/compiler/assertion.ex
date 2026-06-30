@@ -588,6 +588,75 @@ defmodule Bond.Compiler.Assertion do
   end
 
   @doc """
+  Builds the body for a `check where(...)`/`whenever(...)` binding group (#47) — the all-inside
+  form `check(where(binding, assertion…))`.
+
+  Reuses `grouped_eval/3` so the members run inside the same `case` over the bound source as every
+  other contract kind. The bindings are therefore **scoped** (a `case` clause head does not leak),
+  consistent with `@pre`/`@post`. Members evaluate as `:check` assertions, so a violation (or a
+  `where` shape mismatch) throws and is re-raised as a `Bond.CheckError` by the enclosing
+  `Bond.Runtime.Eval.evaluate_check/1`; a `whenever` non-match is vacuously satisfied. The group
+  evaluates to `:ok` (the value-returning behaviour of a bare `check expr` is unaffected).
+  """
+  @spec check_group_body(:where | :whenever, Macro.t(), [Macro.t()], Macro.Env.t(), keyword()) ::
+          Macro.t()
+  def check_group_body(binder, binding_clause, scoped, %Macro.Env{} = env, meta) do
+    {mode, pattern, source} = parse_binding!(binder, binding_clause, env)
+    members_kw = parse_scoped_assertions!(binder, scoped, env)
+
+    binding = %{mode: mode, pattern: pattern, source: source, group_id: generate_group_id()}
+
+    members =
+      for {label, expression} <- members_kw do
+        validate_expression!(expression, env)
+        new(:check, label, expression, env, meta) |> put_binding(binding)
+      end
+
+    eval = grouped_eval(members, &check_single_eval/1, &check_shape_mismatch/2)
+
+    quote do
+      import Bond.Predicates
+
+      (unquote_splicing(eval))
+    end
+  end
+
+  defp check_single_eval(%__MODULE__{expression: expression} = assertion) do
+    quote do
+      Bond.Runtime.Eval.check_assertion(
+        unquote(expression),
+        unquote(Macro.escape(check_group_info(assertion, assertion.code))),
+        fn -> binding() end
+      )
+    end
+  end
+
+  defp check_shape_mismatch(binding, anchor) do
+    info = anchor |> check_group_info(shape_code(binding)) |> Map.put(:label, :shape)
+
+    quote do
+      Bond.Runtime.Eval.check_assertion(
+        Bond.Predicates.__opaque__(false),
+        unquote(Macro.escape(info)),
+        fn -> binding() end
+      )
+    end
+  end
+
+  defp check_group_info(%__MODULE__{definition_env: env} = assertion, expression) do
+    %{
+      assertion_id: assertion.id,
+      kind: :check,
+      label: assertion.label,
+      expression: expression,
+      file: env.file,
+      line: env.line,
+      module: env.module,
+      function: env.function
+    }
+  end
+
+  @doc """
   Generates a fresh, stable identifier for a `where`/`whenever` binding group (#47).
 
   Every assertion scoped to one `where`/`whenever` form is tagged (via `put_binding/2`) with a
