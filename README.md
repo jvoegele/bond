@@ -190,7 +190,10 @@ predicate, operator, quantifier, or function call — and each is reported
 individually on failure. The forms work in `@pre` (binding from arguments),
 `@post` (and `result`), `@invariant` (from `subject`), and the `Bond.Server`
 `@state_invariant` / `@transition_invariant` (from `state` /
-`old_state`/`new_state`).
+`old_state`/`new_state`). They are also available in **inherited contracts** —
+`Bond.Behaviour` callback contracts and `Bond.Protocol` function contracts —
+where the binding source references the callback/function's argument names (and
+`result`), exactly like a plain inherited `@pre`/`@post`.
 
 > #### Known limitation {: .info}
 >

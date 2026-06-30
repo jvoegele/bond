@@ -65,8 +65,9 @@ x > 0`) likewise raises a `CompileError` with a specific diagnostic.
     is vacuously satisfied).
   * `<assertions>` are ordinary bare and/or labelled assertions, exactly as
     above. `@post` accepts both forms (binding from `result` or arguments), as
-    do `@invariant` (from `subject`) and the `Bond.Server` `@state_invariant` /
-    `@transition_invariant`. The keyword fixes the arrow (`where` ⇒ `=`,
+    do `@invariant` (from `subject`), the `Bond.Server` `@state_invariant` /
+    `@transition_invariant`, and inherited contracts (`Bond.Behaviour` callbacks
+    and `Bond.Protocol` functions). The keyword fixes the arrow (`where` ⇒ `=`,
     `whenever` ⇒ `<-`); a mismatched pair, a non-binding argument, or an empty
     body each raise a `CompileError`. See the `Bond` moduledoc for semantics and
     rendering.

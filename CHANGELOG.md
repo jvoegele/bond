@@ -24,10 +24,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
         has_target: exists(k <- new_keys, k.key == "a")
   ```
 
-  Available in `@pre`, `@post`, `@invariant`, and the `Bond.Server` `@state_invariant` /
-  `@transition_invariant`. Generated documentation renders each group under a header naming the
+  Available in `@pre`, `@post`, `@invariant`, the `Bond.Server` `@state_invariant` /
+  `@transition_invariant`, and in **inherited contracts** — `Bond.Behaviour` callbacks and
+  `Bond.Protocol` functions. Generated documentation renders each group under a header naming the
   binding. (`check/1` and the `@pre_weaken`/`@post_strengthen` refinement forms are not yet
   supported.)
+
+- **`forall`/`exists` in inherited contracts.** A quantifier in a `Bond.Behaviour` or
+  `Bond.Protocol` contract no longer flags its generator variable (`i` in `forall(i <- xs, …)`)
+  as an unknown reference.
 
 ## [1.9.0] - 2026-06-29
 
