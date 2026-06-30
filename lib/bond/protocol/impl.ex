@@ -39,7 +39,7 @@ defmodule Bond.Protocol.Impl do
 
   A `@pre_weaken` is only valid when the protocol declares a precondition for that function;
   `@post_strengthen` may add a postcondition even if the protocol declared none. `old/1` is
-  not supported in either annotation (protocol contract v1 restriction).
+  not supported in either annotation.
 
   Implementations that do **not** `use Bond.Protocol.Impl` are completely unaffected.
   """

@@ -405,7 +405,7 @@ defmodule Bond do
       description:
         "@apply_contract accepts a single contract reference — a name (`:withdrawal`) or a " <>
           "`{Module, :name}` pair. Applying multiple contracts to one function is not " <>
-          "supported (v1)."
+          "supported."
   end
 
   defmacro @attr do
@@ -472,8 +472,8 @@ defmodule Bond do
   Register a precondition as a fully-qualified call, for modules that opt out of the
   `@`-prefixed syntax with `use Bond, at_annotations: false`.
 
-  `Bond.pre/1` is the qualified-call equivalent of `@pre`; everything the FSM does with the
-  registered assertion is identical. It accepts either a bare assertion expression or a keyword
+  `Bond.pre/1` is the qualified-call equivalent of `@pre`; the registered precondition is
+  enforced identically. It accepts either a bare assertion expression or a keyword
   list of `label: assertion` pairs. Labels are atoms — quote for spaces or punctuation:
 
       Bond.pre x > 0

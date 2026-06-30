@@ -143,7 +143,7 @@ defmodule Bond.PropertyTest do
     raise CompileError,
       description: """
       contract_holds/2 no longer accepts a module — the stateful module-sequence form \
-      moved to invariants_hold/2 in Bond 1.0.0-rc.3.
+      moved to invariants_hold/2 in Bond 1.0.
 
       Replace:
 

@@ -164,7 +164,7 @@ Name your protocol arguments (`def size(data)`, not `def size(t)`) — a contrac
 that references an undeclared name is a compile error reported against the
 protocol.
 
-### How it works — dispatch-layer wrapping (Option B)
+### How it works — dispatch-layer wrapping
 
 `defprotocol` generates a *dispatch* function: `Sized.size(data)` calls
 `Sized.impl_for!(data).size(data)`. `Bond.Protocol` wraps that one dispatch

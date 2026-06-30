@@ -63,7 +63,7 @@ including patch versions:
     Their function names, signatures, and behaviours are implementation
     detail. Code that calls into either namespace is using a private API.
   * **The shape of generated code.** Bond rewrites contract-bearing
-    functions into a `defoverridable` wrapper and a set of lifted
+    functions into a `defoverridable` wrapper and a set of generated
     `defp __bond_*__` helpers. The names of those helpers
     (`__bond_preconditions__<fun>__<arity>` etc.), their argument shapes,
     and their internal structure are not stable. Don't pattern-match on

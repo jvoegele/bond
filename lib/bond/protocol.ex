@@ -24,7 +24,7 @@ defmodule Bond.Protocol do
   it attaches to in `use Bond`. The contract expressions reference the protocol function's
   declared argument names (`data` above) and, in a `@post`, `result` (the return value).
 
-  ## How it works (Option B — dispatch-layer wrapping)
+  ## How it works — dispatch-layer wrapping
 
   `defprotocol` generates a *dispatch* function — `Sized.size(data)` calls
   `Sized.impl_for!(data).size(data)`. `Bond.Protocol` wraps that one dispatch function, once, in
@@ -46,12 +46,12 @@ defmodule Bond.Protocol do
   the `defimpl` block. See `Bond.Protocol.Impl` for details. Plain `defimpl` blocks that do
   not opt in are completely unaffected.
 
-  ## Scope (v1)
+  ## Scope
 
   Direct calls to a concrete implementation module (`Sized.List.size/1`) bypass dispatch and
   are therefore *not* checked — only calls through the protocol (`Sized.size/1`) are. `old/1`
   in a protocol `@pre`/`@post` or in `@pre_weaken`/`@post_strengthen` is not supported;
-  compile-time `:purge` of protocol contracts is not supported in v1. Runtime configuration
+  compile-time `:purge` of protocol contracts is not supported. Runtime configuration
   (`config :bond, …` and `Bond.Config`) applies as usual.
   """
 

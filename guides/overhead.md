@@ -57,7 +57,7 @@ module-name namespace so prior compilations don't add redefinition
 purge cost to the measurement.
 
 The in-process approach measures pure compile cost (macro expansion +
-Bond's per-module FSM + BEAM compile) without the 1-2 seconds of VM
+Bond's per-module compile-time processing + BEAM compile) without the 1-2 seconds of VM
 startup overhead a subprocess `mix compile` would add. The disk-write
 cost of an actual `mix compile` adds a roughly constant amount across
 both kinds, so it cancels out of the differential reported here.

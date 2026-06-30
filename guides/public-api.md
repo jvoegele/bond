@@ -417,18 +417,15 @@ The following exist in Bond's source tree but are explicitly **not** covered
 by the stability guarantees:
 
   * Every module under `Bond.Compiler.*` and `Bond.Runtime.*` (all marked
-    `@moduledoc internal: true`, all filtered out of hexdocs). This includes
-    the FSM, the lifted-defp shapes, every helper in `Bond.Compiler.Assertion`
-    / `AnnotatedFunction` / `ClauseWrapper` / `Clauses` / `Invariants` /
-    `OldExpression` / `ContractDocs`, and the entire `Bond.Runtime.Eval`
-    surface. Direct use of any of these is unsupported and may break on a
-    patch release.
+    `@moduledoc internal: true`, all filtered out of hexdocs). These are
+    Bond's compile-time and runtime implementation; direct use of any of them
+    is unsupported and may break on a patch release.
   * The `__opaque__/1` and `__truthy__/1` helpers in `Bond.Predicates` —
     called by Bond-generated code, not by users. Their existence is stable
     insofar as the generated code relies on them, but the *interface
     contract* (what they accept, return, or do internally) is not.
-  * The shape of compiled wrapper functions / lifted defps that Bond emits
-    into the user's module. The names (`__bond_preconditions__<fun>__<arity>`,
+  * The shape of the wrapper and helper functions Bond generates into the
+    user's module. The names (`__bond_preconditions__<fun>__<arity>`,
     `__bond_postconditions__...`, `__bond_invariants__...`) are not stable.
   * The text of compile-error diagnostics raised by Bond's macros. These are
     user-facing prose that may be reworded for clarity; the **fact** of a
