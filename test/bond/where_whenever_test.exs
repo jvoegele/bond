@@ -211,4 +211,85 @@ defmodule Bond.WhereWheneverTest do
       end
     end
   end
+
+  describe "@invariant where/whenever (binds from `subject`)" do
+    defmodule Bag do
+      use Bond
+      import Bond.Predicates
+      defstruct items: []
+
+      @invariant(where(%Bag{items: items} = subject),
+        listy: is_list(items),
+        no_nil: forall(i <- items, not is_nil(i))
+      )
+      def make(list), do: %Bag{items: list}
+    end
+
+    test "passes for a valid struct" do
+      assert %Bag{items: [1, 2]} = Bag.make([1, 2])
+    end
+
+    test "fires on the returned struct when a member is violated" do
+      error = assert_raise Bond.InvariantError, fn -> Bag.make([1, nil]) end
+      assert error.label == :no_nil
+    end
+  end
+
+  describe "@state_invariant / @transition_invariant where/whenever (Bond.Server)" do
+    defmodule Server do
+      use GenServer
+      use Bond.Server
+      import Bond.Predicates
+
+      @state_invariant(where(%{count: count, items: items} = state),
+        non_neg: count >= 0,
+        counted: length(items) == count
+      )
+
+      @transition_invariant(whenever(%{count: oc} <- old_state),
+        monotonic: new_state.count >= oc
+      )
+
+      def init(c), do: {:ok, %{count: c, items: []}}
+    end
+
+    test "state invariant passes for a consistent state" do
+      assert :ok = Server.__bond_state_invariant_check__(%{count: 0, items: []})
+    end
+
+    test "state invariant member violation throws an :assertion_failure" do
+      assert {:assertion_failure, %{kind: :state_invariant, label: :counted}} =
+               catch_throw(Server.__bond_state_invariant_check__(%{count: 1, items: []}))
+    end
+
+    test "a `where` (=) state shape mismatch is a :shape violation" do
+      assert {:assertion_failure, %{kind: :state_invariant, label: :shape}} =
+               catch_throw(Server.__bond_state_invariant_check__(:not_a_map))
+    end
+
+    test "transition invariant fires on a violated member" do
+      assert :ok = Server.__bond_transition_invariant_check__(%{count: 1}, %{count: 2})
+
+      assert {:assertion_failure, %{kind: :transition_invariant, label: :monotonic}} =
+               catch_throw(Server.__bond_transition_invariant_check__(%{count: 5}, %{count: 2}))
+    end
+
+    test "a `whenever` (<-) transition is vacuous when old_state doesn't match" do
+      assert :ok = Server.__bond_transition_invariant_check__(:no_prior, %{count: 2})
+    end
+  end
+
+  describe "conditional compilation" do
+    defmodule Purged do
+      # Purging postconditions requires purging invariants too (the pre ≤ post ≤ inv chain).
+      use Bond, postconditions: :purge, invariants: :purge
+
+      @post where({:ok, x} = result), pos: x > 0
+      def f(x), do: {:ok, x}
+    end
+
+    test "a purged @post where/whenever is compiled out (no check at runtime)" do
+      assert {:ok, -1} = Purged.f(-1)
+    end
+  end
 end
