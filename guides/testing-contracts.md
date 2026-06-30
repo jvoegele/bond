@@ -25,6 +25,7 @@ Bond gives you two complementary ways to do that:
 | Contracts hold over random *valid* inputs | `contract_holds/2` | `Bond.PropertyTest` |
 | …and probe the *boundaries* the `@pre` implies | `probe_contract/2` | `Bond.PropertyTest` |
 | Invariants hold across random *stateful sequences* | `invariants_hold/2` | `Bond.PropertyTest` |
+| A `Bond.Server` callback upholds its contracts | `contract_holds/2` on the callback | `Bond.PropertyTest` |
 
 A rule of thumb: reach for `Bond.Test` to test *the contracts* (the edges where they
 should and shouldn't fire), and for `Bond.PropertyTest` to test *the code* (that it
@@ -218,6 +219,126 @@ returns the next one (`%Mod{}` or `{:ok, %Mod{}}`); an **observer** takes the st
 does not advance the state. A transformer returning `{:error, _}` ends the sequence
 cleanly (an operation that refuses is not a contract violation); any other return shape
 raises an `ArgumentError`.
+
+## Testing `Bond.Server`s
+
+A `Bond.Server` adds `@state_invariant` and `@transition_invariant`, which Bond weaves
+*into* the server's state-transition callbacks (see
+[Contracts in a Concurrent World](contracts-and-concurrency.md)). That weaving is what
+makes them testable with the tools above: because the checks are compiled into the
+callback itself, you do not need a running process to exercise them — you can call the
+callback as a plain function and the invariants still fire.
+
+### Driving callbacks directly with `contract_holds/2`
+
+A single function capture of a callback exercises a surprising amount. Take the `Counter`
+from the concurrency guide (`@state_invariant non_negative: state.count >= 0`,
+`@transition_invariant monotonic: new_state.count >= old_state.count`):
+
+```elixir
+defmodule CounterTest do
+  use ExUnit.Case
+  use Bond.PropertyTest
+
+  contract_holds &Counter.handle_call/3,
+    args: [
+      StreamData.constant(:inc),
+      StreamData.constant({self(), make_ref()}),                 # `from` — unused by the body
+      StreamData.map(StreamData.non_negative_integer(), &%{count: &1})
+    ]
+end
+```
+
+One property checks four things at once. On every generated call, Bond verifies:
+
+  * the callback's own `@pre`/`@post`/`check` contracts;
+  * the **`@state_invariant`** on the state the callback **returns**;
+  * the **`@transition_invariant`** relating the **incoming** state (the callback's last
+    argument) to the returned one — the wrapper reads `old_state` straight from that
+    argument, so a direct call has everything it needs;
+  * and, implicitly, that the callback returns a well-formed `{:reply, _, state}` /
+    `{:noreply, state}` shape (a mismatch raises before any contract runs).
+
+The same shape works for `handle_cast/2`, `handle_info/2`, and `handle_continue/2`. It is
+also how a *buggy* operation gets caught: a `contract_holds &Counter.handle_cast/2` over
+the `:dec` cast fails and shrinks to `%{count: 0}`, because decrementing from zero
+violates both `non_negative` (the produced state) and `monotonic` (the transition).
+
+### Your state generator must produce *reachable* states
+
+There is one subtlety unique to servers. An invariant guards the state a callback
+*produces*, not the one passed *into* it — the inductive model described in the
+[concurrency guide](contracts-and-concurrency.md). The callback therefore *assumes* its
+incoming state already satisfies the invariant, so your generator must produce only
+states the server could actually be in. Feeding `%{count: -1}` to `handle_call(:inc, …)`
+would report a `@state_invariant` failure on the *output* (`%{count: 0}` is fine, but
+`%{count: -3}` → `%{count: -2}` is not) — a spurious counterexample for a state the
+server can never reach. Constrain the generator (here, `non_negative_integer/0`)
+accordingly.
+
+This is also the honest limitation of the direct-callback approach: it explores the
+states *you generate*, not the server's true *reachable* set. For a server whose reachable
+states are subtle, see "Covering the reachable state space" below.
+
+### Callbacks with side effects
+
+If a callback calls out to an external service, stub it in `setup` so the property can
+drive it freely. With [Mox](https://hex.pm/packages/mox), a `stub/3` allows unlimited
+calls and keeps the contracts — not the collaborator — as the thing under test:
+
+```elixir
+describe "handle_info(:flush, _) upholds its contracts" do
+  setup do
+    stub(MyApp.HTTPClientMock, :post, fn _payload -> {:ok, :sent} end)
+    :ok
+  end
+
+  contract_holds &MyApp.Uploader.handle_info/2,
+    args: [StreamData.constant(:flush), uploader_state_gen()]
+end
+```
+
+Pair it with a second `describe` whose stub returns an error tuple to drive the failure
+branch — the postconditions should hold on both. Tag the failure block
+`@describetag capture_log: true` if the error path logs.
+
+### Asserting a specific invariant violation
+
+To pin down that a *particular* transition is rejected, use `Bond.Test` and pass `kind:`
+to distinguish the two invariant flavours (both raise `Bond.InvariantError`):
+
+```elixir
+use Bond.Test
+
+test ":dec below zero violates the state invariant" do
+  assert_invariant_violation(Counter.handle_cast(:dec, %{count: 0}),
+    kind: :state_invariant,
+    label: :non_negative
+  )
+end
+```
+
+Because invariants fire inside the woven callback, this works on a direct call just as it
+would when driving a live server.
+
+### Covering the reachable state space
+
+`invariants_hold/2` is Bond's sequence-based stateful runner, but it targets **struct
+modules** whose operations return `%Mod{}` / `{:ok, %Mod{}}` — not GenServer callbacks,
+which return `{:noreply, state}` and friends. So it does not drive a `Bond.Server`
+directly. Until a dedicated server runner exists, two patterns give you reachable-state
+coverage today:
+
+  * **Test the pure core as a struct.** If your server delegates to a pure state module
+    with its own `@invariant`s and transition functions (the pattern the concurrency guide
+    recommends), point `invariants_hold/2` at *that* module. The struct's invariants are
+    checked across every reachable sequence, and the server becomes a thin, separately
+    tested shell.
+  * **Drive a real server with ordinary ExUnit.** `start_supervised!/1` the server, send it
+    a sequence of `call`/`cast`/`send` messages, and let the in-server invariant checks do
+    the asserting: any violation crashes the server with a `Bond.InvariantError`, failing
+    the test. This exercises the genuine reachable states (real dispatch, mailbox ordering,
+    timers) at the cost of writing the sequences by hand rather than generating them.
 
 ## Patterns and gotchas
 
