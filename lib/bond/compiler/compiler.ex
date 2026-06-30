@@ -1106,6 +1106,93 @@ defmodule Bond.Compiler do
     :ok
   end
 
+  @doc false
+  # `@state_invariant where(...)`/`whenever(...)` (#47): bind from the implicit `state`.
+  def register_state_invariant_binding_group(
+        mode,
+        pattern,
+        source,
+        labelled_assertions,
+        env,
+        meta
+      ) do
+    register_server_invariant_binding_group(
+      :state_invariant,
+      :bond_state_invariants,
+      [:state],
+      mode,
+      pattern,
+      source,
+      labelled_assertions,
+      env,
+      meta
+    )
+  end
+
+  @doc false
+  # `@transition_invariant where(...)`/`whenever(...)` (#47): bind from `old_state`/`new_state`.
+  def register_transition_invariant_binding_group(
+        mode,
+        pattern,
+        source,
+        labelled_assertions,
+        env,
+        meta
+      ) do
+    register_server_invariant_binding_group(
+      :transition_invariant,
+      :bond_transition_invariants,
+      [:old_state, :new_state],
+      mode,
+      pattern,
+      source,
+      labelled_assertions,
+      env,
+      meta
+    )
+  end
+
+  # Shared body: like `register_server_invariant/7` but for a `where`/`whenever` binding group —
+  # each member is stored (newest-last) tagged with the shared binding group, and both the source
+  # and every member expression have their implicit `state`/`old_state`/`new_state` references
+  # normalised (the destructuring pattern binds fresh names, so it is left as written).
+  defp register_server_invariant_binding_group(
+         kind,
+         attr,
+         var_names,
+         mode,
+         pattern,
+         source,
+         labelled_assertions,
+         env,
+         meta
+       )
+       when mode in [:assert, :conditional] do
+    binding = %{
+      mode: mode,
+      pattern: pattern,
+      source: normalize_var_context(source, var_names),
+      group_id: Assertion.generate_group_id()
+    }
+
+    for {label, expression} <- labelled_assertions do
+      Assertion.validate_expression!(expression, env)
+      normalized = normalize_var_context(expression, var_names)
+
+      assertion =
+        Assertion.new(kind, label, normalized, env, meta)
+        |> Assertion.put_binding(binding)
+
+      Module.put_attribute(
+        env.module,
+        attr,
+        (Module.get_attribute(env.module, attr) || []) ++ [assertion]
+      )
+    end
+
+    :ok
+  end
+
   # `@state_invariant` / `@transition_invariant` are only consumed by `Bond.Server` (which sets
   # `@__bond_server__`). In a plain `use Bond` module they are captured but never enforced — a
   # silently-ignored contract. Warn so the missing `use Bond.Server` is loud rather than

@@ -328,6 +328,13 @@ defmodule Bond do
   # Same bare-or-keyword-list shape as `@invariant`. Capturing here (rather than only in
   # `Bond.Server`) keeps it on the same `@`-override path as the other annotations; in a module
   # that is not a `Bond.Server`, the captured invariant is simply never consumed.
+  # @state_invariant where(...)/whenever(...) — destructuring binding form (#47); binds from the
+  # implicit `state` (e.g. `@state_invariant where(%{queue: q} = state), …`).
+  defmacro @{:state_invariant, meta, [{binder, _, [binding]} | scoped]}
+           when binder in [:where, :whenever] do
+    register_state_invariant_binding_form(binder, binding, scoped, __CALLER__, meta)
+  end
+
   defmacro @{:state_invariant, meta, [expression_or_kw_list]} do
     register_state_invariant(expression_or_kw_list, __CALLER__, meta)
   end
@@ -351,6 +358,13 @@ defmodule Bond do
   # transition: expressions reference the implicit `old_state` and `new_state` bindings, which
   # Bond.Server binds to the callback's incoming state and the state extracted from its return.
   # Checked across every transition callback except `init/1`/`code_change/3` (re-creations).
+  # @transition_invariant where(...)/whenever(...) — destructuring binding form (#47); binds from
+  # the implicit `old_state`/`new_state`.
+  defmacro @{:transition_invariant, meta, [{binder, _, [binding]} | scoped]}
+           when binder in [:where, :whenever] do
+    register_transition_invariant_binding_form(binder, binding, scoped, __CALLER__, meta)
+  end
+
   defmacro @{:transition_invariant, meta, [expression_or_kw_list]} do
     register_transition_invariant(expression_or_kw_list, __CALLER__, meta)
   end
@@ -720,6 +734,36 @@ defmodule Bond do
     register_each(expression_or_kw_list, fn expr, label ->
       Bond.Compiler.register_state_invariant(expr, label, caller, meta)
     end)
+  end
+
+  # `@state_invariant where(...)`/`whenever(...)` (#47).
+  defp register_state_invariant_binding_form(binder, binding, scoped, caller, meta) do
+    {mode, pattern, source} = parse_binding!(binder, binding, caller)
+    assertions = parse_scoped_assertions!(binder, scoped, caller)
+
+    Bond.Compiler.register_state_invariant_binding_group(
+      mode,
+      pattern,
+      source,
+      assertions,
+      caller,
+      meta
+    )
+  end
+
+  # `@transition_invariant where(...)`/`whenever(...)` (#47).
+  defp register_transition_invariant_binding_form(binder, binding, scoped, caller, meta) do
+    {mode, pattern, source} = parse_binding!(binder, binding, caller)
+    assertions = parse_scoped_assertions!(binder, scoped, caller)
+
+    Bond.Compiler.register_transition_invariant_binding_group(
+      mode,
+      pattern,
+      source,
+      assertions,
+      caller,
+      meta
+    )
   end
 
   # `@transition_invariant` (#34, `Bond.Server`).
