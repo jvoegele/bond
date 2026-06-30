@@ -185,6 +185,13 @@ case:
 @post whenever({:error, reason} <- result), known: reason in [:timeout, :refused]
 ```
 
+A nice side effect: each scoped assertion has its own label, so a violation
+pinpoints exactly which shape and constraint failed, rather than reporting a
+single lumped label for a `<~`-with-`when`-guard alternation. If you migrate an
+existing guarded `<~` contract to per-shape `whenever` clauses this way, expect
+the reported violation labels to become more specific — handy in practice, but
+something to update if you have tests asserting on the old label.
+
 The scoped assertions are ordinary assertions — bare or labelled, using any
 predicate, operator, quantifier, or function call — and each is reported
 individually on failure. The forms work in `@pre` (binding from arguments),
