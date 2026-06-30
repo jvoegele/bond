@@ -146,6 +146,60 @@ assertion expressions, so you can use these operators directly:
 
 See `Bond.Predicates` for the full list of predicates and operators.
 
+## Destructuring bindings: `where` and `whenever`
+
+The `<~` operator matches a pattern but its bindings don't escape — names
+bound in the pattern can only be constrained by a `when` guard, and guards
+are a closed sublanguage (no `exists`/`forall`, no function calls, no
+comparisons against computed values). When you need Bond's **full** assertion
+syntax on a value nested inside a result — a list inside a map inside a tuple,
+say — reach for `where` or `whenever`.
+
+Both wrap a destructuring binding and scope a set of ordinary (optionally
+labelled) assertions to the names it binds:
+
+```elixir
+# `where` (=) asserts the shape: a non-match is a contract violation.
+@post where({:noreply, %{keys: new_keys, timer: timer}} = result),
+      timer_ref:  is_reference(timer),
+      has_target: exists(k <- new_keys, k.key == "a")
+
+# `whenever` (<-) is conditional: a non-match is vacuously satisfied.
+@post whenever({:ok, %{urls: urls}} <- result),
+      non_empty: urls != [],
+      all_https: forall(u <- urls, String.starts_with?(u, "https"))
+```
+
+The keyword carries the semantics and the arrow reinforces it: **`where` uses
+`=`** (the result *is* this shape — a mismatch fails, exactly like `=` raising
+a `MatchError`), and **`whenever` uses `<-`** (the result *might* match — like
+a `with`/`for` generator, a mismatch is skipped). A mismatched keyword/arrow
+pair is a compile error.
+
+Because `whenever` is vacuous on a non-match, **case analysis is one `whenever`
+per shape** — no `or {:error, _}` boilerplate. Each line checks only its own
+case:
+
+```elixir
+@post whenever({:ok, payload} <- result), valid: valid?(payload)
+@post whenever({:error, reason} <- result), known: reason in [:timeout, :refused]
+```
+
+The scoped assertions are ordinary assertions — bare or labelled, using any
+predicate, operator, quantifier, or function call — and each is reported
+individually on failure. The forms work in `@pre` (binding from arguments),
+`@post` (and `result`), `@invariant` (from `subject`), and the `Bond.Server`
+`@state_invariant` / `@transition_invariant` (from `state` /
+`old_state`/`new_state`).
+
+> #### Known limitation {: .info}
+>
+> If a `where`/`whenever` pattern binds a name identical to a top-level
+> function parameter (e.g. a parameter `keys` and a pattern `%{keys: keys}`),
+> that parameter is shadowed inside the group and Elixir emits an "unused
+> variable" warning. The contract is still correct; rename the parameter or
+> the bound name to silence it.
+
 ## `@invariant` for struct modules
 
 `@invariant` declarations specify properties that hold for every value of
