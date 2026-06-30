@@ -241,49 +241,133 @@ defmodule Bond.Compiler.Assertion do
   @spec assertions_eval_list([t()], function_info(), module() | nil) :: [Macro.t()]
   def assertions_eval_list(assertions, function_info, function_module \\ nil)
       when is_list(assertions) and is_tuple(function_info) do
-    for %Assertion{expression: expression, definition_env: assertion_env} = assertion <-
-          assertions do
-      assertion_info = %{
-        assertion_id: assertion.id,
-        kind: assertion.kind,
-        label: assertion.label,
-        expression: assertion.code,
-        file: assertion_env.file,
-        line: assertion_env.line,
-        # The MFA module is the module the function is *compiled into* (the implementer for
-        # inherited contracts), not where the assertion text was written. They coincide for
-        # contracts declared directly on the function, so `function_module` is only passed
-        # explicitly for inherited contracts; otherwise fall back to the assertion's env.
-        module: function_module || assertion_env.module,
-        function: function_info,
-        source_behaviour: assertion.source_behaviour,
-        source_contract: assertion.source_contract
-      }
+    # Most assertions are ungrouped (`:binding == nil`) and emit one `check_assertion/3` call
+    # each, exactly as before. A run of assertions scoped to a `where`/`whenever` form (#47)
+    # shares one `binding.group_id` and is registered contiguously, so chunking by `group_id`
+    # keeps each group together (ungrouped assertions chunk under `nil` and stay individual).
+    assertions
+    |> Enum.chunk_by(fn %Assertion{binding: binding} -> binding && binding.group_id end)
+    |> Enum.flat_map(fn
+      [%Assertion{binding: nil} | _] = singles ->
+        Enum.map(singles, &build_single_eval(&1, function_info, function_module))
 
-      # Delegate the truthiness check and throw-on-failure to
-      # `Bond.Runtime.Eval.check_assertion/3`, where `result` is typed `term()`. Emitting
-      # `if expression do :ok else throw(...) end` directly here would let Dialyzer prove
-      # the falsy branch unreachable when the user's expression is statically `true`
-      # (e.g. `@pre is_binary(x)` on a `@spec`-narrowed argument), producing Pattern:
-      # `false`, Type: `true` warnings in downstream apps.
-      #
-      # The failure binding is passed as a 0-arity thunk, not an eager `binding()`. A bare
-      # `binding()` builds a keyword list of every variable in this defp's scope (the whole
-      # parameter list, plus `result` and every `old(...)` capture) on EVERY successful
-      # evaluation and discards it unless the assertion fails — ~8 ns per in-scope variable
-      # of pure waste on the hot path. Wrapping it in `fn -> binding() end` captures the
-      # variables cheaply (pointers, ~1 ns each) but defers the list construction to
-      # `check_assertion/3`'s failure clauses, which almost never run. Error contents are
-      # identical; see the bench `bench/runtime_check_overhead.exs` decomposition section.
-      quote do
-        Bond.Runtime.Eval.check_assertion(
-          unquote(expression),
-          unquote(Macro.escape(assertion_info)),
-          fn -> binding() end
-        )
+      [%Assertion{binding: %{}} | _] = group ->
+        [build_group_eval(group, function_info, function_module)]
+    end)
+  end
+
+  # Builds the quoted `check_assertion/3` call for a single assertion. The failure binding is
+  # passed as a 0-arity thunk, not an eager `binding()`. A bare `binding()` builds a keyword list
+  # of every variable in this defp's scope (the whole parameter list, plus `result` and every
+  # `old(...)` capture) on EVERY successful evaluation and discards it unless the assertion fails
+  # — ~8 ns per in-scope variable of pure waste on the hot path. Wrapping it in `fn -> binding()
+  # end` captures the variables cheaply (pointers, ~1 ns each) but defers the list construction
+  # to `check_assertion/3`'s failure clauses, which almost never run. Error contents are
+  # identical; see the bench `bench/runtime_check_overhead.exs` decomposition section.
+  #
+  # Delegating the truthiness check and throw-on-failure to `Bond.Runtime.Eval.check_assertion/3`
+  # (where `result` is typed `term()`) rather than emitting `if expression do :ok else throw(...)
+  # end` here keeps Dialyzer from proving the falsy branch unreachable when the user's expression
+  # is statically `true` (e.g. `@pre is_binary(x)` on a `@spec`-narrowed argument), which would
+  # otherwise produce Pattern: `false`, Type: `true` warnings in downstream apps.
+  defp build_single_eval(
+         %Assertion{expression: expression} = assertion,
+         function_info,
+         function_module
+       ) do
+    assertion_info = assertion_info(assertion, function_info, function_module)
+
+    quote do
+      Bond.Runtime.Eval.check_assertion(
+        unquote(expression),
+        unquote(Macro.escape(assertion_info)),
+        fn -> binding() end
+      )
+    end
+  end
+
+  # Builds the quoted eval for a `where`/`whenever` binding group: a single `case` over the
+  # destructured `source` whose matching clause binds `pattern`'s names and then runs the group's
+  # member assertions (each an ordinary `check_assertion/3` call, so they keep their own labels,
+  # telemetry, and deferred failure binding). `source` flows through `Bond.Predicates.__opaque__/1`
+  # — the same Dialyzer-laundering `<~` uses — so a typespec-implied match can't make the
+  # `_` clause look unreachable.
+  #
+  # On a non-match: `:conditional` (`whenever`) is vacuously satisfied (`:ok`); `:assert`
+  # (`where`) is a contract violation, raised through the normal failure path by handing
+  # `check_assertion/3` a laundered `false` (so the member kind's error struct and the deferred
+  # `binding()` snapshot come for free).
+  defp build_group_eval(
+         [%Assertion{binding: %{mode: mode, pattern: pattern, source: source}} | _] = members,
+         function_info,
+         function_module
+       ) do
+    member_evals = Enum.map(members, &build_single_eval(&1, function_info, function_module))
+    mismatch = build_mismatch_branch(mode, hd(members), function_info, function_module)
+
+    quote do
+      case Bond.Predicates.__opaque__(unquote(source)) do
+        unquote(pattern) ->
+          unquote_splicing(member_evals)
+          :ok
+
+        _ ->
+          unquote(mismatch)
       end
     end
   end
+
+  defp build_mismatch_branch(:conditional, _anchor, _function_info, _function_module) do
+    quote do: :ok
+  end
+
+  defp build_mismatch_branch(:assert, anchor, function_info, function_module) do
+    shape_info =
+      anchor
+      |> assertion_info(function_info, function_module)
+      |> Map.put(:label, shape_label(anchor))
+      |> Map.put(:expression, shape_code(anchor))
+
+    quote do
+      Bond.Runtime.Eval.check_assertion(
+        Bond.Predicates.__opaque__(false),
+        unquote(Macro.escape(shape_info)),
+        fn -> binding() end
+      )
+    end
+  end
+
+  # The `binding()` -> single-assertion failure-info map. The MFA module is the module the
+  # function is *compiled into* (the implementer for inherited contracts), not where the assertion
+  # text was written. They coincide for contracts declared directly on the function, so
+  # `function_module` is only passed explicitly for inherited contracts; otherwise fall back to
+  # the assertion's env.
+  defp assertion_info(
+         %Assertion{definition_env: env} = assertion,
+         function_info,
+         function_module
+       ) do
+    %{
+      assertion_id: assertion.id,
+      kind: assertion.kind,
+      label: assertion.label,
+      expression: assertion.code,
+      file: env.file,
+      line: env.line,
+      module: function_module || env.module,
+      function: function_info,
+      source_behaviour: assertion.source_behaviour,
+      source_contract: assertion.source_contract
+    }
+  end
+
+  # Rendered form + label for a failed `where` shape match. The error reads, e.g.,
+  # "shape: {:noreply, %{keys: nk}} = result" so the violated pattern is visible.
+  defp shape_code(%Assertion{binding: %{pattern: pattern, source: source}}) do
+    Macro.to_string(quote do: unquote(pattern) = unquote(source))
+  end
+
+  defp shape_label(%Assertion{binding: %{group_id: _}}), do: :shape
 
   @doc """
   Builds the lifted precondition defp body for a *weakened* (refined) precondition (#16):
