@@ -200,6 +200,19 @@ establishes the initial state and after each
 a new one. The `non_negative` invariant raises `Bond.InvariantError` (with `:kind`
 `:state_invariant`) from inside the server, naming the callback it failed after.
 
+> #### Invariants guard *produced* states, not *incoming* ones {: .info}
+>
+> The check runs on the state a callback **returns**, not on the state passed
+> *into* it. This is the standard inductive model: `init/1` establishes a state
+> that satisfies the invariant, and every transition is checked to preserve it,
+> so by induction every reachable state is valid — re-checking on entry would be
+> redundant. The practical consequence shows up in tests: if you call a callback
+> *directly* with a hand-built state that violates the invariant, Bond does **not**
+> reject it on entry — the callback body runs first (and may well crash on the
+> malformed state before any contract fires). To assert that a *bad input state*
+> is caught, drive the server through a transition that would *produce* it, rather
+> than feeding the bad state straight into a callback.
+
 ### Transition invariants
 
 `@transition_invariant` is the temporal cousin: a relation between the prior
