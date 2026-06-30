@@ -224,6 +224,32 @@ defmodule Bond.Predicates do
   `true`. A predicate that raises (rather than returning falsy) propagates — guard
   shape-dependent predicates with `~>`, exactly as in multi-clause contracts.
 
+  > #### The generator pattern *binds*, it does not *filter* {: .warning}
+  >
+  > Despite the comprehension-style `pattern <- enumerable` syntax, the pattern is a **binding
+  > pattern, not a filter**. `forall(pattern <- enum, pred)` becomes
+  > `fn pattern -> pred end` — a *single-clause* function with no catch-all — applied to every
+  > element. So an element that does **not** match `pattern` is **not skipped** the way a `for`
+  > comprehension would skip it; it raises `FunctionClauseError`, which propagates as a crash
+  > rather than a clean contract violation.
+  >
+  > The practical consequence: **do not put a shape in the generator pattern to assert that
+  > shape.** To assert that *every* element has a shape, match in the *predicate* so a
+  > non-matching element returns a reportable `false`:
+  >
+  > ```elixir
+  > # ✅ asserts the shape — a malformed entry fails the contract, naming the element
+  > forall(entry <- entries, match?(%{key: _, retry: _}, entry))
+  >
+  > # ❌ assumes the shape — a malformed entry raises FunctionClauseError, not a violation
+  > forall(%{key: _, retry: _} <- entries, true)
+  > ```
+  >
+  > Reach for the destructuring generator (`forall(%{retry: r} <- entries, r >= 0)`) only when
+  > every element is *already known* to match — never to establish the shape itself. To assert a
+  > property of just the elements of a given shape while ignoring the rest, guard with `~>`:
+  > `forall(entry <- entries, match?(%{retry: _}, entry) ~> entry.retry >= 0)`.
+
   `forall`/`exists` return ordinary booleans, so they compose with `and`, `or`, `not`, `~>`,
   and `|||`. When several quantifiers appear in one assertion (including nested ones), the
   element-level detail reflects the *last* quantifier to fail; for a bare quantifier it is
@@ -281,6 +307,10 @@ defmodule Bond.Predicates do
       |   counterexample: no element of `users` satisfies `u.role == :admin` (3 elements)
 
   An empty enumerable is `false` (no witness exists).
+
+  Like `forall/2`, the generator pattern **binds, it does not filter**: an element that does not
+  match the pattern raises `FunctionClauseError` rather than being skipped, so use `match?/2` in
+  the predicate (or `~>`) for shape-dependent bodies — see the warning under `forall/2`.
 
   ## Examples
 
