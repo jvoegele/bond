@@ -469,42 +469,17 @@ defmodule Bond.Compiler.Assertion do
       when is_list(invariants) and is_tuple(function_info) do
     subject_var = Macro.var(:subject, nil)
 
-    invariants_eval =
-      for %Assertion{
-            kind: :invariant,
-            expression: expression,
-            definition_env: env
-          } = invariant <- invariants do
-        assertion_info = %{
-          assertion_id: invariant.id,
-          kind: :invariant,
-          label: invariant.label,
-          expression: invariant.code,
-          file: env.file,
-          line: env.line,
-          module: env.module,
-          function: function_info
-        }
-
-        # See the corresponding comment in `assertions_body/2` — the if/throw lives in
-        # `Bond.Runtime.Eval.check_assertion/3` so Dialyzer can't prove the falsy branch
-        # unreachable for tautological invariants, and the failure binding is deferred via a
-        # `fn -> binding() end` thunk so the snapshot is only built when an invariant fails.
-        quote do
-          unquote(subject_var) = var!(bond_invariant_value)
-
-          Bond.Runtime.Eval.check_assertion(
-            unquote(expression),
-            unquote(Macro.escape(assertion_info)),
-            fn -> binding() end
-          )
-        end
-      end
-
+    # `subject` is bound once at the top of the body (rather than per invariant) so it is in scope
+    # for every eval — including the member assertions nested inside a `where`/`whenever` group's
+    # `case`, whose source typically destructures `subject`. The actual evaluation reuses
+    # `assertions_eval_list/3`, so invariants get binding-group grouping (#47) on the same code
+    # path as `@pre`/`@post`. See the Dialyzer/deferred-binding note on `build_single_eval/3`.
     quote do
       import Bond.Predicates
 
-      (unquote_splicing(invariants_eval))
+      unquote(subject_var) = var!(bond_invariant_value)
+
+      (unquote_splicing(assertions_eval_list(invariants, function_info)))
     end
   end
 

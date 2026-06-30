@@ -1011,6 +1011,37 @@ defmodule Bond.Compiler do
     FSM.invariant_def(fsm(env), invariant)
   end
 
+  @doc false
+  # Registers the invariants scoped to one `@invariant where(...)`/`whenever(...)` form (#47).
+  # Like `register_binding_group/7` but for the invariant kind: each member becomes an
+  # `:invariant` `%Assertion{}` tagged with a shared binding group, and — as in
+  # `register_invariant/4` — both the binding source and every member expression have their
+  # `subject` references stripped of hygiene context so they resolve to the `subject` rebound by
+  # `Assertion.invariants_body/2`. The destructuring pattern binds fresh names, so it is left as
+  # written.
+  def register_invariant_binding_group(mode, pattern, source, labelled_assertions, env, meta)
+      when mode in [:assert, :conditional] do
+    binding = %{
+      mode: mode,
+      pattern: pattern,
+      source: normalize_var_context(source, [:subject]),
+      group_id: Assertion.generate_group_id()
+    }
+
+    for {label, expression} <- labelled_assertions do
+      Assertion.validate_expression!(expression, env)
+      normalized = normalize_var_context(expression, [:subject])
+
+      assertion =
+        Assertion.new(:invariant, label, normalized, env, meta)
+        |> Assertion.put_binding(binding)
+
+      FSM.invariant_def(fsm(env), assertion)
+    end
+
+    :ok
+  end
+
   # Strip the hygiene context off every reference to an implicit binding (`subject`, `state`,
   # `old_state`/`new_state`) so they resolve to the unhygienic `Macro.var(name, nil)` the check
   # codegen rebinds at the check site, rather than to whatever the macro's expansion context held.

@@ -269,6 +269,14 @@ defmodule Bond do
           "a separate @#{pre_or_post} line per bare assertion."
   end
 
+  # @invariant where(...)/whenever(...) — destructuring binding form (#47), with the implicit
+  # `subject` binding available as the source (e.g. `@invariant where(%{n: n} = subject), …`).
+  # Matched before the single-arg and arity-error clauses below.
+  defmacro @{:invariant, meta, [{binder, _, [binding]} | scoped]}
+           when binder in [:where, :whenever] do
+    register_invariant_binding_form(binder, binding, scoped, __CALLER__, meta)
+  end
+
   # @invariant <expression-or-keyword-list>
   #
   # Invariant expressions reference the implicit `subject` binding, which Bond rebinds at
@@ -689,6 +697,22 @@ defmodule Bond do
     register_each(expression_or_kw_list, fn expr, label ->
       Bond.Compiler.register_invariant(expr, label, caller, meta)
     end)
+  end
+
+  # `@invariant where(...)`/`whenever(...)` (#47): same parse/validate as `@pre`/`@post`, routed to
+  # the invariant-specific registration (which normalises `subject` references).
+  defp register_invariant_binding_form(binder, binding, scoped, caller, meta) do
+    {mode, pattern, source} = parse_binding!(binder, binding, caller)
+    assertions = parse_scoped_assertions!(binder, scoped, caller)
+
+    Bond.Compiler.register_invariant_binding_group(
+      mode,
+      pattern,
+      source,
+      assertions,
+      caller,
+      meta
+    )
   end
 
   # `@state_invariant` (#34, `Bond.Server`).
