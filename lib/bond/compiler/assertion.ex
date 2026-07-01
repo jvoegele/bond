@@ -105,6 +105,8 @@ defmodule Bond.Compiler.Assertion do
   """
   def new(kind, label, expression, %Macro.Env{} = env \\ __ENV__, meta \\ [])
       when is_assertion_expression(expression) do
+    maybe_lint(expression, env)
+
     %__MODULE__{
       id: generate_unique_id(),
       kind: kind,
@@ -246,6 +248,19 @@ defmodule Bond.Compiler.Assertion do
           "(e.g. `is_integer(x)`, `x > 0`, `Map.has_key?(m, :k)`, " <>
           "`String.starts_with?(s, \"prefix\")`). Bare literals, variables, and " <>
           "non-AST terms aren't valid assertion forms."
+  end
+
+  # Runs the compile-time assertion linter (#52) unless disabled via
+  # `config :bond, lint_assertions: false`. Emits `IO.warn` diagnostics for statically
+  # vacuous/always-constant assertions; never affects the produced struct. Only original
+  # authoring flows through `new/5`; `replace_expression/2` (named-contract substitution) skips
+  # it so a materialised, argument-substituted contract isn't re-linted.
+  defp maybe_lint(expression, env) do
+    if Application.get_env(:bond, :lint_assertions, true) do
+      Bond.Compiler.Linter.warn(expression, env)
+    end
+
+    :ok
   end
 
   # `Macro.to_string/1` handles literals and AST nodes; fall back to `inspect`
