@@ -26,6 +26,7 @@ Bond gives you two complementary ways to do that:
 | …and probe the *boundaries* the `@pre` implies | `probe_contract/2` | `Bond.PropertyTest` |
 | Invariants hold across random *stateful sequences* | `invariants_hold/2` | `Bond.PropertyTest` |
 | A `Bond.Server` callback upholds its contracts | `contract_holds/2` on the callback | `Bond.PropertyTest` |
+| A `Bond.Server` upholds its invariants across random *message sequences* | `server_invariants_hold/2` | `Bond.PropertyTest` |
 
 A rule of thumb: reach for `Bond.Test` to test *the contracts* (the edges where they
 should and shouldn't fire), and for `Bond.PropertyTest` to test *the code* (that it
@@ -324,24 +325,64 @@ end
 Because invariants fire inside the woven callback, this works on a direct call just as it
 would when driving a live server.
 
-### Covering the reachable state space
+### Covering the reachable state space with `server_invariants_hold/2`
 
-`invariants_hold/2` is Bond's sequence-based stateful runner, but it targets **struct
-modules** whose operations return `%Mod{}` / `{:ok, %Mod{}}` — not GenServer callbacks,
-which return `{:noreply, state}` and friends. So it does not drive a `Bond.Server`
-directly. Until a dedicated server runner exists, two patterns give you reachable-state
-coverage today:
+`server_invariants_hold/2` is `invariants_hold/2`'s process-world sibling: it generates
+random message sequences, drives the server through them, and lets its
+`@state_invariant`/`@transition_invariant` (plus each callback's `@pre`/`@post`) be the
+oracle across the **reachable** state space — no hand-written state generator to drift out
+of sync with the server.
 
-  * **Test the pure core as a struct.** If your server delegates to a pure state module
-    with its own `@invariant`s and transition functions (the pattern the concurrency guide
-    recommends), point `invariants_hold/2` at *that* module. The struct's invariants are
-    checked across every reachable sequence, and the server becomes a thin, separately
-    tested shell.
-  * **Drive a real server with ordinary ExUnit.** `start_supervised!/1` the server, send it
-    a sequence of `call`/`cast`/`send` messages, and let the in-server invariant checks do
-    the asserting: any violation crashes the server with a `Bond.InvariantError`, failing
-    the test. This exercises the genuine reachable states (real dispatch, mailbox ordering,
-    timers) at the cost of writing the sequences by hand rather than generating them.
+```elixir
+defmodule BankServerTest do
+  use ExUnit.Case
+  use Bond.PropertyTest
+
+  server_invariants_hold Bank,
+    init: StreamData.integer(0..100),
+    messages: [
+      call: [{:withdraw, [StreamData.positive_integer()]}, {:balance, []}],
+      cast: [{:deposit, [StreamData.positive_integer()]}],
+      info: [{:tick, []}]
+    ]
+end
+```
+
+Each iteration generates an initial `init/1` argument and a random sequence, threads the
+server through it, and fails the property on any contract violation — `StreamData` shrinks
+to a minimal `(init, sequence)` counterexample. A message spec `{name, [gens]}` becomes the
+bare atom `name` when it takes no arguments (`{:tick, []}` → `:tick`) or the tuple
+`{name, …}` otherwise (`{:withdraw, [gen]}` → `{:withdraw, amount}`).
+
+**Two execution modes** (`:mode` option):
+
+  * **`:callbacks`** (the default) — seeds state from `init/1` and invokes the callbacks
+    directly, threading each returned state into the next. Deterministic, fast, and quiet; it
+    follows a genuinely reachable trajectory (real `init`, real callback returns) but does not
+    exercise real dispatch, mailbox ordering, or timers. The right default for CI.
+  * **`:process`** — starts a real server and drives it with `GenServer.call`/`cast` and
+    `send/2`. Highest fidelity, but a violation crashes the server, so expect
+    `GenServer terminating` log reports (add `@moduletag :capture_log`) and slower runs. Reach
+    for it when real dispatch or timer behaviour is part of what you're testing.
+
+If your server delegates to a pure state module with its own `@invariant`s (the pattern the
+concurrency guide recommends), you can also point the struct runner `invariants_hold/2` at
+that core and keep the server a thin, separately tested shell.
+
+> #### Side effects and reachable-state coverage {: .info}
+>
+> Two things to keep in mind when a callback isn't pure:
+>
+>   * **Mocked collaborators.** In `:callbacks` mode the callbacks run in the test process, so a
+>     private-mode `Mox.stub`/`expect` in a `setup` (the usual `async: true` pattern) is in scope.
+>     In `:process` mode the server runs in a spawned process that won't see those expectations —
+>     use `Mox.set_mox_global` with `async: false`, or `Mox.allow/3` the server's pid. Preferring
+>     `:callbacks` sidesteps this entirely.
+>   * **State gated behind a collaborator's reply is only reachable via that reply.** The sequence
+>     explores states reachable *through messages*, holding the stubbed collaborator fixed — so a
+>     branch that only runs when, say, an API call *fails* is not reached by a success stub, no
+>     matter the sequence. Cover each such path with its own run under the appropriate stub, exactly
+>     as you would split example-based tests by outcome.
 
 ## Contract coverage — which assertions have you seen fail?
 

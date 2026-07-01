@@ -315,6 +315,10 @@ Brought into ExUnit modules via `use Bond.PropertyTest`. Provides:
   * `invariants_hold/2` — runs random sequences of operations over a
     struct module and asserts the module's `@invariant`s (and any
     per-function contracts) hold across every reachable state.
+  * `server_invariants_hold/2` — drives a `Bond.Server` through random
+    `call`/`cast`/`info` message sequences and asserts its
+    `@state_invariant`/`@transition_invariant` hold across the reachable
+    state space, in a `:callbacks` (default) or `:process` execution mode.
 
 Requires the optional `:stream_data` dependency in the consumer's `mix.exs`.
 

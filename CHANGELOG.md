@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+
+- **`Bond.PropertyTest.server_invariants_hold/2`** ([#54](https://github.com/jvoegele/bond/issues/54)),
+  a stateful, sequence-based property runner for `Bond.Server` — the process-world sibling of
+  `invariants_hold/2`. It generates random `call`/`cast`/`info` message sequences, drives the
+  server through them, and lets its `@state_invariant`/`@transition_invariant` (plus each
+  callback's `@pre`/`@post`) be the oracle across the *reachable* state space, with `StreamData`
+  shrinking a failure to a minimal `(init, sequence)` counterexample — no hand-written state
+  generator to drift out of sync with the server. Two execution modes: `:callbacks` (the default —
+  seeds from `init/1` and threads callback returns; deterministic, fast, quiet) and `:process`
+  (drives a real server via `GenServer.call`/`cast`/`send` for full dispatch/timer fidelity,
+  recovering an in-server violation from a monitor). Because a `Bond.Server` weaves its checks into
+  the compiled callbacks, both modes exercise the real invariants.
+
 ## [1.11.0] - 2026-07-01
 
 Assertion-safety improvements from a Photon dogfooding pass: a `forall`/`exists` construct fix so a
