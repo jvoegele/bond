@@ -9,17 +9,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-- **Contract coverage** ([#56](https://github.com/jvoegele/bond/issues/56)). A test-time
-  diagnostic that surfaces assertions which are *checked but never observed to fail* — the dynamic
-  complement to the static linter (#52). The hardest contract bug is the vacuous-but-passing
-  assertion; "never failed" is a weak signal (a correct assertion over correct code also never
-  fails), so this is an opt-in diagnostic you run deliberately, not a warning. Enable with
-  `config :bond, coverage: true` (compile-time opt-in — a build that leaves it off is byte-for-byte
-  unchanged and pays nothing), then `Bond.Coverage.install_reporter()` in `test_helper.exs` prints
-  a per-assertion `checked×`/`failed×` table after the suite, flagging `⚠ never failed`. The
-  counters ride the existing runtime check path keyed by each assertion's stable id, so every
-  contract kind — including `Bond.Server` state/transition invariants — is covered. New public
-  module `Bond.Coverage`.
 - **Compile-time assertion linter** ([#52](https://github.com/jvoegele/bond/issues/52)). Bond now
   warns at compile time when an assertion is *statically vacuous* — a contract that can never fail
   protects nothing yet reads as coverage. The ruleset is deliberately narrow and fires only on
@@ -31,6 +20,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   real check. It intentionally does not attempt type-disjoint comparisons over runtime variables
   (`key not in remaining_keys`), which need inference Bond does not do without Dialyzer. Disable
   with `config :bond, lint_assertions: false`.
+- **Contract coverage** ([#56](https://github.com/jvoegele/bond/issues/56)), a small opt-in test
+  diagnostic. Enabling `config :bond, coverage: true` (compile-time; off by default, so an ordinary
+  build is unchanged) makes `Bond.Coverage` tally per-assertion checked/failed counts, and
+  `Bond.Coverage.install_reporter()` prints a table after the suite flagging any assertion that was
+  `⚠ never failed`. It is a deliberately minor spot-check, not a checklist: "never failed" is a weak
+  signal — most postconditions and invariants over correct code legitimately never fail — so expect
+  many such rows in a mature codebase and treat them as an occasional prompt, not a to-do list.
 
 ### Fixed
 
