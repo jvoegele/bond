@@ -288,6 +288,33 @@ defmodule Bond.Runtime.Eval do
     value
   end
 
+  @doc """
+  Coverage-recording variant of `check_assertion/3` (issue #56). Records the evaluation via
+  `Bond.Coverage.record/2` and then delegates unchanged. The compiler emits this in place of
+  `check_assertion/3` only when contract coverage is enabled at compile time
+  (`config :bond, coverage: true`), so a normal build never pays for it.
+
+  `result` is typed `term()` for the same Dialyzer-laundering reason as `check_assertion/3`: the
+  caller passes the user's (possibly statically-`true`) expression into a `term()` parameter, so
+  Dialyzer cannot narrow it and prove the failure path dead.
+  """
+  @spec check_assertion_covered(term(), map(), (-> keyword())) :: :ok
+  def check_assertion_covered(result, assertion_info, binding_fun) do
+    Bond.Coverage.record(assertion_info, result)
+    check_assertion(result, assertion_info, binding_fun)
+  end
+
+  @doc """
+  Coverage-recording variant of `check_value/3` (issue #56), for `Bond.check/1`. Records the
+  evaluation, then delegates unchanged (returning the checked value on success). Emitted in place
+  of `check_value/3` only when coverage is enabled at compile time.
+  """
+  @spec check_value_covered(term(), map(), (-> keyword())) :: term()
+  def check_value_covered(result, assertion_info, binding_fun) do
+    Bond.Coverage.record(assertion_info, result)
+    check_value(result, assertion_info, binding_fun)
+  end
+
   @spec assertion_failure(map(), keyword()) :: no_return()
   defp assertion_failure(assertion_info, binding) do
     assertion_info =

@@ -343,6 +343,46 @@ coverage today:
     the test. This exercises the genuine reachable states (real dispatch, mailbox ordering,
     timers) at the cost of writing the sequences by hand rather than generating them.
 
+## Contract coverage — which assertions have you seen fail?
+
+The tools above prove a contract *can* fire. `Bond.Coverage` answers the complementary
+question across a whole suite: **which assertions ran but were never once false?** An
+assertion checked hundreds of times that has never failed is a candidate for vacuity — the
+runtime counterpart to the compile-time [assertion linter](writing-sound-assertions.html).
+It is a *prompt*, not a verdict: a correct assertion over correct code also never fails, so
+treat `⚠ never failed` as "either write a test that makes this fail, or delete it."
+
+Coverage is **compile-time opt-in**, so a build that does not enable it is byte-for-byte
+unchanged and pays nothing. Enable it for the test environment and install the end-of-suite
+reporter:
+
+```elixir
+# config/test.exs
+config :bond, coverage: true
+```
+
+```elixir
+# test/test_helper.exs
+ExUnit.start()
+Bond.Coverage.install_reporter()
+```
+
+Now `mix test` prints a table after the suite:
+
+```
+Bond contract coverage
+  MyApp.CacheInvalidator
+    handle_info/2
+      @state_invariant :non_negative        checked  1184×  failed     3×  ✓
+      @post :keeps_input                     checked   642×  failed     0×  ⚠ never failed
+```
+
+The `⚠` rows are exactly the assertions to interrogate with `Bond.Test` (prove they can
+fail) — closing the loop with the "prove every assertion can fail" habit from the
+[Writing Sound Assertions](writing-sound-assertions.html) guide. `Bond.Coverage.entries/0`
+and `report/0` are also readable directly if you want to assert on coverage in a test or
+write it to a file.
+
 ## Patterns and gotchas
 
   * **Choosing `contract_holds` vs `probe_contract`.** If writing a generator that
