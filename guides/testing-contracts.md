@@ -42,7 +42,7 @@ dependency of `bond`. Add it to your own project to enable property-based testin
 ```elixir
 def deps do
   [
-    {:bond, "~> 1.10"},
+    {:bond, "~> 1.11"},
     {:stream_data, "~> 1.0", only: [:dev, :test]}
   ]
 end
@@ -377,11 +377,15 @@ Bond contract coverage
       @post :keeps_input                     checked   642×  failed     0×  ⚠ never failed
 ```
 
-The `⚠` rows are exactly the assertions to interrogate with `Bond.Test` (prove they can
-fail) — closing the loop with the "prove every assertion can fail" habit from the
-[Writing Sound Assertions](writing-sound-assertions.html) guide. `Bond.Coverage.entries/0`
-and `report/0` are also readable directly if you want to assert on coverage in a test or
-write it to a file.
+A `⚠` row is a candidate to interrogate with `Bond.Test` (prove it can fail) — the "prove
+every assertion can fail" habit from the [Writing Sound Assertions](writing-sound-assertions.html)
+guide. `Bond.Coverage.entries/0` and `report/0` are also readable directly if you want to
+inspect coverage in a test or write it to a file.
+
+Keep expectations modest: in a mature codebase **most** rows will read `⚠ never failed`,
+because most postconditions and invariants over correct code genuinely never fail — that is
+what a green suite means. This is a spot-check to skim occasionally for a contract that looks
+suspiciously safe, not a to-do list to drive to zero.
 
 ## Patterns and gotchas
 
