@@ -263,6 +263,19 @@ defmodule Bond.Compiler.Assertion do
     :ok
   end
 
+  # Contract coverage (#56) is compile-time opt-in: when `config :bond, coverage: true` these
+  # pick the `_covered` runtime helpers, which record each evaluation before delegating; otherwise
+  # the plain helpers are emitted and a build pays nothing. Read via `Application.get_env/3` at
+  # *macro-expansion* time (i.e. the using module's compile time), exactly like `maybe_lint/2`, so
+  # it reflects the downstream app's `:bond` config, not Bond's own.
+  defp coverage_enabled?, do: Application.get_env(:bond, :coverage, false) == true
+
+  defp check_assertion_fun,
+    do: if(coverage_enabled?(), do: :check_assertion_covered, else: :check_assertion)
+
+  defp check_value_fun,
+    do: if(coverage_enabled?(), do: :check_value_covered, else: :check_value)
+
   # `Macro.to_string/1` handles literals and AST nodes; fall back to `inspect`
   # for anything pathological.
   defp expression_source(expression) do
@@ -367,7 +380,7 @@ defmodule Bond.Compiler.Assertion do
     assertion_info = assertion_info(assertion, function_info, function_module)
 
     quote do
-      Bond.Runtime.Eval.check_assertion(
+      Bond.Runtime.Eval.unquote(check_assertion_fun())(
         unquote(expression),
         unquote(Macro.escape(assertion_info)),
         fn -> binding() end
@@ -594,7 +607,7 @@ defmodule Bond.Compiler.Assertion do
     quote do
       import Bond.Predicates
 
-      Bond.Runtime.Eval.check_value(
+      Bond.Runtime.Eval.unquote(check_value_fun())(
         unquote(expression),
         unquote(Macro.escape(assertion_info)),
         fn -> binding() end

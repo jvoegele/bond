@@ -17,6 +17,7 @@ The full set of modules in published API docs is the source-of-truth for
   * `Bond.Predicates`
   * `Bond.Test`
   * `Bond.PropertyTest`
+  * `Bond.Coverage`
   * `Bond.PreconditionError`
   * `Bond.PostconditionError`
   * `Bond.InvariantError`
@@ -317,6 +318,18 @@ Brought into ExUnit modules via `use Bond.PropertyTest`. Provides:
 
 Requires the optional `:stream_data` dependency in the consumer's `mix.exs`.
 
+## `Bond.Coverage`
+
+A compile-time-opt-in test diagnostic (enabled with `config :bond, coverage: true`) that
+records, per assertion, how many times it was checked and how many of those were failures —
+surfacing assertions that ran but were never observed to fail. Public functions:
+
+  * `record/2` — the recording hook the runtime calls; not called directly.
+  * `entries/0` — accumulated coverage as structured data.
+  * `report/0` — the coverage as a human-readable table.
+  * `reset/0` — clear accumulated coverage.
+  * `install_reporter/0` — print `report/0` after the ExUnit suite (call in `test_helper.exs`).
+
 ## Telemetry
 
 Bond emits exactly one telemetry event:
@@ -390,6 +403,11 @@ All under the `:bond` application:
     First exact-match module wins over regex matches; regex matches are
     tried in list order.
   * `:warn_skipped_invariants` — boolean (default `true`).
+  * `:lint_assertions` — boolean (default `true`). Compile-time: emit warnings
+    for statically vacuous assertions (see `Bond.Compiler.Linter`).
+  * `:coverage` — boolean (default `false`). Compile-time: instrument every
+    assertion so `Bond.Coverage` can record checked/failed counts. A build that
+    leaves it off is unchanged and pays nothing.
 
 The contract-checking chain `preconditions ≤ postconditions ≤ invariants` is
 enforced at compile time and at runtime. Compile-time: if a lower kind is
