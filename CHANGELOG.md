@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-07-01
+
+Adds a stateful, sequence-based property runner for `Bond.Server` — driving a server through random
+message sequences with its invariants as the oracle.
+
 ### Added
 
 - **`Bond.PropertyTest.server_invariants_hold/2`** ([#54](https://github.com/jvoegele/bond/issues/54)),
