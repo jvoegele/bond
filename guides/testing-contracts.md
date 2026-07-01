@@ -43,7 +43,7 @@ dependency of `bond`. Add it to your own project to enable property-based testin
 ```elixir
 def deps do
   [
-    {:bond, "~> 1.11"},
+    {:bond, "~> 1.12"},
     {:stream_data, "~> 1.0", only: [:dev, :test]}
   ]
 end
