@@ -69,6 +69,22 @@ defmodule Bond.QuantifiedAssertionsTest do
     def any_pos(items), do: items
   end
 
+  defmodule PatternFixture do
+    @moduledoc false
+    use Bond
+
+    # Structural generator pattern (#55): an element that does not match the pattern is a clean
+    # counterexample, not a `FunctionClauseError`. The generator expresses *shape*; the predicate
+    # expresses the property of matching elements.
+    @pre retries_nonneg: forall(%{retry: r} <- entries, r >= 0)
+    def retry(entries), do: Enum.count(entries)
+
+    # A bare `true` predicate makes the destructuring generator a pure shape assertion — the
+    # author's original intuition.
+    @pre has_admin: exists(%{role: :admin} <- users, true)
+    def authorize(users), do: {:ok, Enum.count(users)}
+  end
+
   describe "@pre forall" do
     test "passes when every element satisfies the predicate" do
       assert PreFixture.scale([1, 2, 3]) == [2, 4, 6]
@@ -139,6 +155,47 @@ defmodule Bond.QuantifiedAssertionsTest do
     end
   end
 
+  describe "structural generator pattern (#55)" do
+    test "passes when every element matches the pattern and satisfies the predicate" do
+      assert PatternFixture.retry([%{retry: 0}, %{retry: 3}]) == 2
+    end
+
+    test "a matching element that fails the predicate is a predicate-kind counterexample" do
+      error =
+        assert_raise Bond.PreconditionError, fn ->
+          PatternFixture.retry([%{retry: 0}, %{retry: -1}])
+        end
+
+      assert Exception.message(error) =~
+               "counterexample: element at index 1 (%{retry: -1}) does not satisfy `r >= 0`"
+    end
+
+    test "a non-matching element is a clean pattern-kind counterexample, not a crash" do
+      error =
+        assert_raise Bond.PreconditionError, fn ->
+          PatternFixture.retry([%{retry: 0}, %{oops: 1}])
+        end
+
+      assert Exception.message(error) =~
+               "counterexample: element at index 1 (%{oops: 1}) does not match pattern " <>
+                 "`%{retry: r}`"
+    end
+
+    test "exists over a structural pattern passes when an element matches" do
+      assert PatternFixture.authorize([%{role: :user}, %{role: :admin}]) == {:ok, 2}
+    end
+
+    test "exists reports a pattern mismatch when no element matches the generator" do
+      error =
+        assert_raise Bond.PreconditionError, fn ->
+          PatternFixture.authorize([%{role: :user}, %{role: :guest}])
+        end
+
+      assert Exception.message(error) =~
+               "counterexample: no element of `users` matches pattern `%{role: :admin}` (2 elements)"
+    end
+  end
+
   describe "empty enumerable semantics" do
     test "forall is vacuously true" do
       assert EmptyFixture.all_pos([]) == []
@@ -199,6 +256,7 @@ defmodule Bond.QuantifiedAssertionsTest do
 
       assert metadata.quantifier == %{
                quantifier: :forall,
+               kind: :predicate,
                element: -9,
                index: 1,
                predicate: "x > 0"

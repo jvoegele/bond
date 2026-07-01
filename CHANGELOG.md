@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A `forall`/`exists` generator-pattern mismatch is now a clean counterexample, not a crash**
+  ([#55](https://github.com/jvoegele/bond/issues/55)). A quantifier with a *structural* generator
+  pattern — `forall(%{retry: r} <- entries, r >= 0)` — used to raise `FunctionClauseError` on any
+  element that did not match the pattern, because the generator compiled to a single-clause
+  function. It now compiles with a catch-all clause, so a non-matching element makes the
+  quantifier fail with a counterexample that names the unmatched pattern
+  (`element at index 1 (%{oops: 1}) does not match pattern ...`), and for `exists` a wholesale
+  mismatch reports `no element of users matches pattern ...`. The destructuring generator
+  therefore doubles as a shape assertion, as its syntax suggests.
+  Bare-variable generators (`forall(x <- xs, …)`) are unchanged — they match every element, so no
+  catch-all is emitted. This only *adds* well-defined behaviour where there was an exception; no
+  reasonable code depended on the crash.
+
 ## [1.10.1] - 2026-06-30
 
 A formatter fix: downstream projects that put `:bond` in their `:import_deps` no longer have

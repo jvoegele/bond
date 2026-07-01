@@ -39,14 +39,43 @@ defmodule Bond.Runtime.Quantifier do
 
   @typedoc """
   Failure detail recorded in the side channel and surfaced on the `:quantifier` key of an
-  assertion failure. `:forall` carries the offending `:element` and zero-based `:index`;
-  `:exists` carries the element `:count` and the source text of the enumerable.
+  assertion failure.
+
+  The `:kind` field distinguishes the two ways a quantifier can fail: `:predicate` — an element
+  matched the generator pattern but the predicate was falsy; `:pattern` — an element did not
+  match the generator pattern at all (only possible for a structural pattern, which emits a
+  `:no_match` catch-all; see `Bond.Predicates`).
+
+  `:forall` carries the offending `:element` and zero-based `:index`. `:exists` carries the
+  element `:count` and the source text of the enumerable; a `:pattern`-kind `:exists` failure
+  means *no* element matched the generator pattern.
   """
   @type failure ::
-          %{quantifier: :forall, element: term(), index: non_neg_integer(), predicate: String.t()}
+          %{
+            quantifier: :forall,
+            kind: :predicate,
+            element: term(),
+            index: non_neg_integer(),
+            predicate: String.t()
+          }
+          | %{
+              quantifier: :forall,
+              kind: :pattern,
+              element: term(),
+              index: non_neg_integer(),
+              pattern: String.t()
+            }
           | %{
               quantifier: :exists,
+              kind: :predicate,
               predicate: String.t(),
+              count: non_neg_integer(),
+              enum_code: String.t()
+            }
+          | %{
+              quantifier: :exists,
+              kind: :pattern,
+              pattern: String.t(),
               count: non_neg_integer(),
               enum_code: String.t()
             }
@@ -62,19 +91,29 @@ defmodule Bond.Runtime.Quantifier do
   A predicate that *raises* (rather than returning falsy) propagates unchanged — the quantifier
   reports an unsatisfied element, not a crashing one. Guard shape-dependent predicates with the
   `~>` implication operator, exactly as in multi-clause contracts.
+
+  `fun` returns `{:match, predicate_result}` for an element that matched the generator pattern,
+  or `:no_match` for one that did not (structural patterns only — see `Bond.Predicates`). A
+  `:no_match` element makes the universal fail with a `:pattern`-kind counterexample;
+  `predicate_code` and `pattern_code` are the compile-time source texts for the message.
   """
-  @spec forall(Enumerable.t(), (term() -> as_boolean(term())), String.t()) :: boolean()
-  def forall(enum, fun, predicate_code) when is_function(fun, 1) do
+  @spec forall(
+          Enumerable.t(),
+          (term() -> {:match, as_boolean(term())} | :no_match),
+          String.t(),
+          String.t()
+        ) :: boolean()
+  def forall(enum, fun, predicate_code, pattern_code) when is_function(fun, 1) do
     clear()
 
     result =
       enum
       |> Stream.with_index()
       |> Enum.reduce_while(true, fn {element, index}, _acc ->
-        if fun.(element) do
-          {:cont, true}
-        else
-          {:halt, {element, index}}
+        case fun.(element) do
+          {:match, truthy} when truthy in [false, nil] -> {:halt, {:unsatisfied, element, index}}
+          {:match, _truthy} -> {:cont, true}
+          :no_match -> {:halt, {:no_match, element, index}}
         end
       end)
 
@@ -82,8 +121,26 @@ defmodule Bond.Runtime.Quantifier do
       true ->
         true
 
-      {element, index} ->
-        put(%{quantifier: :forall, element: element, index: index, predicate: predicate_code})
+      {:unsatisfied, element, index} ->
+        put(%{
+          quantifier: :forall,
+          kind: :predicate,
+          element: element,
+          index: index,
+          predicate: predicate_code
+        })
+
+        false
+
+      {:no_match, element, index} ->
+        put(%{
+          quantifier: :forall,
+          kind: :pattern,
+          element: element,
+          index: index,
+          pattern: pattern_code
+        })
+
         false
     end
   end
@@ -95,23 +152,55 @@ defmodule Bond.Runtime.Quantifier do
   `fun` (including an empty `enum`), records the element count and returns `false`. There is no
   single offending element, so the failure detail carries `:count` and `enum_code` (the source
   text of the enumerable) for a "no element of … satisfies …" message.
+
+  `fun` returns `{:match, predicate_result}` or `:no_match`, as in `forall/4`. When *every*
+  element failed to match the generator pattern (and there was at least one), the failure is
+  reported as a `:pattern`-kind "no element matches pattern …" rather than the misleading "no
+  element satisfies …"; a mix of shapes falls back to the predicate message.
   """
-  @spec exists(Enumerable.t(), (term() -> as_boolean(term())), String.t(), String.t()) ::
-          boolean()
-  def exists(enum, fun, predicate_code, enum_code) when is_function(fun, 1) do
+  @spec exists(
+          Enumerable.t(),
+          (term() -> {:match, as_boolean(term())} | :no_match),
+          String.t(),
+          String.t(),
+          String.t()
+        ) :: boolean()
+  def exists(enum, fun, predicate_code, enum_code, pattern_code) when is_function(fun, 1) do
     clear()
 
     result =
-      Enum.reduce_while(enum, 0, fn element, count ->
-        if fun.(element), do: {:halt, :found}, else: {:cont, count + 1}
+      Enum.reduce_while(enum, {0, 0}, fn element, {checked, mismatches} ->
+        case fun.(element) do
+          {:match, truthy} when truthy in [false, nil] -> {:cont, {checked + 1, mismatches}}
+          {:match, _truthy} -> {:halt, :found}
+          :no_match -> {:cont, {checked + 1, mismatches + 1}}
+        end
       end)
 
     case result do
       :found ->
         true
 
-      count when is_integer(count) ->
-        put(%{quantifier: :exists, predicate: predicate_code, count: count, enum_code: enum_code})
+      {count, mismatches} when count > 0 and mismatches == count ->
+        put(%{
+          quantifier: :exists,
+          kind: :pattern,
+          pattern: pattern_code,
+          count: count,
+          enum_code: enum_code
+        })
+
+        false
+
+      {count, _mismatches} ->
+        put(%{
+          quantifier: :exists,
+          kind: :predicate,
+          predicate: predicate_code,
+          count: count,
+          enum_code: enum_code
+        })
+
         false
     end
   end

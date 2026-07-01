@@ -55,34 +55,33 @@ watching the assertion fail once (see the tip above). The same caution applies t
 comparing a value against a literal of the wrong type (`status == 200` when `status` is
 `:ok`).
 
-## Quantifier generators bind, they do not filter
+## Quantifier generators bind and assert shape — they do not filter
 
 `forall`/`exists` use a comprehension-*looking* generator, `pattern <- enumerable`, but the
-pattern is a **binding pattern, not a filter**. It compiles to a single-clause
-`fn pattern -> predicate end` applied to every element, so an element that does not match
-the pattern raises `FunctionClauseError` — it is *not* skipped the way a `for` comprehension
-would skip it. (See the warning under `Bond.Predicates.forall/2`.)
-
-The practical rule: **do not put a shape in the generator pattern to assert that shape.**
+pattern **binds, it does not filter**. A `for` comprehension *skips* an element that does not
+match; a Bond quantifier does the opposite — a **structural** generator pattern makes a
+non-matching element **fail the assertion**, with a clean counterexample that names the
+unmatched pattern. The destructuring generator therefore doubles as a shape assertion:
 
 ```elixir
-# ✅ asserts the shape — a malformed entry fails the contract, naming the element
-forall(entry <- entries, match?(%{key: _, retry: _}, entry))
-
-# ❌ assumes the shape — a malformed entry raises FunctionClauseError, not a violation
-forall(%{key: _, retry: _} <- entries, true)        # the bare `true` is the tell
+# binds `retry` from each entry and asserts a property of it; an entry missing `:retry`
+# fails the contract, naming the element — it is not silently skipped
+forall(%{retry: r} <- entries, r >= 0)
 ```
 
-Reach for a destructuring generator (`forall(%{retry: r} <- entries, r >= 0)`) only when
-every element is *already known* to match. To assert a property of just the elements of a
-given shape while ignoring the rest, guard with `~>`:
+A **bare-variable** generator (`forall(x <- xs, …)`) matches every element, so there is no
+shape to violate — the predicate does all the work.
+
+To assert a property of *only* the elements of a given shape while **ignoring** the rest
+(comprehension-style filtering), guard the predicate with `~>` so non-matching elements pass
+vacuously:
 
 ```elixir
 forall(entry <- entries, match?(%{retry: _}, entry) ~> entry.retry >= 0)
 ```
 
 This is the same discipline as shape-dependent predicates in multi-clause contracts: when a
-predicate only makes sense for some inputs, gate it with `~>` rather than letting it raise.
+predicate only makes sense for some inputs, gate it with `~>`.
 
 ## `old/1` is meaningful only for state that changes
 

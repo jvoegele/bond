@@ -136,10 +136,13 @@ defmodule Bond.AssertionError do
   # Renders the element-level `counterexample:` line for a quantified assertion (`forall`/
   # `exists`), or `""` for an ordinary assertion. `forall` names the offending element and its
   # zero-based index; `exists` reports that no element satisfied the predicate, with the count.
+  # The `:pattern`-kind variants report a *generator-pattern* mismatch (issue #55) rather than an
+  # unsatisfied predicate.
   defp format_counterexample(nil), do: ""
 
   defp format_counterexample(%{
          quantifier: :forall,
+         kind: :predicate,
          element: element,
          index: index,
          predicate: predicate
@@ -149,12 +152,35 @@ defmodule Bond.AssertionError do
   end
 
   defp format_counterexample(%{
+         quantifier: :forall,
+         kind: :pattern,
+         element: element,
+         index: index,
+         pattern: pattern
+       }) do
+    "|   counterexample: element at index #{index} (#{inspect(element)}) does not match pattern " <>
+      "`#{pattern}`\n"
+  end
+
+  defp format_counterexample(%{
          quantifier: :exists,
+         kind: :predicate,
          predicate: predicate,
          count: count,
          enum_code: enum_code
        }) do
     "|   counterexample: no element of `#{enum_code}` satisfies `#{predicate}` " <>
+      "(#{count} #{pluralize(count, "element")})\n"
+  end
+
+  defp format_counterexample(%{
+         quantifier: :exists,
+         kind: :pattern,
+         pattern: pattern,
+         count: count,
+         enum_code: enum_code
+       }) do
+    "|   counterexample: no element of `#{enum_code}` matches pattern `#{pattern}` " <>
       "(#{count} #{pluralize(count, "element")})\n"
   end
 

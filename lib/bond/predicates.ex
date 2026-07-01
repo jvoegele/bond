@@ -224,31 +224,29 @@ defmodule Bond.Predicates do
   `true`. A predicate that raises (rather than returning falsy) propagates — guard
   shape-dependent predicates with `~>`, exactly as in multi-clause contracts.
 
-  > #### The generator pattern *binds*, it does not *filter* {: .warning}
+  > #### The generator pattern *binds* and asserts shape — it does not *filter* {: .info}
   >
-  > Despite the comprehension-style `pattern <- enumerable` syntax, the pattern is a **binding
-  > pattern, not a filter**. `forall(pattern <- enum, pred)` becomes
-  > `fn pattern -> pred end` — a *single-clause* function with no catch-all — applied to every
-  > element. So an element that does **not** match `pattern` is **not skipped** the way a `for`
-  > comprehension would skip it; it raises `FunctionClauseError`, which propagates as a crash
-  > rather than a clean contract violation.
-  >
-  > The practical consequence: **do not put a shape in the generator pattern to assert that
-  > shape.** To assert that *every* element has a shape, match in the *predicate* so a
-  > non-matching element returns a reportable `false`:
+  > Despite the comprehension-style `pattern <- enumerable` syntax, the pattern **binds, it does
+  > not filter**. A `for` comprehension *skips* an element that does not match its generator
+  > pattern; `forall`/`exists` do the opposite — a **structural** generator pattern makes a
+  > non-matching element **fail** the quantifier, reported as a clean counterexample that names
+  > the unmatched pattern (not a `FunctionClauseError`). So a destructuring generator doubles as
+  > a shape assertion:
   >
   > ```elixir
-  > # ✅ asserts the shape — a malformed entry fails the contract, naming the element
-  > forall(entry <- entries, match?(%{key: _, retry: _}, entry))
+  > # binds `retry` and asserts a property; an entry missing `:retry` fails, naming the element
+  > forall(%{retry: r} <- entries, r >= 0)
   >
-  > # ❌ assumes the shape — a malformed entry raises FunctionClauseError, not a violation
+  > # a pure shape assertion — every entry must match this pattern
   > forall(%{key: _, retry: _} <- entries, true)
   > ```
   >
-  > Reach for the destructuring generator (`forall(%{retry: r} <- entries, r >= 0)`) only when
-  > every element is *already known* to match — never to establish the shape itself. To assert a
-  > property of just the elements of a given shape while ignoring the rest, guard with `~>`:
-  > `forall(entry <- entries, match?(%{retry: _}, entry) ~> entry.retry >= 0)`.
+  > A **bare-variable** generator (`forall(x <- xs, …)`) matches every element, so there is no
+  > shape to violate — the predicate does all the work.
+  >
+  > To assert a property of *only* the elements of a given shape while **ignoring** the rest
+  > (comprehension-style filtering), guard the predicate with `~>` so non-matching elements pass
+  > vacuously: `forall(entry <- entries, match?(%{retry: _}, entry) ~> entry.retry >= 0)`.
 
   `forall`/`exists` return ordinary booleans, so they compose with `and`, `or`, `not`, `~>`,
   and `|||`. When several quantifiers appear in one assertion (including nested ones), the
@@ -269,8 +267,9 @@ defmodule Bond.Predicates do
     quote do
       Bond.Runtime.Quantifier.forall(
         unquote(enum),
-        fn unquote(pattern) -> unquote(predicate) end,
-        unquote(Macro.to_string(predicate))
+        unquote(quantifier_fun(pattern, predicate)),
+        unquote(Macro.to_string(predicate)),
+        unquote(Macro.to_string(pattern))
       )
     end
   end
@@ -308,9 +307,9 @@ defmodule Bond.Predicates do
 
   An empty enumerable is `false` (no witness exists).
 
-  Like `forall/2`, the generator pattern **binds, it does not filter**: an element that does not
-  match the pattern raises `FunctionClauseError` rather than being skipped, so use `match?/2` in
-  the predicate (or `~>`) for shape-dependent bodies — see the warning under `forall/2`.
+  Like `forall/2`, the generator pattern **binds and asserts shape** — a **structural** pattern
+  makes a non-matching element fail to be a witness, and when *no* element matches the failure
+  reports the unmatched pattern rather than the predicate. See the note under `forall/2`.
 
   ## Examples
 
@@ -326,9 +325,10 @@ defmodule Bond.Predicates do
     quote do
       Bond.Runtime.Quantifier.exists(
         unquote(enum),
-        fn unquote(pattern) -> unquote(predicate) end,
+        unquote(quantifier_fun(pattern, predicate)),
         unquote(Macro.to_string(predicate)),
-        unquote(Macro.to_string(enum))
+        unquote(Macro.to_string(enum)),
+        unquote(Macro.to_string(pattern))
       )
     end
   end
@@ -342,6 +342,40 @@ defmodule Bond.Predicates do
   # See the corresponding `forall/3`,`forall/4` clauses.
   defmacro exists(_a, _b, _c), do: quantifier_arity_error!(:exists, 3)
   defmacro exists(_a, _b, _c, _d), do: quantifier_arity_error!(:exists, 4)
+
+  # Build the per-element function handed to the runtime quantifier. A matching element yields
+  # `{:match, predicate_result}`; for a *structural* generator pattern we append a catch-all
+  # clause returning `:no_match`, so an element that does not match the pattern becomes a clean
+  # counterexample instead of a `FunctionClauseError` (issue #55). A bare-variable pattern
+  # matches everything, so no catch-all is emitted — it would be an unreachable clause and draw a
+  # "this clause cannot match" warning in the caller's module. The runtime distinguishes the two
+  # `false` reasons (pattern mismatch vs unsatisfied predicate) for the failure message.
+  defp quantifier_fun(pattern, predicate) do
+    match_clause =
+      quote do
+        unquote(pattern) -> {:match, unquote(predicate)}
+      end
+
+    clauses =
+      if structural_pattern?(pattern) do
+        match_clause ++
+          quote do
+            _ -> :no_match
+          end
+      else
+        match_clause
+      end
+
+    {:fn, [], clauses}
+  end
+
+  # A generator pattern that can fail to match — anything other than a bare variable (`x`, `_`,
+  # `_foo`, all quoted as `{name, meta, context}` with an atom `context`) — is "structural" and
+  # needs the `:no_match` catch-all above.
+  defp structural_pattern?({name, _meta, context}) when is_atom(name) and is_atom(context),
+    do: false
+
+  defp structural_pattern?(_other), do: true
 
   # Shared compile-time diagnostic for `for`-style multi-generator/filter misuse of a
   # quantifier. Runs at macro-expansion time (in the already-compiled `Bond.Predicates`), so it
