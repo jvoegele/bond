@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-07-01
+
+Assertion-safety improvements from a Photon dogfooding pass: a `forall`/`exists` construct fix so a
+generator-pattern mismatch is a clean counterexample rather than a crash, and a compile-time linter
+that warns on statically vacuous assertions. Also adds a minor, opt-in contract-coverage diagnostic.
+
 ### Added
 
 - **Compile-time assertion linter** ([#52](https://github.com/jvoegele/bond/issues/52)). Bond now
