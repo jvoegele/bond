@@ -8,7 +8,7 @@ defmodule Bond.PropertyTest do
   outputs. With Bond, the oracle is *already there at every call site*; PBT just feeds
   random inputs in and lets the existing instrumentation raise on any violation.
 
-  `Bond.PropertyTest` adds three macros, one per testing shape:
+  `Bond.PropertyTest` adds four macros, one per testing shape:
 
     * **`contract_holds/2` — single function.** Pass a function reference and a list of
       generators (one per argument). The macro calls the function with random inputs; any
@@ -34,6 +34,16 @@ defmodule Bond.PropertyTest do
             constructors: [{:new, [StreamData.integer(1..100)]}],
             transformers: [{:push, [StreamData.term()]}, {:pop, []}],
             observers:    [{:size, []}, {:peek, []}]
+
+    * **`server_invariants_hold/2` — stateful `Bond.Server` message sequence.** The
+      process-world sibling of `invariants_hold/2`: drive a server through random
+      `call`/`cast`/`info` sequences and let its `@state_invariant`/`@transition_invariant`
+      be the oracle across the reachable state space.
+
+          server_invariants_hold Bank,
+            init: StreamData.integer(0..100),
+            messages: [call: [{:withdraw, [StreamData.positive_integer()]}],
+                       cast: [{:deposit, [StreamData.positive_integer()]}]]
 
   ## Setup
 
@@ -487,5 +497,113 @@ defmodule Bond.PropertyTest do
         end
       end
     end
+  end
+
+  @doc """
+  Generates an ExUnit property that drives a `Bond.Server` through random sequences of messages
+  and verifies its `@state_invariant`/`@transition_invariant` (plus each callback's `@pre`/`@post`)
+  hold across the reachable state space.
+
+  This is the process-world sibling of `invariants_hold/2`: for a server, the invariants are an
+  even more compelling free oracle, since the reachable state space is otherwise tedious to
+  enumerate by hand. Pass the server module, an `:init` generator, and `:messages` specs:
+
+      server_invariants_hold Bank,
+        init: StreamData.integer(0..100),
+        messages: [
+          call: [{:withdraw, [StreamData.positive_integer()]}, {:balance, []}],
+          cast: [{:deposit, [StreamData.positive_integer()]}],
+          info: [{:tick, []}]
+        ]
+
+  Each iteration generates an initial argument and a random message sequence, drives the server
+  through it, and lets any contract violation fail the property; `StreamData` shrinks to a minimal
+  `(init, sequence)` counterexample. A message spec `{name, [arg_generators]}` becomes the bare
+  atom `name` when it has no arguments (`{:tick, []}` → `:tick`) or the tuple `{name, …}` otherwise
+  (`{:withdraw, [gen]}` → `{:withdraw, amount}`).
+
+  ## Execution modes
+
+    * `:callbacks` (the default) — seeds state from `init/1` and invokes the callbacks directly,
+      threading each returned state into the next. Deterministic and fast; follows a genuinely
+      reachable trajectory (real `init`, real callback returns) but does not exercise real
+      dispatch, mailbox ordering, or timers.
+    * `:process` — starts a real (unlinked) server per sequence and drives it with
+      `GenServer.call`/`cast` and `send/2`, using `:sys.get_state/1` as a barrier so asynchronous
+      casts/infos are processed before the next step. Highest fidelity (real dispatch, mailbox
+      ordering, timers); a contract violation crashes the server and is recovered from the monitor
+      and re-raised as a shrinkable property failure.
+
+  ## Options
+
+    * `:init` (required) — a `StreamData` generator for the argument passed to the server's
+      `init/1` (and `start_link/1` in `:process` mode).
+    * `:messages` (required, non-empty) — keyword list of `call:`/`cast:`/`info:`, each a list of
+      `{fun_name, [arg_generators]}` message specs.
+    * `:mode` (optional, default `:callbacks`) — `:callbacks` or `:process`.
+    * `:max_length` (optional, default 20) — maximum message-sequence length.
+    * `:name` (optional) — the property description. Defaults to `"server_invariants_hold <module>"`.
+  """
+  defmacro server_invariants_hold(module, opts)
+
+  defmacro server_invariants_hold({:__aliases__, _, _} = module_ast, opts) do
+    init_gen = Keyword.get(opts, :init)
+    messages = Keyword.get(opts, :messages, [])
+    mode = Keyword.get(opts, :mode, :callbacks)
+    max_length = Keyword.get(opts, :max_length, 20)
+    name = Keyword.get(opts, :name, "server_invariants_hold #{Macro.to_string(module_ast)}")
+
+    if init_gen == nil do
+      raise ArgumentError,
+            "server_invariants_hold requires an `:init` generator (the argument passed to the " <>
+              "server's init/1), e.g. `init: StreamData.integer(0..100)`."
+    end
+
+    if messages == [] do
+      raise ArgumentError,
+            "server_invariants_hold requires a non-empty `:messages` keyword " <>
+              "(e.g. `messages: [call: [{:deposit, [gen]}], info: [{:tick, []}]]`)."
+    end
+
+    run_op =
+      case mode do
+        :callbacks ->
+          quote do:
+                  Bond.PropertyTest.ServerSequence.run_callbacks(
+                    unquote(module_ast),
+                    init_arg,
+                    ops
+                  )
+
+        :process ->
+          quote do:
+                  Bond.PropertyTest.ServerSequence.run_process(unquote(module_ast), init_arg, ops)
+
+        other ->
+          raise ArgumentError,
+                "server_invariants_hold :mode must be :callbacks or :process, got: #{inspect(other)}"
+      end
+
+    quote do
+      property unquote(name) do
+        sequence_gen =
+          Bond.PropertyTest.ServerSequence.generator(unquote(messages),
+            max_length: unquote(max_length)
+          )
+
+        check all(
+                init_arg <- unquote(init_gen),
+                ops <- sequence_gen
+              ) do
+          unquote(run_op)
+        end
+      end
+    end
+  end
+
+  defmacro server_invariants_hold(other, _opts) do
+    raise ArgumentError,
+          "server_invariants_hold expects a Bond.Server module as its first argument, got: " <>
+            Macro.to_string(other)
   end
 end
