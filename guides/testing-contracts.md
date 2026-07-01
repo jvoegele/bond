@@ -369,6 +369,21 @@ If your server delegates to a pure state module with its own `@invariant`s (the 
 concurrency guide recommends), you can also point the struct runner `invariants_hold/2` at
 that core and keep the server a thin, separately tested shell.
 
+> #### Side effects and reachable-state coverage {: .info}
+>
+> Two things to keep in mind when a callback isn't pure:
+>
+>   * **Mocked collaborators.** In `:callbacks` mode the callbacks run in the test process, so a
+>     private-mode `Mox.stub`/`expect` in a `setup` (the usual `async: true` pattern) is in scope.
+>     In `:process` mode the server runs in a spawned process that won't see those expectations —
+>     use `Mox.set_mox_global` with `async: false`, or `Mox.allow/3` the server's pid. Preferring
+>     `:callbacks` sidesteps this entirely.
+>   * **State gated behind a collaborator's reply is only reachable via that reply.** The sequence
+>     explores states reachable *through messages*, holding the stubbed collaborator fixed — so a
+>     branch that only runs when, say, an API call *fails* is not reached by a success stub, no
+>     matter the sequence. Cover each such path with its own run under the appropriate stub, exactly
+>     as you would split example-based tests by outcome.
+
 ## Contract coverage — which assertions have you seen fail?
 
 The tools above prove a contract *can* fire. `Bond.Coverage` answers the complementary
