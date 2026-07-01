@@ -55,6 +55,33 @@ watching the assertion fail once (see the tip above). The same caution applies t
 comparing a value against a literal of the wrong type (`status == 200` when `status` is
 `:ok`).
 
+## The assertion linter catches the obvious cases
+
+Bond runs a small **compile-time linter** over every assertion and emits a warning for the
+high-confidence, provably-constant smells — so some of the traps in this guide are caught for
+you the moment you compile:
+
+- **Constant assertions** — an expression that folds to a constant over literals and pure
+  operators: `:ok == 200`, `"x" not in [%{...}]`, `1 == 1`.
+- **Self-comparisons** — `x == x` (always true), `x != x` (always false), `p or not p`.
+- **Vacuous quantifiers** — a `forall`/`exists` with a bare-variable generator and a predicate
+  that is constant or never mentions the element: `forall(x <- items, true)`.
+
+It is deliberately narrow: it only warns when it can *prove* the assertion is constant, because
+a noisy contract linter gets turned off wholesale. In particular it **cannot** catch the
+type-disjoint comparison above (`key not in remaining_keys`) — knowing `remaining_keys` holds
+maps requires type inference Bond does not do without Dialyzer. That class stays your
+responsibility, which is why the "prove it can fail once" habit still matters. (Watching an
+assertion that never fails is also the job of contract-coverage tooling — the dynamic complement
+to this static check.)
+
+To silence it — e.g. for a deliberate placeholder assertion — disable it globally:
+
+```elixir
+# config/config.exs
+config :bond, lint_assertions: false
+```
+
 ## Quantifier generators bind and assert shape — they do not filter
 
 `forall`/`exists` use a comprehension-*looking* generator, `pattern <- enumerable`, but the

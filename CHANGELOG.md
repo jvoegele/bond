@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Compile-time assertion linter** ([#52](https://github.com/jvoegele/bond/issues/52)). Bond now
+  warns at compile time when an assertion is *statically vacuous* — a contract that can never fail
+  protects nothing yet reads as coverage. The ruleset is deliberately narrow and fires only on
+  provably-constant shapes: a constant-folding assertion (`:ok == 200`, `"x" not in [%{...}]`,
+  `1 == 1`), a self-comparison (`x == x`, `x != x`, `p or not p`), or a vacuous quantifier — a
+  `forall`/`exists` with a bare-variable generator whose predicate is constant or ignores the
+  bound element (`forall(x <- items, true)`). Structural-generator quantifiers are *not* flagged:
+  since [#55](https://github.com/jvoegele/bond/issues/55) they assert element shape, which is a
+  real check. It intentionally does not attempt type-disjoint comparisons over runtime variables
+  (`key not in remaining_keys`), which need inference Bond does not do without Dialyzer. Disable
+  with `config :bond, lint_assertions: false`.
+
 ### Fixed
 
 - **A `forall`/`exists` generator-pattern mismatch is now a clean counterexample, not a crash**
