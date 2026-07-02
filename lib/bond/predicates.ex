@@ -61,6 +61,9 @@ defmodule Bond.Predicates do
   @doc """
   Logical exclusive or operator: `p ||| q` means `xor(p, q)`.
 
+  Prefer the named form `xor(p, q)` in assertions — it reads unambiguously as exclusive or
+  where `|||` can be mistaken for logical *or* by readers unfamiliar with Bond.
+
   Note that the `|||` operator has higher precedence than many other operators and it may be
   necessary to parenthesize the expressions on either side of the operator to get the
   expected result.

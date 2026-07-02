@@ -2,7 +2,7 @@
 
 A Bond assertion is ordinary Elixir, evaluated for truthiness at runtime. That is the
 source of its power — you have the whole language, plus Bond's
-[predicate vocabulary](`Bond.Predicates`) (`<~`, `~>`, `forall`/`exists`, `xor`, `|||`)
+[predicate vocabulary](`Bond.Predicates`) (`<~`, `~>`, `forall`/`exists`, `xor/2`, `|||`)
 — and also its one sharp edge: **nothing type-checks your assertion**. An expression
 that is always true, always crashes, or means something other than it reads will compile,
 run, and often *pass*, telling you nothing while looking like coverage.
@@ -33,7 +33,7 @@ Enum.empty?(remaining) or is_reference(timer)        # ✅ says what it means
 Enum.empty?(remaining) ||| is_reference(timer)       # ❌ XOR: also fails when BOTH are true
 ```
 
-Use `or` for disjunction, `xor`/`|||` only when you genuinely mean "exactly one", and
+Use `or` for disjunction, `xor/2` (or its infix alias `|||`) only when you genuinely mean "exactly one", and
 `~>` (`p ~> q`, "p implies q") for the very common "if this shape, then that property".
 `~>` is also the safe choice when the consequent only makes sense once the antecedent
 holds — it short-circuits instead of evaluating a consequent that would raise.
