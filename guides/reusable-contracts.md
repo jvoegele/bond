@@ -79,6 +79,36 @@ end
 There is nothing more to do at the application site — the arity of the function
 you apply to selects the overload.
 
+### Result-only contracts
+
+When the same return-value guarantee applies across functions of **different arities**,
+declare the contract with an explicit empty parameter list:
+
+```elixir
+defcontract gate_result() do
+  @post {:ok, :cleared} <~ result or
+          ({:error, :validation_failed, errs} when is_list(errs)) <~ result
+end
+```
+
+A zero-argument contract is **arity-agnostic**: `@apply_contract :gate_result` works
+on a function of any arity. The wrapper still forwards the applying function's actual
+arguments to the original implementation — only the postcondition is constrained, and
+only through `result`.
+
+```elixir
+@apply_contract :gate_result
+def can_encode_previews?(game_film), do: …        # arity 1
+
+@apply_contract :gate_result
+def can_encode?(game_film, exchange_file), do: …  # arity 2
+```
+
+The explicit `()` is required — `defcontract gate_result do … end` (no parens)
+raises a `CompileError` pointing at the `()` form. Preconditions are not meaningful
+in a zero-argument contract (no argument names to reference) and are rejected at
+compile time by the reference validator.
+
 ## Applying a contract
 
 `@apply_contract` immediately precedes the function it constrains, like `@pre`:
@@ -106,9 +136,11 @@ end
 The applying function's parameters are rebound to the contract's canonical names
 **positionally**, so the function is free to name them differently — `withdraw(acct,
 amt)` works against `withdrawal(account, amount)` just as a behaviour
-implementation's parameters rebind to its callback's names. The contract's
-declared arity must match the function's arity; a mismatch is a compile error
-that lists the contract's available arities.
+implementation's parameters rebind to its callback's names. The contract's declared
+arity must match the function's arity; a mismatch is a compile error that lists the
+available arities. The one exception is a zero-argument `defcontract name()`, which
+is arity-agnostic and applies to any function regardless of arity (see
+[Result-only contracts](#result-only-contracts) above).
 
 ## How failures are attributed
 

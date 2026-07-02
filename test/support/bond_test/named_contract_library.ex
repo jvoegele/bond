@@ -24,4 +24,9 @@ defmodule BondTest.NamedContractLibrary do
   defcontract positive(x, floor) do
     @pre x > floor
   end
+
+  # Zero-argument result-only contract — applies to functions of any arity (#49).
+  defcontract tagged_ok() do
+    @post match?({:ok, _}, result)
+  end
 end

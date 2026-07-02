@@ -445,6 +445,28 @@ defmodule Bond do
   the applying function's arity selects which one binds. A contract body may contain only
   `@pre`/`@post`, and each expression may reference only the contract's declared arguments (plus
   `result` in a `@post`).
+
+  ## Zero-argument (result-only) contracts
+
+  A contract whose `@post` constrains only the return value — never any argument name — can be
+  shared across functions of any arity by declaring it with an explicit empty parameter list:
+
+      defcontract gate_result() do
+        @post {:ok, :cleared} <~ result or
+                ({:error, :validation_failed, errs} when is_list(errs)) <~ result
+      end
+
+      @apply_contract :gate_result
+      def can_encode_previews?(game_film), do: …
+
+      @apply_contract :gate_result
+      def can_encode?(game_film, exchange_file), do: …
+
+  The empty `()` is explicit and required — `defcontract gate_result do … end` (no parens) raises
+  a `CompileError`. The wrapper and `super` call still forward the applying function's actual
+  arguments; only the `result` binding in the lifted postcondition defp is constrained by the
+  contract. Preconditions may not appear in a zero-argument contract (there are no argument names
+  to reference).
   """
   defmacro defcontract(head, do: block) do
     Bond.Compiler.NamedContracts.define(head, block, __CALLER__)
