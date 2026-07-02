@@ -39,6 +39,24 @@ defmodule Bond.BehaviourInheritanceTest do
     @callback resolve(spec :: term) :: {:ok, String.t()} | {:error, term}
   end
 
+  # --- Gap 3 (#61): zero-arg @apply_contract on @impl functions with inherited contracts ---
+
+  defmodule StrictContracts do
+    use Bond
+
+    defcontract strictly_positive() do
+      @post strictly_positive: result > 0
+    end
+  end
+
+  defmodule StrictBankAccount do
+    use Bond, behaviours: [Ledger]
+
+    @apply_contract {StrictContracts, :strictly_positive}
+    @impl true
+    def withdraw(bal, amt) when amt <= bal, do: bal - amt
+  end
+
   # --- Implementations (the contract-inheriting side) ---
 
   defmodule BankAccount do
@@ -293,6 +311,61 @@ defmodule Bond.BehaviourInheritanceTest do
 
       assert error.file =~ "uses_plain.ex"
       assert is_integer(error.line) and error.line > 0
+    end
+  end
+
+  describe "@apply_contract on @impl functions with inherited contracts (#61 Gap 3)" do
+    test "inherits precondition from behaviour and enforces it" do
+      assert_raise Bond.PreconditionError, fn -> StrictBankAccount.withdraw(100, 0) end
+    end
+
+    test "inherited postcondition passes when impl honours it" do
+      # result >= 0 AND result > 0 — both pass
+      assert StrictBankAccount.withdraw(100, 50) == 50
+    end
+
+    test "strengthened postcondition from @apply_contract is enforced beyond the inherited one" do
+      # withdraw(100, 100) = 0 — passes Ledger @post (>= 0) but fails strictly_positive (> 0)
+      error = assert_raise Bond.PostconditionError, fn -> StrictBankAccount.withdraw(100, 100) end
+      assert error.label == :strictly_positive
+    end
+
+    test "non-zero-arg @apply_contract combined with behaviour inheritance is a compile error" do
+      assert_raise CompileError, ~r/Only zero-argument/, fn ->
+        Code.compile_string("""
+        defmodule Bond.BehaviourInheritanceTest.Gap3NonZeroApply do
+          use Bond, behaviours: [Bond.BehaviourInheritanceTest.Ledger]
+
+          # Arity matches withdraw/2 so it's found; then the "non-zero-arg" check fires.
+          defcontract bounded(balance, amount) do
+            @pre amount > 0
+          end
+
+          @apply_contract :bounded
+          @impl true
+          def withdraw(bal, amt), do: bal - amt
+        end
+        """)
+      end
+    end
+
+    test "@apply_contract + @post on inherited impl is a compile error pointing at @post_strengthen" do
+      assert_raise CompileError, ~r/Use @post_strengthen for the extra assertions/, fn ->
+        Code.compile_string("""
+        defmodule Bond.BehaviourInheritanceTest.Gap3MixedPost do
+          use Bond, behaviours: [Bond.BehaviourInheritanceTest.Ledger]
+
+          defcontract extra() do
+            @post result != nil
+          end
+
+          @apply_contract :extra
+          @post result < 1000
+          @impl true
+          def withdraw(bal, amt), do: bal - amt
+        end
+        """)
+      end
     end
   end
 end

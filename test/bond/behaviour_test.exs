@@ -3,6 +3,27 @@ defmodule Bond.BehaviourTest do
 
   alias Bond.Compiler.Assertion
 
+  defmodule BehaviourWithApplied do
+    use Bond.Behaviour
+
+    defcontract non_negative_result() do
+      @post non_negative: result >= 0
+    end
+
+    defcontract positive_delta(amount) do
+      @pre positive: amount > 0
+      @post non_negative: result >= 0
+    end
+
+    @apply_contract :non_negative_result
+    @callback get_count() :: non_neg_integer()
+
+    @apply_contract :positive_delta
+    @callback apply_delta(n :: integer) :: integer
+
+    @callback describe() :: String.t()
+  end
+
   defmodule Ledger do
     use Bond.Behaviour
 
@@ -195,6 +216,108 @@ defmodule Bond.BehaviourTest do
           use Bond.Behaviour
           @pre result > 0
           @callback f(x :: integer) :: integer
+        end
+        """)
+      end
+    end
+  end
+
+  describe "defcontract / @apply_contract in Bond.Behaviour (#61 Gap 1)" do
+    test "__bond_contracts__/0 includes zero-arg applied contract as postconditions only" do
+      contracts = BehaviourWithApplied.__bond_contracts__()
+      assert Map.has_key?(contracts, {:get_count, 0})
+      %{preconditions: pre, postconditions: post} = contracts[{:get_count, 0}]
+      assert pre == []
+      assert [%Assertion{kind: :postcondition, label: :non_negative}] = post
+    end
+
+    test "__bond_contracts__/0 includes non-zero-arg applied contract's @pre and @post" do
+      contracts = BehaviourWithApplied.__bond_contracts__()
+      assert Map.has_key?(contracts, {:apply_delta, 1})
+      %{preconditions: pre, postconditions: post} = contracts[{:apply_delta, 1}]
+      assert [%Assertion{kind: :precondition, label: :positive}] = pre
+      assert [%Assertion{kind: :postcondition, label: :non_negative}] = post
+    end
+
+    test "__bond_contracts__/0 omits callbacks with no applied or inline contract" do
+      refute Map.has_key?(BehaviourWithApplied.__bond_contracts__(), {:describe, 0})
+    end
+
+    test "non-zero-arg applied contract's arg names become canonical" do
+      %{arg_names: names} = BehaviourWithApplied.__bond_contracts__()[{:apply_delta, 1}]
+      assert names == [:amount]
+    end
+
+    test "__bond_named_contracts__/0 is emitted and contains all defcontracts" do
+      named = BehaviourWithApplied.__bond_named_contracts__()
+      assert Map.has_key?(named, {:non_negative_result, 0})
+      assert Map.has_key?(named, {:positive_delta, 1})
+    end
+
+    test "assertions from @apply_contract carry source_contract attribution" do
+      %{postconditions: [post]} = BehaviourWithApplied.__bond_contracts__()[{:get_count, 0}]
+      assert post.source_contract == {BehaviourWithApplied, :non_negative_result}
+    end
+
+    test "cross-module @apply_contract {BehaviourModule, :name} is supported" do
+      [{mod, _} | _] =
+        Code.compile_string("""
+        defmodule Bond.BehaviourTest.Gap1CrossModule do
+          use Bond.Behaviour
+
+          @apply_contract {Bond.BehaviourTest.BehaviourWithApplied, :non_negative_result}
+          @callback count() :: integer
+        end
+        """)
+
+      contracts = mod.__bond_contracts__()
+      assert Map.has_key?(contracts, {:count, 0})
+      %{postconditions: [post]} = contracts[{:count, 0}]
+      assert post.source_contract == {BehaviourWithApplied, :non_negative_result}
+    end
+
+    test "@apply_contract and @pre on the same @callback is a compile error" do
+      assert_raise CompileError, ~r/@apply_contract and @pre\/@post cannot both/, fn ->
+        Code.compile_string("""
+        defmodule Bond.BehaviourTest.Gap1Mixed do
+          use Bond.Behaviour
+
+          defcontract valid() do
+            @post result != nil
+          end
+
+          @apply_contract :valid
+          @pre x > 0
+          @callback f(x :: integer) :: term
+        end
+        """)
+      end
+    end
+
+    test "@apply_contract with unknown contract name is a compile error" do
+      assert_raise CompileError, ~r/no contract named `unknown`/, fn ->
+        Code.compile_string("""
+        defmodule Bond.BehaviourTest.Gap1Unknown do
+          use Bond.Behaviour
+
+          @apply_contract :unknown
+          @callback f(x :: integer) :: integer
+        end
+        """)
+      end
+    end
+
+    test "@apply_contract with no following @callback is a compile error" do
+      assert_raise CompileError, ~r/do not precede an @callback/, fn ->
+        Code.compile_string("""
+        defmodule Bond.BehaviourTest.Gap1Dangling do
+          use Bond.Behaviour
+
+          defcontract valid() do
+            @post result != nil
+          end
+
+          @apply_contract :valid
         end
         """)
       end

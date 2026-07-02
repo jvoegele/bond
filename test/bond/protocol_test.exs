@@ -90,6 +90,36 @@ defmodule Bond.ProtocolTest do
     end
   end
 
+  # --- Gap 2 (#61): defcontract / @apply_contract in Bond.Protocol ---
+
+  defprotocol Fetchable do
+    use Bond.Protocol
+
+    defcontract non_empty_result() do
+      @post non_nil: result != nil
+    end
+
+    @apply_contract :non_empty_result
+    @spec fetch(t) :: term
+    def fetch(data)
+  end
+
+  defmodule FetchBox do
+    defstruct [:item]
+  end
+
+  defimpl Fetchable, for: FetchBox do
+    def fetch(%FetchBox{item: item}), do: item
+  end
+
+  defmodule EmptyFetch do
+    defstruct []
+  end
+
+  defimpl Fetchable, for: EmptyFetch do
+    def fetch(_), do: nil
+  end
+
   setup do
     # Contracts default to enabled; make sure no prior test left a runtime override in the
     # global persistent_term modes term.
@@ -242,6 +272,68 @@ defmodule Bond.ProtocolTest do
           use Bond.Protocol
           def f(data)
           @post result > 0
+        end
+        """)
+      end
+    end
+  end
+
+  describe "defcontract / @apply_contract in Bond.Protocol (#61 Gap 2)" do
+    test "__bond_protocol_contract__/2 reflects the applied contract's postconditions" do
+      {_arg_names, pre, post} = Fetchable.__bond_protocol_contract__(:fetch, 1)
+      assert pre == []
+      assert length(post) == 1
+      [p] = post
+      assert p.kind == :postcondition
+      assert p.label == :non_nil
+    end
+
+    test "__bond_named_contracts__/0 is emitted and contains all defcontracts" do
+      named = Fetchable.__bond_named_contracts__()
+      assert Map.has_key?(named, {:non_empty_result, 0})
+    end
+
+    test "assertions from @apply_contract carry source_contract attribution" do
+      {_arg_names, _pre, [post]} = Fetchable.__bond_protocol_contract__(:fetch, 1)
+      assert post.source_contract == {Fetchable, :non_empty_result}
+    end
+
+    test "honouring impl passes the applied contract" do
+      assert Fetchable.fetch(%FetchBox{item: "value"}) == "value"
+    end
+
+    test "violating impl fails the postcondition from the applied contract" do
+      error = assert_raise Bond.PostconditionError, fn -> Fetchable.fetch(%EmptyFetch{}) end
+      assert error.label == :non_nil
+      assert error.source_protocol == Fetchable
+    end
+
+    test "@apply_contract and @pre on the same protocol def is a compile error" do
+      assert_raise CompileError, ~r/@apply_contract and @pre\/@post cannot both/, fn ->
+        Code.compile_string("""
+        defprotocol Bond.ProtocolTest.Gap2Mixed do
+          use Bond.Protocol
+
+          defcontract valid() do
+            @post result != nil
+          end
+
+          @apply_contract :valid
+          @pre data != nil
+          def f(data)
+        end
+        """)
+      end
+    end
+
+    test "@apply_contract with unknown contract in a protocol is a compile error" do
+      assert_raise CompileError, ~r/no contract named `unknown`/, fn ->
+        Code.compile_string("""
+        defprotocol Bond.ProtocolTest.Gap2Unknown do
+          use Bond.Protocol
+
+          @apply_contract :unknown
+          def f(data)
         end
         """)
       end
