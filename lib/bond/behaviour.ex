@@ -82,6 +82,7 @@ defmodule Bond.Behaviour do
   alias Bond.Compiler.EnvSnapshot
   alias Bond.Compiler.InheritedContracts
   alias Bond.Compiler.InheritedContracts.Context
+  alias Bond.Compiler.NamedContracts
 
   @doc false
   defmacro __using__(_opts) do
@@ -90,6 +91,9 @@ defmodule Bond.Behaviour do
       # to this module, exactly as `use Bond` scopes its own `@` override.
       import Kernel, except: [@: 1]
       import Bond.Behaviour, only: [@: 1]
+      # `defcontract` / `include` are available in the same module, letting the behaviour DRY
+      # up repeated postconditions via `@apply_contract` before each `@callback` (#61).
+      import Bond, only: [defcontract: 1, defcontract: 2]
 
       @before_compile Bond.Behaviour
     end
@@ -132,9 +136,29 @@ defmodule Bond.Behaviour do
     :ok
   end
 
-  # `@callback`: snapshot the pending `@pre`/`@post` and record them against this callback's
-  # `{name, arity}`, then forward the spec to `Kernel.@/1` so the callback is registered as
-  # usual (the module remains an ordinary behaviour).
+  # `@apply_contract <ref>` — apply a reusable named contract to the next `@callback` (#61).
+  # Stores the ref so `register_callback_contracts` can expand it when the `@callback` fires.
+  # Cannot be combined with `@pre`/`@post` on the same `@callback` (checked there).
+  defmacro @{:apply_contract, _meta, [expression]} do
+    env = __CALLER__
+    ref = NamedContracts.parse_ref(expression, env)
+    Module.put_attribute(env.module, :__bond_pending_apply_contract__, {ref, env})
+    :ok
+  end
+
+  # `@apply_contract` with multiple args — the list form is not supported.
+  defmacro @{:apply_contract, _meta, [_, _ | _]} do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description:
+        "Bond: @apply_contract accepts a single contract reference — a name (`:returns_conn`) " <>
+          "or a `{Module, :name}` pair."
+  end
+
+  # `@callback`: snapshot the pending `@pre`/`@post` (or `@apply_contract`) and record them
+  # against this callback's `{name, arity}`, then forward the spec to `Kernel.@/1` so the
+  # callback is registered as usual (the module remains an ordinary behaviour).
   defmacro @{:callback, meta, [spec]} do
     register_callback_contracts(spec, __CALLER__)
 
@@ -155,21 +179,24 @@ defmodule Bond.Behaviour do
   defmacro __before_compile__(env) do
     leftover_pre = InheritedContracts.pending(ctx(), env.module, :precondition)
     leftover_post = InheritedContracts.pending(ctx(), env.module, :postcondition)
+    leftover_apply = Module.get_attribute(env.module, :__bond_pending_apply_contract__)
 
-    if leftover_pre != [] or leftover_post != [] do
+    if leftover_pre != [] or leftover_post != [] or leftover_apply != nil do
       raise CompileError,
         file: env.file,
         line: env.line,
         description:
-          "Bond: @pre/@post in #{inspect(env.module)} do not precede an @callback. " <>
+          "Bond: @pre/@post (or @apply_contract) in #{inspect(env.module)} do not precede an @callback. " <>
             "Contracts on a behaviour must immediately precede the @callback they constrain."
     end
 
     contracts = collect_contracts(env.module)
+    named_contracts_ast = named_contracts_reflection_ast(env.module)
 
     quote do
       @doc false
       def __bond_contracts__, do: unquote(Macro.escape(contracts))
+      unquote(named_contracts_ast)
     end
   end
 
@@ -193,25 +220,55 @@ defmodule Bond.Behaviour do
   defp register_callback_contracts(spec, %Macro.Env{} = env) do
     pre = InheritedContracts.pending(ctx(), env.module, :precondition)
     post = InheritedContracts.pending(ctx(), env.module, :postcondition)
+    pending_apply = Module.get_attribute(env.module, :__bond_pending_apply_contract__)
 
     InheritedContracts.clear_pending(ctx(), env.module)
+    Module.put_attribute(env.module, :__bond_pending_apply_contract__, nil)
+
+    if pending_apply != nil and (pre != [] or post != []) do
+      {_ref, apply_env} = pending_apply
+
+      raise CompileError,
+        file: apply_env.file,
+        line: apply_env.line,
+        description:
+          "Bond: @apply_contract and @pre/@post cannot both precede the same @callback. " <>
+            "Use @apply_contract alone, or @pre/@post alone."
+    end
 
     # Only record an entry when this callback actually carries contracts — uncontracted
     # callbacks contribute nothing for implementers to inherit.
-    if pre != [] or post != [] do
+    if pending_apply != nil or pre != [] or post != [] do
       case parse_callback(spec) do
-        {name, arity, arg_names} ->
+        {name, arity, callback_arg_names} ->
+          {canonical_names, all_pre, all_post} =
+            case pending_apply do
+              nil ->
+                {callback_arg_names, pre, post}
+
+              {ref, apply_env} ->
+                NamedContracts.expand_for_callback(
+                  ref,
+                  name,
+                  arity,
+                  callback_arg_names,
+                  env,
+                  apply_env
+                )
+            end
+
           InheritedContracts.validate_referenced_names!(
             ctx(),
-            pre,
-            post,
+            all_pre,
+            all_post,
             {name, arity},
-            arg_names,
+            canonical_names,
             env
           )
 
           entry =
-            {{name, arity}, %{arg_names: arg_names, preconditions: pre, postconditions: post}}
+            {{name, arity},
+             %{arg_names: canonical_names, preconditions: all_pre, postconditions: all_post}}
 
           current = Module.get_attribute(env.module, :__bond_callback_contracts__) || []
           Module.put_attribute(env.module, :__bond_callback_contracts__, [entry | current])
@@ -221,8 +278,8 @@ defmodule Bond.Behaviour do
             file: env.file,
             line: env.line,
             description:
-              "Bond: could not parse the @callback that the preceding @pre/@post attach to. " <>
-                "Bond contracts require a named callback of the form " <>
+              "Bond: could not parse the @callback that the preceding @pre/@post (or " <>
+                "@apply_contract) attaches to. Bond contracts require a named callback of the form " <>
                 "`@callback name(arg :: type, …) :: return`."
       end
     end
@@ -263,5 +320,20 @@ defmodule Bond.Behaviour do
     (Module.get_attribute(module, :__bond_callback_contracts__) || [])
     |> Enum.reverse()
     |> Map.new(fn {key, entry} -> {key, EnvSnapshot.sanitize_contract_entry(entry)} end)
+  end
+
+  # Emits `__bond_named_contracts__/0` when the behaviour defines at least one `defcontract`,
+  # so other modules can reference them with `@apply_contract {BehaviourModule, :name}`.
+  defp named_contracts_reflection_ast(module) do
+    named = NamedContracts.flatten(module)
+
+    if map_size(named) == 0 do
+      []
+    else
+      quote do
+        @doc false
+        def __bond_named_contracts__, do: unquote(Macro.escape(named))
+      end
+    end
   end
 end

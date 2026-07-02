@@ -58,6 +58,7 @@ defmodule Bond.Protocol do
   alias Bond.Compiler.EnvSnapshot
   alias Bond.Compiler.InheritedContracts
   alias Bond.Compiler.InheritedContracts.Context
+  alias Bond.Compiler.NamedContracts
   alias Bond.Compiler.ProtocolWrapper
 
   # Storage-attribute keys are inline atom literals returned by these helpers, NOT `@name value`
@@ -79,6 +80,9 @@ defmodule Bond.Protocol do
       import Kernel, except: [@: 1]
       import Protocol, except: [def: 1]
       import Bond.Protocol, only: [@: 1, def: 1]
+      # `defcontract` / `include` allow the protocol to DRY up repeated postconditions via
+      # `@apply_contract` before each `def` (#61).
+      import Bond, only: [defcontract: 1, defcontract: 2]
 
       @before_compile Bond.Protocol
     end
@@ -114,6 +118,23 @@ defmodule Bond.Protocol do
     :ok
   end
 
+  # `@apply_contract <ref>` — apply a named contract to the next protocol `def` (#61).
+  defmacro @{:apply_contract, _meta, [expression]} do
+    env = __CALLER__
+    ref = NamedContracts.parse_ref(expression, env)
+    Module.put_attribute(env.module, :__bond_protocol_pending_apply_contract__, {ref, env})
+    :ok
+  end
+
+  defmacro @{:apply_contract, _meta, [_, _ | _]} do
+    raise CompileError,
+      file: __CALLER__.file,
+      line: __CALLER__.line,
+      description:
+        "Bond: @apply_contract accepts a single contract reference — a name (`:valid_result`) " <>
+          "or a `{Module, :name}` pair."
+  end
+
   defmacro @other do
     quote do
       Kernel.@(unquote(other))
@@ -143,14 +164,15 @@ defmodule Bond.Protocol do
   defmacro __before_compile__(env) do
     leftover_pre = InheritedContracts.pending(ctx(), env.module, :precondition)
     leftover_post = InheritedContracts.pending(ctx(), env.module, :postcondition)
+    leftover_apply = Module.get_attribute(env.module, :__bond_protocol_pending_apply_contract__)
 
-    if leftover_pre != [] or leftover_post != [] do
+    if leftover_pre != [] or leftover_post != [] or leftover_apply != nil do
       raise CompileError,
         file: env.file,
         line: env.line,
         description:
-          "Bond: @pre/@post in #{inspect(env.module)} do not precede a protocol `def`. " <>
-            "Contracts on a protocol must immediately precede the function they constrain."
+          "Bond: @pre/@post (or @apply_contract) in #{inspect(env.module)} do not precede a " <>
+            "protocol `def`. Contracts on a protocol must immediately precede the function they constrain."
     end
 
     contracts = Module.get_attribute(env.module, contracts_key()) || []
@@ -184,7 +206,9 @@ defmodule Bond.Protocol do
         def __bond_protocol_contract__(_name, _arity), do: :no_contract
       end
 
-    {:__block__, [], wrappers ++ contract_clauses ++ [catch_all]}
+    named_contracts_ast = named_contracts_reflection_ast(env.module)
+
+    {:__block__, [], wrappers ++ contract_clauses ++ [catch_all, named_contracts_ast]}
   end
 
   # The shared inheritance plumbing (pending accumulation, reference validation, diagnostics)
@@ -208,22 +232,45 @@ defmodule Bond.Protocol do
   defp register_function_contracts(name, args, %Macro.Env{} = env) do
     pre = InheritedContracts.pending(ctx(), env.module, :precondition)
     post = InheritedContracts.pending(ctx(), env.module, :postcondition)
+    pending_apply = Module.get_attribute(env.module, :__bond_protocol_pending_apply_contract__)
 
     InheritedContracts.clear_pending(ctx(), env.module)
+    Module.put_attribute(env.module, :__bond_protocol_pending_apply_contract__, nil)
 
-    if pre != [] or post != [] do
-      arg_names = canonical_arg_names(args)
+    if pending_apply != nil and (pre != [] or post != []) do
+      {_ref, apply_env} = pending_apply
+
+      raise CompileError,
+        file: apply_env.file,
+        line: apply_env.line,
+        description:
+          "Bond: @apply_contract and @pre/@post cannot both precede the same protocol `def`. " <>
+            "Use @apply_contract alone, or @pre/@post alone."
+    end
+
+    if pending_apply != nil or pre != [] or post != [] do
+      arity = length(args)
+      def_arg_names = canonical_arg_names(args)
+
+      {canonical_names, all_pre, all_post} =
+        case pending_apply do
+          nil ->
+            {def_arg_names, pre, post}
+
+          {ref, apply_env} ->
+            NamedContracts.expand_for_callback(ref, name, arity, def_arg_names, env, apply_env)
+        end
 
       InheritedContracts.validate_referenced_names!(
         ctx(),
-        pre,
-        post,
-        {name, length(args)},
-        arg_names,
+        all_pre,
+        all_post,
+        {name, arity},
+        canonical_names,
         env
       )
 
-      entry = {{name, length(args)}, arg_names, pre, post}
+      entry = {{name, arity}, canonical_names, all_pre, all_post}
       contracts = Module.get_attribute(env.module, contracts_key()) || []
       Module.put_attribute(env.module, contracts_key(), [entry | contracts])
     end
@@ -236,5 +283,21 @@ defmodule Bond.Protocol do
       {{n, _, ctx}, _idx} when is_atom(n) and is_atom(ctx) -> n
       {_arg, idx} -> :"bond_arg_#{idx}"
     end)
+  end
+
+  # Emits `__bond_named_contracts__/0` when the protocol defines at least one `defcontract`,
+  # so other modules can reference them with `@apply_contract {ProtocolModule, :name}`.
+  defp named_contracts_reflection_ast(module) do
+    named = NamedContracts.flatten(module)
+
+    if map_size(named) == 0 do
+      quote do
+      end
+    else
+      quote do
+        @doc false
+        def __bond_named_contracts__, do: unquote(Macro.escape(named))
+      end
+    end
   end
 end

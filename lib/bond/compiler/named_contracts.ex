@@ -415,6 +415,122 @@ defmodule Bond.Compiler.NamedContracts do
   defp verb([_single]), do: "is"
   defp verb(_many), do: "are"
 
+  # --- @apply_contract resolution for Bond.Behaviour / Bond.Protocol (#61) ---
+
+  @doc """
+  Resolves an `@apply_contract` ref (`:name` or `{module, :name}`) and expands it into the
+  `{canonical_arg_names, preconditions, postconditions}` tuple that `Bond.Behaviour` and
+  `Bond.Protocol` store per callback/function.
+
+  Called at declaration time (when `@callback` or protocol `def` is parsed), so
+  all `defcontract`s declared above that point in the module are available. Remote module
+  contracts are read from `module.__bond_named_contracts__/0`.
+
+  For a zero-argument (result-only) contract the caller's own arg names are used as canonical
+  so the implementer receives them for positional rebinding. For a non-zero-argument contract
+  the contract's declared arg names override the caller's.
+
+  Returns `{canonical_names, pre_assertions, post_assertions}`, all stamped with
+  `:source_contract`. Raises `CompileError` on an unknown or arity-mismatched reference.
+  """
+  @spec expand_for_callback(
+          ref :: {:local, atom()} | {:remote, module(), atom()},
+          fun_name :: atom(),
+          arity :: non_neg_integer(),
+          fallback_arg_names :: [atom()],
+          env :: Macro.Env.t(),
+          apply_env :: Macro.Env.t()
+        ) :: {[atom()], list(), list()}
+  def expand_for_callback(ref, fun_name, arity, fallback_arg_names, env, apply_env) do
+    {contract_module, contract_name, entry} =
+      resolve_ref_for_callback(ref, fun_name, arity, env, apply_env)
+
+    source = {contract_module, contract_name}
+    stamped_pre = Enum.map(entry.preconditions, &%{&1 | source_contract: source})
+    stamped_post = Enum.map(entry.postconditions, &%{&1 | source_contract: source})
+
+    # Zero-arg contract: use the callback's own arg names as canonical (no override needed —
+    # the contract has no parameter names to substitute). Non-zero-arg: the contract's declared
+    # arg names become canonical, same as in `use Bond` modules.
+    canonical_names = if entry.arg_names == [], do: fallback_arg_names, else: entry.arg_names
+
+    {canonical_names, stamped_pre, stamped_post}
+  end
+
+  @doc """
+  Parses an `@apply_contract` expression into a normalized ref tuple, expanding any module alias
+  in the caller's context.
+
+  Returns `{:local, name}` for `:name` or `{:remote, Module, :name}` for `{Module, :name}`.
+  Raises a `CompileError` for any other shape.
+  """
+  @spec parse_ref(Macro.t(), Macro.Env.t()) ::
+          {:local, atom()} | {:remote, module(), atom()}
+  def parse_ref(name, _env) when is_atom(name), do: {:local, name}
+
+  def parse_ref({module_ast, name}, env) when is_atom(name),
+    do: {:remote, Macro.expand(module_ast, env), name}
+
+  def parse_ref(other, env) do
+    raise CompileError,
+      file: env.file,
+      line: env.line,
+      description:
+        "Bond: @apply_contract expects a contract name (`:returns_conn`) or a " <>
+          "`{Module, :name}` pair. Got: `#{Macro.to_string(other)}`."
+  end
+
+  defp resolve_ref_for_callback({:local, name}, _fun_name, arity, env, apply_env) do
+    named = flatten(env.module)
+    fetch_for_callback(named, name, arity, env.module, apply_env)
+  end
+
+  defp resolve_ref_for_callback({:remote, module, name}, _fun_name, arity, _env, apply_env) do
+    Code.ensure_compiled!(module)
+
+    unless function_exported?(module, :__bond_named_contracts__, 0) do
+      raise CompileError,
+        file: apply_env.file,
+        line: apply_env.line,
+        description:
+          "Bond: @apply_contract {#{inspect(module)}, #{inspect(name)}} — " <>
+            "#{inspect(module)} defines no named contracts (no `defcontract`, or it does " <>
+            "not `use Bond`, `use Bond.Behaviour`, or `use Bond.Protocol`)."
+    end
+
+    registry = module.__bond_named_contracts__()
+    fetch_for_callback(registry, name, arity, module, apply_env)
+  end
+
+  defp fetch_for_callback(registry, name, arity, contract_module, apply_env) do
+    case {Map.fetch(registry, {name, arity}), Map.fetch(registry, {name, 0})} do
+      {{:ok, entry}, _} ->
+        {contract_module, name, entry}
+
+      {_, {:ok, %{arg_names: []} = entry}} ->
+        {contract_module, name, entry}
+
+      _ ->
+        available =
+          registry
+          |> Map.keys()
+          |> Enum.filter(fn {n, _a} -> n == name end)
+          |> Enum.map_join(", ", fn {n, a} -> "#{n}/#{a}" end)
+
+        avail_phrase =
+          if available == "",
+            do: "no contract named `#{name}` is defined",
+            else: "available arities: #{available}"
+
+        raise CompileError,
+          file: apply_env.file,
+          line: apply_env.line,
+          description:
+            "Bond: @apply_contract #{inspect(name)} — no contract #{name}/#{arity} or " <>
+              "#{name}/0 found (#{avail_phrase})."
+    end
+  end
+
   # --- registry ---
 
   defp register(module, {name, arity} = key, entry, env) do

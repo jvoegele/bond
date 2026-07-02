@@ -583,17 +583,6 @@ defmodule Bond.Compiler do
     key = {af.fun, af.arity}
     [%{env: apply_env} | _] = applied
 
-    # v1 non-goal: an applied contract cannot be combined with behaviour/protocol inheritance.
-    if Map.has_key?(inherited, key) do
-      raise CompileError,
-        file: apply_env.file,
-        line: apply_env.line,
-        description:
-          "Bond: #{mfa(af)} both inherits a behaviour contract and applies a named contract " <>
-            "(@apply_contract). Combining the two on one function is not supported (v1); use one " <>
-            "or the other."
-    end
-
     # v1 non-goal: a single applied contract per function (composing several would require the
     # canonical-name agreement / multi-binding the immutable v1 deliberately omits).
     if length(applied) > 1 do
@@ -625,36 +614,77 @@ defmodule Bond.Compiler do
             "@pre_weaken/@post_strengthen. Refining a named contract is not supported (v1)."
     end
 
-    # #40 Option A: the function's own plain @pre/@post ADD to the applied contract (conjunction).
-    # They evaluate in the lifted assertion defp, which is parameterised by the contract's canonical
-    # argument names — so they must reference those names, not the function's own parameters. Validate
-    # that here (a clear error beats an "undefined variable" deep in generated code), then append them
-    # UNSTAMPED so a failure attributes to the function itself, not the contract.
-    validate_applied_extension_refs!(
-      plain_pre,
-      plain_post,
-      {af.fun, af.arity},
-      entry.arg_names,
-      apply_env
-    )
+    if Map.has_key?(inherited, key) do
+      # Combined: @apply_contract on a function that also inherits a behaviour contract (#61).
+      # Only zero-argument (result-only) contracts may combine with inheritance; their
+      # postconditions are added alongside the inherited ones (equivalent to @post_strengthen).
+      if entry.arg_names != [] do
+        raise CompileError,
+          file: apply_env.file,
+          line: apply_env.line,
+          description:
+            "Bond: #{mfa(af)} both inherits a behaviour contract and applies a named contract " <>
+              "(@apply_contract). Only zero-argument (result-only) contracts may combine with " <>
+              "behaviour inheritance — their postconditions are added as a strengthening. " <>
+              "Use @post_strengthen for contracts with arguments, or remove the behaviour " <>
+              "from the `behaviours:` list to use @apply_contract alone."
+      end
 
-    source = {contract_module, name}
+      if plain_pre != [] or plain_post != [] do
+        raise CompileError,
+          file: apply_env.file,
+          line: apply_env.line,
+          description:
+            "Bond: #{mfa(af)} combines @apply_contract with additional @pre/@post alongside " <>
+              "an inherited behaviour contract. Use @post_strengthen for the extra assertions."
+      end
 
-    af
-    |> AnnotatedFunction.replace_preconditions(
-      stamp_source_contract(entry.preconditions, source) ++ plain_pre
-    )
-    |> AnnotatedFunction.replace_postconditions(
-      stamp_source_contract(entry.postconditions, source) ++ plain_post
-    )
-    |> then(fn af ->
-      if entry.arg_names == [],
-        # Zero-argument result-only contract: leave canonical_names_override nil so the wrapper
-        # and super call use the function's own parameters. The lifted defp receives those params
-        # but underscore-prefixes them in its head (see AnnotatedFunction.lifted_defp_params/3).
-        do: AnnotatedFunction.put_result_only_contract(af),
-        else: AnnotatedFunction.put_canonical_override(af, entry.arg_names)
-    end)
+      {:ok, %{arg_names: inh_names, preconditions: inh_pre, postconditions: inh_post}} =
+        Map.fetch(inherited, key)
+
+      source = {contract_module, name}
+
+      af
+      |> AnnotatedFunction.replace_preconditions(inh_pre)
+      |> AnnotatedFunction.replace_postconditions(inh_post)
+      |> AnnotatedFunction.put_post_strengthen(
+        stamp_source_contract(entry.postconditions, source)
+      )
+      |> AnnotatedFunction.put_canonical_override(inh_names)
+    else
+      # Non-combined: no inherited contract on this function. Pure @apply_contract path.
+
+      # #40 Option A: the function's own plain @pre/@post ADD to the applied contract (conjunction).
+      # They evaluate in the lifted assertion defp, which is parameterised by the contract's canonical
+      # argument names — so they must reference those names, not the function's own parameters. Validate
+      # that here (a clear error beats an "undefined variable" deep in generated code), then append them
+      # UNSTAMPED so a failure attributes to the function itself, not the contract.
+      validate_applied_extension_refs!(
+        plain_pre,
+        plain_post,
+        {af.fun, af.arity},
+        entry.arg_names,
+        apply_env
+      )
+
+      source = {contract_module, name}
+
+      af
+      |> AnnotatedFunction.replace_preconditions(
+        stamp_source_contract(entry.preconditions, source) ++ plain_pre
+      )
+      |> AnnotatedFunction.replace_postconditions(
+        stamp_source_contract(entry.postconditions, source) ++ plain_post
+      )
+      |> then(fn af ->
+        if entry.arg_names == [],
+          # Zero-argument result-only contract: leave canonical_names_override nil so the wrapper
+          # and super call use the function's own parameters. The lifted defp receives those params
+          # but underscore-prefixes them in its head (see AnnotatedFunction.lifted_defp_params/3).
+          do: AnnotatedFunction.put_result_only_contract(af),
+          else: AnnotatedFunction.put_canonical_override(af, entry.arg_names)
+      end)
+    end
   end
 
   defp validate_applied_extension_refs!([], [], _key, _arg_names, _env), do: :ok
