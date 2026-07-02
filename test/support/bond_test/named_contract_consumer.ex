@@ -17,4 +17,11 @@ defmodule BondTest.NamedContractConsumer do
 
   @apply_contract {NamedContractLibrary, :positive}
   def above_floor(n, floor), do: n - floor
+
+  # Zero-argument result-only contract applied at different arities (#49).
+  @apply_contract {NamedContractLibrary, :tagged_ok}
+  def wrap_one(x), do: {:ok, x}
+
+  @apply_contract {NamedContractLibrary, :tagged_ok}
+  def wrap_two(x, y), do: {:ok, {x, y}}
 end

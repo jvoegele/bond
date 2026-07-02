@@ -675,6 +675,107 @@ defmodule Bond.NamedContractsTest do
     end
   end
 
+  describe "zero-argument result-only contracts (#49)" do
+    test "defcontract name() compiles and is registered" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.ZeroArgDef do
+          use Bond
+          defcontract tagged_ok() do
+            @post match?({:ok, _}, result)
+          end
+        end
+        """)
+
+      assert mod == Bond.NamedContractsTest.ZeroArgDef
+    end
+
+    test "a zero-argument contract applies to a function of any arity" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.ZeroArgApply do
+          use Bond
+          defcontract tagged_ok() do
+            @post match?({:ok, _}, result)
+          end
+          @apply_contract :tagged_ok
+          def wrap_one(x), do: {:ok, x}
+          @apply_contract :tagged_ok
+          def wrap_two(x, y), do: {:ok, {x, y}}
+        end
+        """)
+
+      assert mod.wrap_one(1) == {:ok, 1}
+      assert mod.wrap_two(1, 2) == {:ok, {1, 2}}
+    end
+
+    test "a zero-argument contract's postcondition fires when violated" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.ZeroArgViolation do
+          use Bond
+          defcontract tagged_ok() do
+            @post match?({:ok, _}, result)
+          end
+          @apply_contract :tagged_ok
+          def bad(_x), do: :error
+        end
+        """)
+
+      assert_raise Bond.PostconditionError, fn -> mod.bad(1) end
+    end
+
+    test "a zero-argument contract forwards the function's own arguments to super" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.ZeroArgSuper do
+          use Bond
+          defcontract tagged_ok() do
+            @post match?({:ok, _}, result)
+          end
+          @apply_contract :tagged_ok
+          def add(a, b), do: {:ok, a + b}
+        end
+        """)
+
+      assert mod.add(2, 3) == {:ok, 5}
+    end
+
+    test "cross-module zero-argument contract applies at different arities" do
+      alias BondTest.NamedContractConsumer
+
+      assert NamedContractConsumer.wrap_one(:x) == {:ok, :x}
+      assert NamedContractConsumer.wrap_two(:x, :y) == {:ok, {:x, :y}}
+    end
+
+    test "cross-module zero-argument contract fires when violated" do
+      [{mod, _} | _] =
+        compile!("""
+        defmodule Bond.NamedContractsTest.ZeroArgRemoteViolation do
+          use Bond
+          alias BondTest.NamedContractLibrary
+          @apply_contract {NamedContractLibrary, :tagged_ok}
+          def bad(x), do: x
+        end
+        """)
+
+      assert_raise Bond.PostconditionError, fn -> mod.bad(:not_ok_tuple) end
+    end
+
+    test "defcontract name without parens still raises a clear error" do
+      assert_raise CompileError, ~r/needs a parameter list/, fn ->
+        compile!("""
+        defmodule Bond.NamedContractsTest.ZeroArgNoParens do
+          use Bond
+          defcontract gate_result do
+            @post is_tuple(result)
+          end
+        end
+        """)
+      end
+    end
+  end
+
   describe "@apply_contract resolution diagnostics" do
     test "applying alongside behaviour inheritance is rejected" do
       compile!("""

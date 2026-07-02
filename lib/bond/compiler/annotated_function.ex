@@ -57,7 +57,14 @@ defmodule Bond.Compiler.AnnotatedFunction do
             # `%{ref: ref, env: env}` where `ref` is `{:local, name}` or `{:remote, module, name}`.
             # Captured by the FSM and resolved into inherited-style contracts at
             # `Bond.Compiler.__before_compile__/1` time, keyed by this function's `{fun, arity}`.
-            applied_contracts: []
+            applied_contracts: [],
+            # Set when a zero-argument `defcontract name()` is applied via `@apply_contract`.
+            # The contract carries no canonical arg names (it is arity-agnostic), so the wrapper
+            # and `super` call use the function's own parameter names derived from its clauses.
+            # The lifted precondition/postcondition defp still receives those params in the call,
+            # but they are underscore-prefixed in the defp head to suppress unused-variable
+            # warnings — the contract expressions only reference `result`.
+            result_only_contract: false
 
   @type t :: %__MODULE__{
           kind: :def | :defp | nil,
@@ -72,7 +79,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
           canonical_names_override: [atom()] | nil,
           pre_weaken_assertions: [Bond.Compiler.Assertion.t()],
           post_strengthen_assertions: [Bond.Compiler.Assertion.t()],
-          applied_contracts: [%{ref: tuple(), env: Macro.Env.t()}]
+          applied_contracts: [%{ref: tuple(), env: Macro.Env.t()}],
+          result_only_contract: boolean()
         }
 
   def new(%FunctionDefinition{} = function_def) do
@@ -175,6 +183,19 @@ defmodule Bond.Compiler.AnnotatedFunction do
   """
   def put_canonical_override(%__MODULE__{} = annotated_function, names) when is_list(names) do
     %{annotated_function | canonical_names_override: names}
+  end
+
+  @doc """
+  Marks a zero-argument named contract (`defcontract name()`) applied to this function.
+
+  The contract carries no canonical argument names — it is arity-agnostic and only constrains
+  `result`. The wrapper and `super` call use the function's own parameter names (derived
+  normally from its clauses); `canonical_names_override` is left nil. The lifted defp still
+  receives those params but they are underscore-prefixed in the head to suppress unused-variable
+  warnings, since the contract expressions reference only `result`.
+  """
+  def put_result_only_contract(%__MODULE__{} = annotated_function) do
+    %{annotated_function | result_only_contract: true}
   end
 
   @doc """
@@ -543,6 +564,17 @@ defmodule Bond.Compiler.AnnotatedFunction do
   #     not the impl's parameter names, so the lifted defp must take the canonical names as bare
   #     vars regardless of clause count — the same value the wrapper rebinds and passes via the
   #     canonical name.
+  # Zero-argument result-only contract: the function's real canonical names are still passed to
+  # the defp in the call (so the arity matches), but the defp head underscore-prefixes them all
+  # to suppress "unused variable" warnings — the contract expressions reference only `result`.
+  defp lifted_defp_params(
+         %__MODULE__{result_only_contract: true},
+         canonical_names,
+         _first_clause
+       ) do
+    Enum.map(canonical_names, fn name -> Macro.var(:"_#{name}", nil) end)
+  end
+
   defp lifted_defp_params(
          %__MODULE__{canonical_names_override: override},
          canonical_names,

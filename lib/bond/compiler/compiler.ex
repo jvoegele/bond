@@ -647,7 +647,14 @@ defmodule Bond.Compiler do
     |> AnnotatedFunction.replace_postconditions(
       stamp_source_contract(entry.postconditions, source) ++ plain_post
     )
-    |> AnnotatedFunction.put_canonical_override(entry.arg_names)
+    |> then(fn af ->
+      if entry.arg_names == [],
+        # Zero-argument result-only contract: leave canonical_names_override nil so the wrapper
+        # and super call use the function's own parameters. The lifted defp receives those params
+        # but underscore-prefixes them in its head (see AnnotatedFunction.lifted_defp_params/3).
+        do: AnnotatedFunction.put_result_only_contract(af),
+        else: AnnotatedFunction.put_canonical_override(af, entry.arg_names)
+    end)
   end
 
   defp validate_applied_extension_refs!([], [], _key, _arg_names, _env), do: :ok
@@ -711,10 +718,19 @@ defmodule Bond.Compiler do
         {contract_module, name, entry}
 
       :error ->
-        raise CompileError,
-          file: env.file,
-          line: env.line,
-          description: unknown_applied_contract_message(registry, name, arity, contract_module)
+        # Fall back to a zero-argument `defcontract name()` declaration, which is arity-agnostic
+        # (result-only: its postconditions reference only `result`, never any argument name).
+        case Map.fetch(registry, {name, 0}) do
+          {:ok, %{arg_names: []} = entry} ->
+            {contract_module, name, entry}
+
+          _ ->
+            raise CompileError,
+              file: env.file,
+              line: env.line,
+              description:
+                unknown_applied_contract_message(registry, name, arity, contract_module)
+        end
     end
   end
 
