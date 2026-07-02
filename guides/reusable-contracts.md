@@ -205,12 +205,122 @@ that includes the same base along two paths simply checks it twice (harmless —
 assertions are side-effect-free and a failure stops at the first). A contract that
 includes itself, directly or transitively, is a compile error.
 
+## In a behaviour declaration
+
+`defcontract` and `@apply_contract` are available in any `use Bond.Behaviour`
+module, letting the behaviour author name a shared agreement once and reference it
+from multiple callbacks:
+
+```elixir
+defmodule Ledger do
+  use Bond.Behaviour
+
+  defcontract ledger_op(account, amount) do
+    @pre positive: amount > 0
+    @post non_negative: result.balance >= 0
+  end
+
+  @apply_contract :ledger_op
+  @callback withdraw(account :: map(), amount :: number()) :: map()
+
+  @apply_contract :ledger_op
+  @callback deposit(account :: map(), amount :: number()) :: map()
+end
+```
+
+Implementers see no difference — `use Bond, behaviours: [Ledger]` inherits
+`withdraw/2` and `deposit/2` with the same canonical argument names and assertions
+as if the contracts had been written with plain `@pre`/`@post`.
+
+A zero-argument contract is particularly useful when several callbacks with
+**different arities** all share the same return-value guarantee:
+
+```elixir
+defmodule FileStore do
+  use Bond.Behaviour
+
+  defcontract valid_key() do
+    @post is_binary(result)
+  end
+
+  @apply_contract :valid_key
+  @callback read(bucket :: term(), key :: String.t()) :: String.t()
+
+  @apply_contract :valid_key
+  @callback write(bucket :: term(), key :: String.t(), value :: term()) :: String.t()
+end
+```
+
+The behaviour module emits `__bond_named_contracts__/0` when it defines named
+contracts, so other modules can reference them via `@apply_contract {FileStore, :valid_key}`.
+
+## In a protocol declaration
+
+The same syntax works inside a `defprotocol` that uses `Bond.Protocol`:
+
+```elixir
+defprotocol Serializable do
+  use Bond.Protocol
+
+  defcontract valid_payload() do
+    @post is_binary(result) and byte_size(result) > 0
+  end
+
+  @apply_contract :valid_payload
+  @spec encode(t) :: binary()
+  def encode(data)
+
+  @apply_contract :valid_payload
+  @spec encode_compressed(t) :: binary()
+  def encode_compressed(data)
+end
+```
+
+Every implementation is wrapped uniformly at dispatch with the contract attributed
+to the protocol, exactly as if `@post` had been written directly on each function.
+
+## Strengthening inherited contracts
+
+An implementation can go beyond what its behaviour promises by applying a
+zero-argument contract on an `@impl` function. The applied contract's
+postconditions are added alongside the inherited ones — equivalent to writing
+`@post_strengthen` but named and reusable:
+
+```elixir
+defmodule Audited do
+  use Bond
+
+  defcontract audit_trail() do
+    @post audit_written?(result)
+  end
+end
+
+defmodule AuditedAccount do
+  use Bond, behaviours: [Ledger]  # Ledger @post: result.balance >= 0
+
+  @apply_contract {Audited, :audit_trail}
+  @impl true
+  def withdraw(account, amount), do: ...
+end
+```
+
+`AuditedAccount.withdraw/2` enforces both the inherited `non_negative` postcondition
+and the `audit_written?` assertion. The inherited `@pre` and canonical argument names
+from `Ledger` remain in force.
+
+Only **zero-argument** contracts may be combined with behaviour inheritance — they
+reference only `result` and so do not conflict with the inherited contract's canonical
+argument vocabulary. A non-zero-arg contract alongside a behaviour contract is a
+compile error; use `@post_strengthen` directly when you need to add an
+argument-referencing strengthening.
+
 ## Scope and non-goals
 
 Two relationships are reported as clear compile errors:
 
-  * **Combining an applied contract with behaviour/protocol inheritance** on the
-    *same* function.
+  * **Combining a non-zero-arg contract with behaviour inheritance.** A zero-arg
+    (result-only) contract can be combined with inheritance — see
+    [Strengthening inherited contracts](#strengthening-inherited-contracts) above.
   * **Refining** an applied contract with `@pre_weaken`/`@post_strengthen` (the
     *weaken* direction). Additive `@pre`/`@post` covers the common "require more"
     case; weakening a named contract's precondition is not currently supported.
