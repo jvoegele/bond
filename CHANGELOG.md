@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-07-02
+
+Extends named contracts (`defcontract`/`@apply_contract`) to behaviour and protocol declaration
+modules, and adds zero-argument result-only contracts that apply across functions of any arity.
+
+### Added
+
+- **Zero-argument `defcontract name()` for result-only contracts**
+  ([#49](https://github.com/jvoegele/bond/issues/49)). A `defcontract` with an explicit empty
+  parameter list is *arity-agnostic*: `@apply_contract :name` matches any function regardless of
+  arity, and the contract's `@post` assertions (which reference only `result`) apply uniformly. This
+  lets a single named contract cover several functions with different signatures that all share the
+  same return-value guarantee. Preconditions are rejected at compile time (no argument names to
+  reference). `defcontract name do … end` (no parentheses) remains an error pointing at the `()`
+  form.
+
+- **`defcontract`/`@apply_contract` in `Bond.Behaviour` declaration modules**
+  ([#61](https://github.com/jvoegele/bond/issues/61)). A `use Bond.Behaviour` module can now define
+  named contracts with `defcontract` and attach them to `@callback` declarations with
+  `@apply_contract`. Implementers inherit the contracts unchanged — no difference from a plain
+  `@pre`/`@post` on the callback. The behaviour module emits `__bond_named_contracts__/0` when it
+  defines named contracts, enabling cross-module `@apply_contract {BehaviourModule, :name}`
+  references.
+
+- **`defcontract`/`@apply_contract` in `Bond.Protocol` declaration modules**
+  ([#61](https://github.com/jvoegele/bond/issues/61)). A `use Bond.Protocol` protocol can now use
+  `defcontract` and `@apply_contract` before its `def` declarations. Contracts land at the dispatch
+  wrapper and are enforced uniformly across all implementations, attributed to the protocol exactly
+  as with `@pre`/`@post` written directly.
+
+- **Zero-arg `@apply_contract` on `@impl` functions with inherited behaviour contracts**
+  ([#61](https://github.com/jvoegele/bond/issues/61)). A zero-argument (result-only) named contract
+  may now appear on an `@impl` function that also inherits a behaviour contract. Its postconditions
+  are added alongside the inherited ones — equivalent to `@post_strengthen` but named and reusable.
+  The inherited `@pre` and canonical argument names remain in force. A non-zero-arg contract
+  combined with behaviour inheritance remains a clear compile error pointing at `@post_strengthen`.
+
 ## [1.12.0] - 2026-07-01
 
 Adds a stateful, sequence-based property runner for `Bond.Server` — driving a server through random
