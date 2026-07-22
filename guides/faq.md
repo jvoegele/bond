@@ -756,6 +756,80 @@ relaxation (see above) also makes the workaround lighter: cross-clause
 agreement is only enforced at parameter positions a contract actually
 references.
 
+## How do I bind names inside `~>` or `or`?
+
+`where` and `whenever` are recognised at the **start** of a contract. They
+can't appear inside a larger expression:
+
+```elixir
+# does not compile
+@post valid: result ~> where(%{"startFrame" => s, "endFrame" => e} = instr,
+                             s_ok: is_integer(s) and s >= 0,
+                             e_ok: is_integer(e) and e > 0 and e != s)
+```
+
+Every case this comes up in is expressible today, usually more clearly.
+Pick whichever of these three fits.
+
+**`match?/2` takes a guard.** If the condition on the bound names is
+guard-expressible, this is the whole answer — no binding form needed:
+
+```elixir
+@post shape: match?({:ok, :cleared}, result) or
+               match?({:error, :validation_failed, errs} when is_list(errs), result)
+```
+
+**Two assertions, with the antecedent pushed inward.** For the `~>` case,
+split the shape requirement from the constraints on the bound names, and
+move the antecedent into each scoped assertion. The antecedent is in scope
+at the top level, so this always works:
+
+```elixir
+@post shape: result ~> match?(%{"startFrame" => _, "endFrame" => _}, instr)
+@post whenever(%{"startFrame" => s, "endFrame" => e} <- instr),
+      s_ok: result ~> (is_integer(s) and s >= 0),
+      e_ok: result ~> (is_integer(e) and e > 0 and e != s)
+```
+
+This is equivalent to the version that doesn't compile, and it keeps the
+per-assertion labels: a bad `endFrame` reports `label: :e_ok`, and a
+result of `true` with the wrong shape reports `label: :shape`.
+
+**A private predicate, for a choice between shapes.** When the alternatives
+each need their own bindings and the conditions aren't guard-expressible,
+a multi-clause function says it best — and it's independently testable:
+
+```elixir
+defp acceptable?({:ok, path}), do: String.starts_with?(path, "/")
+defp acceptable?({:error, :validation, errs}), do: Enum.all?(errs, &is_binary/1)
+defp acceptable?(_), do: false
+
+@post shape: acceptable?(result)
+```
+
+The failure names the predicate and shows the offending value in the
+binding, so you still see what went wrong:
+
+```
+postcondition failed in MyMod.run/1
+|   label: :shape
+|   assertion: acceptable?(result)
+|   binding: [result: {:ok, "rel"}]
+```
+
+The one thing this last form gives up is knowing *which* alternative you
+meant to satisfy. If that matters, name the branches with separate
+predicates and combine them with `or`.
+
+> #### Why not make `where` composable? {: .info}
+>
+> Bond deliberately doesn't support these forms as boolean sub-expressions.
+> A nested `where` would have to evaluate to `false` on a shape mismatch
+> rather than raise — otherwise the left branch of an `or` would blow up
+> before the right one was tried — so the same keyword would fail two
+> different ways depending on where it appeared. Given that every case
+> above is already expressible, that wasn't a trade worth making.
+
 ## How do I reuse a predicate across several functions?
 
 If the same condition guards an argument in several functions, you don't

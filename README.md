@@ -202,6 +202,12 @@ individually on failure. The forms work in `@pre` (binding from arguments),
 where the binding source references the callback/function's argument names (and
 `result`), exactly like a plain inherited `@pre`/`@post`.
 
+Both forms are recognised at the **start** of a contract — they are not boolean
+sub-expressions, so they can't appear inside `~>`, `or`, or a larger expression.
+Bond raises a compile error naming the alternatives if you try. See
+[How do I bind names inside `~>` or `or`?](guides/faq.md) for the three patterns
+that cover this, all of which keep per-assertion labels.
+
 ### The all-inside form (call contexts)
 
 The prefix form above (`@post where(binding), assertion…`) relies on the `@`
