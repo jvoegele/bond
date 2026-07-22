@@ -348,6 +348,17 @@ defmodule Bond.Compiler do
       Module.get_attribute(env.module, :__bond_contract_config__) ||
         %{preconditions: true, postconditions: true, invariants: true}
 
+    # Whether Bond owns `@` in this module, and therefore documentation. Read here — while the
+    # module is still open — rather than deeper in the codegen, where `apply_contract/2` is also
+    # reachable from unit tests holding an already-compiled module. See
+    # `Bond.Compiler.ContractDocs.doc_clauses/5`.
+    config =
+      Map.put(
+        config,
+        :at_annotations,
+        Module.get_attribute(env.module, :__bond_at_annotations__) != false
+      )
+
     invariants = FSM.invariants(fsm(env))
     inherited = FSM.inherited_contracts(fsm(env))
 

@@ -100,6 +100,14 @@ defmodule Bond do
         def add(x, y), do: x + y
       end
 
+  > #### Contract sections are omitted from generated docs {: .info}
+  >
+  > With the `@` override off, your `@doc` goes straight to `Kernel` and Bond never sees it, so
+  > it cannot append the `#### Preconditions` / `#### Postconditions` sections it normally adds.
+  > Bond leaves documentation entirely alone in this mode rather than emit a doc that would
+  > replace your own prose. Contracts are enforced exactly as usual; only their appearance in
+  > generated documentation is affected.
+
   > #### Bare macros are always fully-qualified {: .info}
   >
   > The `pre`/`post`/`invariant` macros are never imported, even with the default
@@ -134,6 +142,12 @@ defmodule Bond do
 
     config_ast =
       quote do
+        # Whether Bond owns the `@` macro in this module. Read at `@before_compile` by
+        # `Bond.Compiler.ContractDocs`: with the override off, `@doc` never reaches Bond, so Bond
+        # must leave documentation alone entirely rather than emit a contract-section doc that
+        # would overwrite the user's (see `Bond.Compiler.ContractDocs.doc_clauses/5`).
+        @__bond_at_annotations__ unquote(at_annotations?)
+
         # Read the `:bond` application config in the *user's* module body so
         # `Application.compile_env/3` works (it cannot be called inside a macro/function body,
         # only in a module body) and so the compile-env dependency is correctly tracked for
@@ -382,9 +396,25 @@ defmodule Bond do
         )
   end
 
+  # `@doc` is both *recorded* and *emitted*.
+  #
+  # Recording lets `@before_compile` re-emit the doc with the generated `#### Preconditions` /
+  # `#### Postconditions` sections appended. Emitting it here as well is what makes documentation
+  # independent of whether Bond ends up generating anything: a function with no contract, or one
+  # whose contracts are compiled out under `:purge`, gets no override at all, and a doc that only
+  # existed in Bond's buffer would be dropped on the floor (#71).
+  #
+  # A doc set here survives `defoverridable` and the wrapper that replaces the definition, so for
+  # a contracted function the re-emitted doc simply overrides this one — see
+  # `Bond.Compiler.ContractDocs.doc_override_head/2` for why that override is preceded by a
+  # bodiless function head.
   defmacro @{:doc, meta, [value]} do
     Bond.Compiler.register_doc(__CALLER__, meta, value)
-    :ok
+    line = Keyword.get(meta, :line, __CALLER__.line)
+
+    quote do
+      Module.put_attribute(__MODULE__, :doc, {unquote(line), unquote(value)})
+    end
   end
 
   # `@apply_contract <ref>` — apply a reusable named contract (`defcontract`) to the next
