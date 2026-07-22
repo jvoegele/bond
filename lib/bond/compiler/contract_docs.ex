@@ -46,18 +46,20 @@ defmodule Bond.Compiler.ContractDocs do
       ) do
     contract_docs = build_contract_docs(annotated_function, pre_mode, post_mode)
 
-    has_string_doc? = Enum.any?(doc_attributes, fn {_meta, value} -> is_binary(value) end)
+    has_string_doc? = Enum.any?(doc_attributes, fn {_meta, value} -> string_doc?(value) end)
 
     augmented =
       cond do
-        has_string_doc? ->
+        has_string_doc? and contract_docs != "" ->
           Enum.map(doc_attributes, fn
-            {meta, value} when is_binary(value) and contract_docs != "" ->
-              {meta, value <> "\n\n" <> contract_docs}
-
-            other ->
-              other
+            {meta, value} ->
+              if string_doc?(value),
+                do: {meta, append_docs(value, contract_docs)},
+                else: {meta, value}
           end)
+
+        has_string_doc? ->
+          doc_attributes
 
         contract_docs != "" ->
           # No user-supplied string doc; synthesise one containing just the contract docs so
@@ -71,9 +73,40 @@ defmodule Bond.Compiler.ContractDocs do
     for {meta, value} <- augmented do
       line = Keyword.get(meta, :line, env.line)
 
+      # `value` arrives as AST, straight from the `@doc` macro override in `Bond`, so it is
+      # unquoted rather than escaped: escaping is a no-op for the literals (`"text"`, `false`,
+      # `[since: "1.0"]`) that make up the common case, but it turns an interpolated heredoc's
+      # `{:<<>>, _, _}` AST into data, which `Module.put_attribute/3` rejects outright (#70).
+      # Unquoting evaluates it instead.
+      #
+      # NOTE: Bond buffers `@doc` and replays it here, at `@before_compile`, so an interpolated
+      # `#{@attr}` reads that attribute as of end-of-module rather than at the point the `@doc`
+      # was written. That follows from the buffering design rather than from this expression;
+      # interpolation is merely what makes it observable.
       quote do
-        Module.put_attribute(__MODULE__, :doc, {unquote(line), unquote(Macro.escape(value))})
+        Module.put_attribute(__MODULE__, :doc, {unquote(line), unquote(value)})
       end
+    end
+  end
+
+  # A doc value that carries prose the generated contract sections should be appended to: a
+  # literal string, or the `{:<<>>, _, _}` AST of a string with interpolation in it. Excludes
+  # `false`/`nil` (documentation deliberately suppressed) and a `[since: …]` keyword list
+  # (metadata, no prose).
+  defp string_doc?(value) when is_binary(value), do: true
+  defp string_doc?({:<<>>, _meta, _parts}), do: true
+  defp string_doc?(_value), do: false
+
+  # Appends the generated contract sections to a doc value. A literal string is concatenated
+  # here at compile time; an interpolated one has to be concatenated in the emitted AST, since
+  # its value is not known until the module body runs.
+  defp append_docs(value, contract_docs) when is_binary(value) do
+    value <> "\n\n" <> contract_docs
+  end
+
+  defp append_docs(value_ast, contract_docs) do
+    quote do
+      unquote(value_ast) <> unquote("\n\n" <> contract_docs)
     end
   end
 
