@@ -339,6 +339,42 @@ Typespecs say "this argument is an integer." Contracts say "this argument
 is a positive integer less than the balance, and the result is the
 balance minus the argument." Use both.
 
+## Should I remove guards and pattern matches when I add contracts?
+
+**No.** Contracts are an additive layer over ordinary defensive Elixir, not
+a replacement for it. Guards (`when is_binary(x)`) and structural patterns
+(`%DateTime{utc_offset: 0} = dt`) should stay exactly where they were.
+
+Two reasons, and the second surprises people:
+
+1. **Contracts can be switched off.** They can be disabled at runtime with
+   `Bond.Config`, or compiled out entirely with `:purge`. A guard you deleted
+   in favour of a `@pre` is gone in every build where contracts are off, and
+   the function silently accepts input it was written to reject.
+
+2. **The guard runs first.** Bond reproduces your `when` guards on the
+   wrapper clauses so multi-clause dispatch keeps working, which means an
+   argument that fails the guard raises `FunctionClauseError` before any
+   precondition is evaluated. A `@pre` that merely restates a guard is
+   therefore unreachable as a `Bond.PreconditionError` — the guard is the
+   real enforcer, and the `@pre` documents it.
+
+| Layer | Role | Active when |
+|---|---|---|
+| Guard / structural pattern | Correctness enforcement | Always |
+| `@pre` / `@post` | Documentation, diagnostics, property-test oracle | Contracts enabled |
+
+This has a direct consequence for tests. Use
+`Bond.Test.assert_precondition_violation/2` for preconditions with *no*
+corresponding guard — semantic constraints that only a contract can express,
+like a cross-field relationship. For a precondition backed by a guard, assert
+`FunctionClauseError` instead, because that is what fires and what should fire.
+
+The division of labour that works well: let guards and patterns say what the
+function *accepts*, and let contracts say what it *promises* — the
+relationships between arguments, and between arguments and the result, that a
+guard cannot express at all.
+
 ## Are contracts evaluated on the recursion path?
 
 No — Bond implements Bertrand Meyer's
