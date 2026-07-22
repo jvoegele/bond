@@ -34,6 +34,13 @@ defmodule Bond.Server do
   > you define via the `@on_definition` compiler hook, which only sees definitions made after
   > it is installed; `use GenServer` provides default callback implementations during its own
   > expansion, so putting it first keeps those defaults out of Bond.Server's view.
+  >
+  > The module must also genuinely implement the `GenServer` behaviour, whether through
+  > `use GenServer` or a bare `@behaviour GenServer`. Bond identifies callbacks by name and
+  > arity, so in a module that is *not* a GenServer an ordinary `init/1` or `handle_info/2`
+  > helper would be indistinguishable from a real callback. Rather than guess, Bond checks the
+  > behaviour: in a non-GenServer module no callback is wrapped, and any `@state_invariant` or
+  > `@transition_invariant` produces a compile-time warning that it cannot be checked.
 
   ## Transition invariants
 

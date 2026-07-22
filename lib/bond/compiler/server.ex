@@ -8,7 +8,8 @@ defmodule Bond.Compiler.Server do
 
     * records, via `@on_definition`, the `GenServer` state-transition callbacks the module
       actually defines (see `__on_definition__/6` for why `Module.overridable?/2` must not gate
-      this);
+      this, and `__before_compile__/1` for why the module must implement `GenServer` for those
+      recordings to mean anything);
     * at `@before_compile`, emits a `defoverridable` plus a wrapper around each such callback that
       calls `super`, extracts the new state with `Bond.Runtime.Server.extract_state/2`, and runs
       the module's `@state_invariant` / `@transition_invariant` checks against it — gated under the
@@ -59,20 +60,44 @@ defmodule Bond.Compiler.Server do
 
   def __on_definition__(_env, _kind, _fun, _params, _guards, _body), do: :ok
 
+  # A `{name, arity}` in `@genserver_callbacks` only *is* a GenServer callback if the module
+  # actually implements `GenServer`. `__on_definition__/6` cannot tell the difference — name and
+  # arity are all it has — so a plain `init/1` or `handle_info/2` helper in a non-GenServer module
+  # would otherwise be wrapped and have the module's `@state_invariant` run against its return
+  # value (#68). Checking the behaviour list here is both correct and sufficient: within a genuine
+  # GenServer a function at a callback's name/arity can only *be* that callback, since a module
+  # cannot define two functions with the same name and arity.
+  #
+  # `@behaviour` registrations are all in place by `@before_compile`, so this is independent of
+  # whether `use GenServer` precedes or follows `use Bond.Server`.
+  defp implements_genserver?(env) do
+    GenServer in (Module.get_attribute(env.module, :behaviour) || [])
+  end
+
   @doc false
   defmacro __before_compile__(env) do
+    genserver? = implements_genserver?(env)
+
     callbacks =
-      env.module
-      |> Module.get_attribute(:bond_server_callbacks)
-      |> Enum.uniq()
-      # Keep a stable, declaration-independent order for reflection and codegen.
-      |> then(fn defined -> Enum.filter(@genserver_callbacks, &(&1 in defined)) end)
+      if genserver? do
+        env.module
+        |> Module.get_attribute(:bond_server_callbacks)
+        |> Enum.uniq()
+        # Keep a stable, declaration-independent order for reflection and codegen.
+        |> then(fn defined -> Enum.filter(@genserver_callbacks, &(&1 in defined)) end)
+      else
+        []
+      end
 
     # State and transition invariants are captured into `:bond_state_invariants` /
     # `:bond_transition_invariants` by `Bond.Compiler.register_{state,transition}_invariant/4` (via
     # the `@state_invariant` / `@transition_invariant` overrides), newest-last = declaration order.
     state_invariants = Module.get_attribute(env.module, :bond_state_invariants) || []
     transition_invariants = Module.get_attribute(env.module, :bond_transition_invariants) || []
+
+    unless genserver? do
+      warn_not_a_genserver(env, state_invariants ++ transition_invariants)
+    end
 
     # State and transition invariants are gated under the `:invariants` kind (zero new Bond.Config
     # surface). The resolved per-module config lives in `@__bond_contract_config__` (set by `use
@@ -118,6 +143,26 @@ defmodule Bond.Compiler.Server do
 
   # The captured `{label, code}` pairs exposed by the reflection functions above.
   defp reflection(assertions), do: Enum.map(assertions, &{&1.label, &1.code})
+
+  # The `use Bond.Server`-but-not-a-GenServer counterpart to
+  # `Bond.Compiler.warn_orphan_server_invariants/1`'s `use Bond`-but-not-a-Bond.Server case. Both
+  # describe the same failure — a declared contract that can never be checked — so both are loud
+  # rather than silent. Without this the #68 gate would simply do nothing, which is a worse
+  # experience for someone who merely forgot `use GenServer`.
+  defp warn_not_a_genserver(_env, []), do: :ok
+
+  defp warn_not_a_genserver(env, [assertion | _]) do
+    attr =
+      if assertion.kind == :state_invariant, do: "@state_invariant", else: "@transition_invariant"
+
+    IO.warn(
+      "#{attr} was declared in #{inspect(env.module)}, which does not implement the GenServer " <>
+        "behaviour. State and transition invariants are checked on the state produced by a " <>
+        "module's GenServer callbacks, so this declaration is ignored. Add `use GenServer` " <>
+        "(before `use Bond.Server`).",
+      assertion.definition_env
+    )
+  end
 
   # The pre/post modes that gate the `:invariants` kind in `Bond.Runtime.Eval.should_evaluate?/3`
   # (the pre <= post <= invariants chain), mirroring struct `@invariant`s.
