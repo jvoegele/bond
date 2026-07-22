@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **`@doc` containing interpolation no longer fails to compile on a contracted function**
+  ([#70](https://github.com/jvoegele/bond/issues/70)). Bond buffers `@doc` as unexpanded AST and
+  replays it once the contract sections are ready, but escaped the value rather than evaluating
+  it. That is a no-op for the literals covering the common case (`"text"`, `false`,
+  `[since: "1.0"]`), but an interpolated heredoc arrives as `{:<<>>, _, _}` AST, and escaping
+  handed that raw AST to `Module.put_attribute/3`, which rejected it with
+  `** (ArgumentError) @doc is a built-in module attribute …`. Any interpolation triggered it —
+  `#{@some_attribute}` as readily as `%#{__MODULE__}{}` — and only on functions carrying a
+  contract. Interpolated docs are now evaluated, and are recognised as user prose so the
+  generated `#### Preconditions` / `#### Postconditions` sections are appended to them rather
+  than emitted as a competing `@doc`.
+
+- **A contract can now reference an underscore-prefixed head binding on a single-clause
+  function** ([#64](https://github.com/jvoegele/bond/issues/64)). When a head destructures and
+  the body uses only the destructured fields, the `= name` binding exists solely for a contract
+  to reference, and Elixir warns that it is unused. The idiomatic fix is `= _name`, and Bond
+  already treats `_name` and `name` as the same binding when negotiating canonical names across
+  clauses — but a single-clause function's generated assertion helper reproduced the head
+  pattern verbatim, leaving only `_name` bound, so any contract mentioning `name` failed with
+  `undefined variable`. That helper now rebinds the canonical name wherever a contract
+  references it, matching what multi-clause functions already did. `= _name` is a uniform,
+  warning-free way to bind an argument purely for a contract's use. Names destructured inside
+  the pattern remain available to single-clause contracts as before.
+
 - **`Bond.Server` no longer wraps functions that merely share a name and arity with a `GenServer`
   callback** ([#68](https://github.com/jvoegele/bond/issues/68)). Callback detection ran on name
   and arity alone, with no check that the module implemented `GenServer`. In a module that used

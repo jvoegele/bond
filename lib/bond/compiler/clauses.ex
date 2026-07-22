@@ -193,6 +193,58 @@ defmodule Bond.Compiler.Clauses do
   end
 
   @doc """
+  Rebinds each parameter's top-level name from its underscore-prefixed form to the canonical
+  (non-underscored) one, wherever an assertion actually references that canonical name.
+
+  `_api_spec` and `api_spec` are the same binding as far as `canonical_names/2` is concerned
+  (see `normalize_name/1`), so a multi-clause function's wrapper and lifted defp already bind
+  the non-underscored name and a contract can reference it. A single-clause function's lifted
+  defp instead reproduces the user's pattern verbatim, so `%{id: id} = _api_spec` left
+  `api_spec` unbound and any contract mentioning it failed to compile with
+  `undefined variable "api_spec"` (#64). Applying this to the reproduced pattern makes the two
+  paths agree, so `= _name` is a uniform way to bind a parameter purely for a contract's use
+  without tripping Elixir's unused-variable warning.
+
+  Renaming is conditional on the canonical name being referenced so that a parameter the
+  contracts ignore keeps its underscore (renaming it would be a pointless change), and so that
+  a contract deliberately written against the underscored name still resolves.
+
+  Destructured names inside the pattern are untouched: single-clause contracts may reference
+  them, which is the whole reason that path reproduces the user's pattern.
+  """
+  @spec bind_referenced_canonical_names([Macro.t()], MapSet.t(atom())) :: [Macro.t()]
+  def bind_referenced_canonical_names(params, %MapSet{} = referenced) when is_list(params) do
+    Enum.map(params, &rename_top_level_binding(&1, referenced))
+  end
+
+  defp rename_top_level_binding(param, referenced) do
+    name = top_level_name(param)
+    normalized = name && normalize_name(name)
+
+    if name && normalized != name && MapSet.member?(referenced, normalized) do
+      put_top_level_name(param, normalized)
+    else
+      param
+    end
+  end
+
+  # Mirrors `top_level_name/1`'s clauses, including their order: for `a = b`, where both sides
+  # are bare variables, the name on the right is the top-level one.
+  defp put_top_level_name({name, meta, ctx}, new) when is_atom(name) and is_atom(ctx) do
+    {new, meta, ctx}
+  end
+
+  defp put_top_level_name({:=, meta, [pattern, {name, var_meta, ctx}]}, new)
+       when is_atom(name) and is_atom(ctx) do
+    {:=, meta, [pattern, {new, var_meta, ctx}]}
+  end
+
+  defp put_top_level_name({:=, meta, [{name, var_meta, ctx}, pattern]}, new)
+       when is_atom(name) and is_atom(ctx) do
+    {:=, meta, [{new, var_meta, ctx}, pattern]}
+  end
+
+  @doc """
   Returns the subset of parameter names that any of the given `assertions`
   reference. The result is intersected with the union of top-level names
   across `clauses`, so synthetic bindings like `result`, `old(...)` helpers,
