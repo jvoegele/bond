@@ -31,13 +31,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   that mode. The trade-off is that contract sections are not added to generated docs there —
   losing the user's own prose is the worse of the two.
 
-### Changed
-
-- **`@doc` on a private function now warns**, as it does in plain Elixir
-  (`@doc is always discarded for private functions`). Bond previously absorbed the attribute
-  and never re-emitted it for `defp`, which silently hid a mistake Elixir would otherwise
-  flag. Contracts on private functions are unaffected; only the swallowed warning changes.
-
 - **`@doc` containing interpolation no longer fails to compile on a contracted function**
   ([#70](https://github.com/jvoegele/bond/issues/70)). Bond buffers `@doc` as unexpanded AST and
   replays it once the contract sections are ready, but escaped the value rather than evaluating
@@ -82,6 +75,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   time**, rather than being silently ignored by the fix above. The warning names the module and
   points at `use GenServer`, mirroring the existing warning for server invariants declared in a
   module that does not `use Bond.Server`.
+
+### Changed
+
+- **`@doc` on a private function now warns**, as it does in plain Elixir
+  (`@doc is always discarded for private functions`). Bond previously absorbed the attribute
+  and never re-emitted it for `defp`, which silently hid a mistake Elixir would otherwise
+  flag. Contracts on private functions are unaffected; only the swallowed warning changes.
 
 ## [1.13.0] - 2026-07-02
 
