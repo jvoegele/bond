@@ -30,20 +30,63 @@ defmodule Bond.Compiler.ContractDocs do
           AnnotatedFunction.t(),
           Macro.Env.t(),
           AnnotatedFunction.mode(),
-          AnnotatedFunction.mode()
+          AnnotatedFunction.mode(),
+          boolean()
         ) :: [Macro.t()]
   # Private functions can't carry @doc — Elixir warns "module attribute @doc was
   # set but never used" / "@doc is always discarded for private functions". Skip
   # emission entirely for `defp` so contracts on private helpers don't generate
   # warnings at the user's call site.
-  def doc_clauses(%AnnotatedFunction{kind: :defp}, _env, _pre_mode, _post_mode), do: []
+  def doc_clauses(%AnnotatedFunction{kind: :defp}, _env, _pre_mode, _post_mode, _owns_docs?),
+    do: []
+
+  # Under `use Bond, at_annotations: false` the user's `@doc` goes straight to `Kernel` and Bond
+  # never sees it, so `doc_attributes` is always empty. Emitting the synthesised contract-section
+  # doc would then *replace* the user's prose instead of extending it. Documentation is left
+  # untouched in that mode, at the cost of the generated contract sections.
+  def doc_clauses(_annotated_function, _env, _pre_mode, _post_mode, false), do: []
 
   def doc_clauses(
         %AnnotatedFunction{doc_attributes: doc_attributes} = annotated_function,
         env,
         pre_mode,
-        post_mode
+        post_mode,
+        _owns_docs?
       ) do
+    build_doc_clauses(annotated_function, doc_attributes, env, pre_mode, post_mode)
+  end
+
+  @doc """
+  The bodiless function head that must precede the wrapper clauses when `doc_clauses/5` overrides
+  a `@doc` the user already set.
+
+  Bond emits `@doc` twice for a documented, contracted function: once where the user wrote it
+  (so the documentation survives even when no override is generated — see `Bond`'s `@doc`
+  override) and once here, carrying the appended contract sections. Setting a doc for a
+  definition that already has one draws Elixir's
+
+      warning: redefining @doc attribute previously set at line N
+
+  Elixir's own remedy, named in that warning, is to attach the replacement to a function head —
+  a signature with no `do` block. Emitting one between the doc attribute and the wrapper clauses
+  makes the override silent. Returns `[]` when the user supplied no `@doc` (nothing to override,
+  so no head is needed) or for `defp` (which carries no documentation at all).
+  """
+  @spec doc_override_head(AnnotatedFunction.t(), [atom()]) :: [Macro.t()]
+  def doc_override_head(%AnnotatedFunction{kind: :defp}, _canonical_names), do: []
+  def doc_override_head(%AnnotatedFunction{doc_attributes: []}, _canonical_names), do: []
+
+  def doc_override_head(%AnnotatedFunction{fun: fun}, canonical_names) do
+    params = Enum.map(canonical_names, &Macro.var(&1, nil))
+
+    [
+      quote do
+        def unquote(fun)(unquote_splicing(params))
+      end
+    ]
+  end
+
+  defp build_doc_clauses(annotated_function, doc_attributes, env, pre_mode, post_mode) do
     contract_docs = build_contract_docs(annotated_function, pre_mode, post_mode)
 
     has_string_doc? = Enum.any?(doc_attributes, fn {_meta, value} -> string_doc?(value) end)

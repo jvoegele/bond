@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **`@doc` is no longer discarded on functions Bond does not wrap**
+  ([#71](https://github.com/jvoegele/bond/issues/71)). Bond overrides `@doc` and recorded the
+  value so that `@before_compile` could re-emit it with the generated contract sections
+  appended — but recording was *all* it did, so any function Bond did not generate an override
+  for lost its documentation entirely, with no error and no warning. That covered two common
+  cases: a function with no contract (usually most of a module, since contracts are applied
+  selectively), and *every* function in a module compiled with contracts purged, including
+  contracted ones.
+
+  `@doc` is now also emitted where it was written, so documentation no longer depends on
+  whether Bond generates anything. For a contracted function the re-emitted, contract-augmented
+  doc overrides it; that override is attached to a bodiless function head, which is Elixir's
+  sanctioned way to replace a doc without the `redefining @doc attribute previously set at
+  line N` warning.
+
+- **`use Bond, at_annotations: false` no longer overwrites documentation.** With the `@`
+  override off, the user's `@doc` goes straight to `Kernel` and Bond never sees it, so the
+  synthesised contract-section doc *replaced* the user's prose on every contracted function
+  and emitted a spurious `redefining @doc` warning. Bond now leaves documentation untouched in
+  that mode. The trade-off is that contract sections are not added to generated docs there —
+  losing the user's own prose is the worse of the two.
+
+### Changed
+
+- **`@doc` on a private function now warns**, as it does in plain Elixir
+  (`@doc is always discarded for private functions`). Bond previously absorbed the attribute
+  and never re-emitted it for `defp`, which silently hid a mistake Elixir would otherwise
+  flag. Contracts on private functions are unaffected; only the swallowed warning changes.
+
 - **`@doc` containing interpolation no longer fails to compile on a contracted function**
   ([#70](https://github.com/jvoegele/bond/issues/70)). Bond buffers `@doc` as unexpanded AST and
   replays it once the contract sections are ready, but escaped the value rather than evaluating
@@ -1552,9 +1581,9 @@ conversation.
 - **No `@doc` emission on `defp`.** Contracts on private helpers
   previously triggered Elixir's "@doc is always discarded for private
   functions" warning on every contracted defp, making the combination
-  unusable without compile-time noise. `Bond.Compiler.ContractDocs.
-  doc_clauses/4` now short-circuits for `:defp` kind. The contracts
-  themselves continue to fire — the warning was the only blocker.
+  unusable without compile-time noise. Bond's doc-clause emission now
+  short-circuits for `:defp` kind. The contracts themselves continue to
+  fire — the warning was the only blocker.
 
 - **`Bond.Predicates` moduledoc gains an "Operator precedence"
   section** documenting the `~>` / `<~` left-associativity trap.

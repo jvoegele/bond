@@ -162,6 +162,30 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       assert doc =~ ~r"ensures1: result < x"
     end
 
+    test "precedes the re-emitted @doc's clauses with a bodiless head",
+         %{one_clause_annotated_function: annotated_function} do
+      # The user's own `@doc` has already set a doc on the original definition, so re-emitting
+      # one here would draw Elixir's "redefining @doc" warning. Attaching it to a bodiless
+      # function head is Elixir's sanctioned way to override silently (#71).
+      ast = AnnotatedFunction.apply_contract(annotated_function)
+
+      assert [{:def, _, [{:add, _, params}]}] = doc_override_heads(ast)
+      assert length(params) == annotated_function.arity
+    end
+
+    test "emits no bodiless head when the user supplied no @doc",
+         %{one_clause_annotated_function: annotated_function} do
+      # Nothing to override — the only doc is the one Bond synthesises for the contract
+      # sections — so no head is needed.
+      ast =
+        %{annotated_function | doc_attributes: []}
+        |> AnnotatedFunction.apply_contract()
+
+      assert doc_override_heads(ast) == []
+      assert [{_line, doc}] = doc_put_attribute_clauses(ast)
+      assert doc =~ ~r"#### Preconditions"
+    end
+
     test "emits a @doc Module.put_attribute call per doc attribute for a multi-clause function",
          %{two_clause_annotated_function: annotated_function} do
       ast = AnnotatedFunction.apply_contract(annotated_function)
@@ -468,17 +492,27 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
   defp override_def_clause(ast) do
     ast
     |> block_clauses()
-    |> Enum.find(fn
-      {:def, _, _} -> true
-      _ -> false
-    end)
+    |> Enum.find(&def_with_body?/1)
   end
 
   defp override_def_clauses(ast) do
     ast
     |> block_clauses()
+    |> Enum.filter(&def_with_body?/1)
+  end
+
+  # The wrapper clauses proper. Excludes the bodiless `def fun(args)` head that precedes them
+  # when Bond overrides a user-supplied `@doc` (#71) — that head carries no body.
+  defp def_with_body?({:def, _, [_head, [{:do, _} | _]]}), do: true
+  defp def_with_body?(_), do: false
+
+  # The bodiless `def fun(args)` heads emitted so a re-emitted `@doc` overrides the user's own
+  # without Elixir's "redefining @doc" warning.
+  defp doc_override_heads(ast) do
+    ast
+    |> block_clauses()
     |> Enum.filter(fn
-      {:def, _, _} -> true
+      {:def, _, [{name, _, args}]} when is_atom(name) and is_list(args) -> true
       _ -> false
     end)
   end

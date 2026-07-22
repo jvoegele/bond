@@ -297,7 +297,13 @@ defmodule Bond.Compiler.AnnotatedFunction do
   @type contract_config :: %{
           required(:preconditions) => mode(),
           required(:postconditions) => mode(),
-          optional(:invariants) => mode()
+          optional(:invariants) => mode(),
+          # Whether Bond owns `@` in this module, and so whether it may emit documentation at
+          # all (#71). Not a contract kind and not part of the pre ≤ post ≤ invariant chain;
+          # it rides along on the config map because that is what is already threaded from
+          # `Bond.Compiler.__before_compile__/1` down into codegen.
+          optional(:at_annotations) => boolean(),
+          optional(:warn_skipped_invariants) => boolean()
         }
 
   @doc """
@@ -373,7 +379,12 @@ defmodule Bond.Compiler.AnnotatedFunction do
     maybe_warn_skipped_invariants(annotated_function, inv_mode, config)
 
     if pre_mode != :purge or post_mode != :purge or inv_mode != :purge do
-      build_contract_override(annotated_function, pre_mode, post_mode, inv_mode)
+      # Whether Bond owns `@` — and so documentation — in this module. Supplied by
+      # `Bond.Compiler.__before_compile__/1` from `@__bond_at_annotations__`; defaults to `true`
+      # for callers that build a config map directly.
+      owns_docs? = Map.get(config, :at_annotations, true)
+
+      build_contract_override(annotated_function, pre_mode, post_mode, inv_mode, owns_docs?)
     end
   end
 
@@ -463,7 +474,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
            annotated_function,
          pre_mode,
          post_mode,
-         inv_mode
+         inv_mode,
+         owns_docs?
        ) do
     first_clause = List.first(annotated_function.clauses)
     env = first_clause.env
@@ -477,7 +489,14 @@ defmodule Bond.Compiler.AnnotatedFunction do
         OldExpression.precompile([])
       end
 
-    doc_asts = ContractDocs.doc_clauses(annotated_function, env, pre_mode, post_mode)
+    doc_asts = ContractDocs.doc_clauses(annotated_function, env, pre_mode, post_mode, owns_docs?)
+
+    # Only meaningful alongside an emitted doc: it exists to let that doc override the one the
+    # user's own `@doc` already set, without Elixir's "redefining @doc" warning.
+    doc_head_ast =
+      if doc_asts == [],
+        do: [],
+        else: ContractDocs.doc_override_head(annotated_function, canonical_names)
 
     wrapper_context = %{
       fun: fun,
@@ -508,6 +527,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
       defoverridable([{unquote(fun), unquote(arity)}])
 
       unquote_splicing(doc_asts)
+
+      unquote_splicing(doc_head_ast)
 
       unquote_splicing(wrapper_clauses)
 
