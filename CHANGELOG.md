@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+
+- **A clear compile error for `where`/`whenever` used inside a larger expression**
+  ([#63](https://github.com/jvoegele/bond/issues/63)). The binding forms are recognised at the
+  *start* of a contract, so a nested one — `result ~> where(…)`, `where(…) or whenever(…)` —
+  previously surfaced as `undefined variable "x"` at whichever scoped assertion referenced a
+  name nothing had bound: accurate, but unhelpful when the real problem is the form's position.
+  Bond now raises a `CompileError` that renders the offending form and names the three
+  alternatives. Recognition requires the binder shape (`pattern = source` / `pattern <- source`),
+  so an ordinary call to a `where/2` of your own — `Ecto.Query.where/3` being the obvious one —
+  is never mistaken for a binding form.
+
+- **FAQ: "How do I bind names inside `~>` or `or`?"** — the three patterns that cover this,
+  each verified to keep per-assertion labels: `match?/2` with a `when` guard; two assertions
+  with the antecedent pushed into each scoped assertion; and a private predicate function for a
+  choice between shapes. Composable binding forms were considered and declined — every
+  motivating case is already expressible, and a nested `where` would have to evaluate to `false`
+  on a shape mismatch rather than raise (otherwise the left branch of an `or` would blow up
+  before the right was tried), leaving one keyword with two failure behaviours.
+
 ## [1.13.1] - 2026-07-22
 
 A bug-fix release. Documentation written in a `use Bond` module now survives compilation

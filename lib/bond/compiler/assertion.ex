@@ -105,6 +105,7 @@ defmodule Bond.Compiler.Assertion do
   """
   def new(kind, label, expression, %Macro.Env{} = env \\ __ENV__, meta \\ [])
       when is_assertion_expression(expression) do
+    reject_nested_binding_form!(expression, env)
     maybe_lint(expression, env)
 
     %__MODULE__{
@@ -248,6 +249,62 @@ defmodule Bond.Compiler.Assertion do
           "(e.g. `is_integer(x)`, `x > 0`, `Map.has_key?(m, :k)`, " <>
           "`String.starts_with?(s, \"prefix\")`). Bare literals, variables, and " <>
           "non-AST terms aren't valid assertion forms."
+  end
+
+  # `where`/`whenever` are recognised positionally, at the *start* of a contract — the `@` layer
+  # and the call-style entry points strip the binding before an assertion ever reaches `new/5`,
+  # so a binding form still present in an expression here is necessarily nested inside a larger
+  # one (`result ~> where(…)`, `where(…) or whenever(…)`). Elixir would otherwise report this as
+  # `undefined variable "x"` at the member referencing a name nothing bound — accurate but
+  # thoroughly unhelpful, since the real problem is the position of the form, not the variable.
+  #
+  # Composable binding forms were considered and declined (#63): every motivating case is already
+  # expressible, so the diagnostic points at the alternatives rather than introducing a nested
+  # form whose failure semantics would have to differ from the top-level one.
+  #
+  # Matching requires the binder shape (`pattern = source` for `where`, `pattern <- source` for
+  # `whenever`), so an ordinary call to a user's own `where/2` — `Ecto.Query.where/3` being the
+  # obvious one — is never mistaken for a binding form.
+  defp reject_nested_binding_form!(expression, env) do
+    Macro.prewalk(expression, fn
+      {:where, meta, [{:=, _, [_, _]} | _]} = node ->
+        raise CompileError,
+          file: env.file,
+          line: Keyword.get(meta, :line, env.line),
+          description: nested_binding_form_message(:where, node)
+
+      {:whenever, meta, [{:<-, _, [_, _]} | _]} = node ->
+        raise CompileError,
+          file: env.file,
+          line: Keyword.get(meta, :line, env.line),
+          description: nested_binding_form_message(:whenever, node)
+
+      node ->
+        node
+    end)
+
+    :ok
+  end
+
+  defp nested_binding_form_message(form, node) do
+    """
+    Bond: `#{form}` may only appear at the start of a contract, not inside a larger expression.
+
+        #{expression_source(node)}
+
+    To bind names inside a boolean expression, use one of:
+
+      * `match?/2`, which accepts a guard —
+        `match?({:error, :invalid, errs} when is_list(errs), result)`
+
+      * two assertions, pushing the antecedent into each scoped assertion —
+        `@post shape: result ~> match?(%{"a" => _}, instr)`
+        `@post whenever(%{"a" => a} <- instr), a_ok: result ~> is_integer(a)`
+
+      * a private predicate function, for a choice between several shapes.
+
+    See the "How do I bind names inside `~>` or `or`?" entry in the FAQ.\
+    """
   end
 
   # Runs the compile-time assertion linter (#52) unless disabled via
