@@ -376,6 +376,117 @@ defmodule Bond.ServerTest do
     end
   end
 
+  describe "wrapping requires the GenServer behaviour (#68)" do
+    import ExUnit.CaptureIO
+
+    # These fixtures are compiled at runtime so their stderr can be captured, and are exercised
+    # through the returned module atom (never a literal alias) so the compiler does not warn about
+    # modules that do not exist at test-compile time.
+    defp compile_fixture!(source) do
+      {[{module, _bin} | _], warning} = with_io(:stderr, fn -> Code.compile_string(source) end)
+      {module, warning}
+    end
+
+    # Uses Bond.Server for its invariants but is NOT a GenServer, and happens to define ordinary
+    # functions at a callback's name/arity. Before #68 these were wrapped on name/arity alone and
+    # had @state_invariant run against their return values.
+    defp compile_collider!(name) do
+      compile_fixture!("""
+      defmodule #{name} do
+        use Bond.Server
+        @state_invariant valid: state.count >= 0
+
+        # ordinary functions that collide with GenServer callback name/arity
+        def init(env), do: {:ok, env}
+        def handle_info(a, b), do: {:noreply, {a, b}}
+        def handle_call(a, b, c), do: {:reply, a, {b, c}}
+
+        # no collision
+        def compile(env, opts), do: {env, opts}
+      end
+      """)
+    end
+
+    test "does not wrap name/arity collisions in a non-GenServer module" do
+      {mod, _warning} = compile_collider!("BondTest.Collider")
+
+      # The state invariant would raise (`:not_a_state.count`) if it were run against these.
+      assert apply(mod, :init, [:not_a_state]) == {:ok, :not_a_state}
+      assert apply(mod, :handle_info, [:a, :b]) == {:noreply, {:a, :b}}
+      assert apply(mod, :handle_call, [:a, :b, :c]) == {:reply, :a, {:b, :c}}
+      assert apply(mod, :compile, [:env, :opts]) == {:env, :opts}
+    end
+
+    test "reports no callbacks for a non-GenServer module" do
+      {mod, _warning} = compile_collider!("BondTest.ColliderReflection")
+
+      assert apply(mod, :__bond_server_callbacks__, []) == []
+    end
+
+    test "warns that the invariants cannot be checked" do
+      {_mod, warning} = compile_collider!("BondTest.ColliderWarning")
+
+      assert warning =~ "@state_invariant was declared in BondTest.ColliderWarning"
+      assert warning =~ "does not implement the GenServer behaviour"
+      assert warning =~ "use GenServer"
+    end
+
+    test "emits no @impl for a behaviour the module never declared" do
+      {_mod, warning} = compile_collider!("BondTest.ColliderImpl")
+
+      refute warning =~ "no behaviour was declared"
+    end
+
+    test "warns for @transition_invariant too" do
+      {_mod, warning} =
+        compile_fixture!("""
+        defmodule BondTest.ColliderTransition do
+          use Bond.Server
+          @transition_invariant monotonic: new_state.n >= old_state.n
+          def handle_cast(a, b), do: {:noreply, {a, b}}
+        end
+        """)
+
+      assert warning =~ "@transition_invariant was declared in BondTest.ColliderTransition"
+      assert warning =~ "does not implement the GenServer behaviour"
+    end
+
+    test "does not warn when a non-GenServer module declares no server invariants" do
+      {_mod, warning} =
+        compile_fixture!("""
+        defmodule BondTest.QuietNonServer do
+          use Bond.Server
+          def init(x), do: {:ok, x}
+        end
+        """)
+
+      refute warning =~ "was declared in"
+    end
+
+    test "detects GenServer declared with a bare @behaviour, without `use GenServer`" do
+      {mod, _warning} =
+        compile_fixture!("""
+        defmodule BondTest.BareBehaviourServer do
+          @behaviour GenServer
+          use Bond.Server
+
+          @state_invariant non_negative: state.n >= 0
+
+          @impl true
+          def init(n), do: {:ok, %{n: n}}
+
+          @impl true
+          def handle_cast(:dec, s), do: {:noreply, %{s | n: s.n - 1}}
+        end
+        """)
+
+      assert apply(mod, :__bond_server_callbacks__, []) == [init: 1, handle_cast: 2]
+      assert apply(mod, :init, [1]) == {:ok, %{n: 1}}
+
+      assert_raise Bond.InvariantError, fn -> apply(mod, :handle_cast, [:dec, %{n: 0}]) end
+    end
+  end
+
   # Transition invariant only (no @state_invariant), so init/code_change get no wrapper at all.
   defmodule TransOnly do
     use GenServer

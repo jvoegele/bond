@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`Bond.Server` no longer wraps functions that merely share a name and arity with a `GenServer`
+  callback** ([#68](https://github.com/jvoegele/bond/issues/68)). Callback detection ran on name
+  and arity alone, with no check that the module implemented `GenServer`. In a module that used
+  `Bond.Server` for its `@state_invariant`s but was not a GenServer, an ordinary helper named
+  `init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`, `handle_continue/2`, or
+  `code_change/3` was wrapped anyway, and the state invariant was evaluated against its return
+  value — surfacing far from its cause as an `UndefinedFunctionError`, `BadMapError`, or
+  `KeyError` raised from inside the generated check, alongside spurious
+  `got "@impl true" for function … but no behaviour was declared` warnings.
+
+  Wrapping now requires the module to implement the `GenServer` behaviour, via either
+  `use GenServer` or a bare `@behaviour GenServer`. Within a genuine GenServer nothing changes:
+  a function at a callback's name and arity can only *be* that callback, since a module cannot
+  define two functions with the same name and arity. `__bond_server_callbacks__/0` correspondingly
+  reports `[]` for a non-GenServer module.
+
+- **`@state_invariant`/`@transition_invariant` in a non-GenServer module now warn at compile
+  time**, rather than being silently ignored by the fix above. The warning names the module and
+  points at `use GenServer`, mirroring the existing warning for server invariants declared in a
+  module that does not `use Bond.Server`.
+
 ## [1.13.0] - 2026-07-02
 
 Extends named contracts (`defcontract`/`@apply_contract`) to behaviour and protocol declaration
