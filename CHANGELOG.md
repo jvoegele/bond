@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-07-22
+
+A bug-fix release. Documentation written in a `use Bond` module now survives compilation
+intact — previously it was discarded on any function Bond did not wrap, including every
+function in a build with contracts purged — and `Bond.Server` no longer wraps functions that
+merely share a name and arity with a `GenServer` callback.
+
 ### Fixed
 
 - **`@doc` is no longer discarded on functions Bond does not wrap**
