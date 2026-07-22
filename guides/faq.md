@@ -632,6 +632,29 @@ Bond treats `_a` and `a` as the same binding for the consistency check.
 Write fallback clauses with `_name` markers freely; the contracts still
 attach.
 
+That equivalence is also the answer to a wart you hit as soon as a head
+destructures. When the body uses only the destructured fields, the `= name`
+binding exists purely so a contract can reference the whole argument — and
+Elixir, which cannot see into the generated assertion functions, warns that
+`name` is unused:
+
+```elixir
+@pre is_api_spec: is_api_spec(api_spec)
+def matches?(%{id: id} = api_spec, value), do: id == value
+#                        ^^^^^^^^ warning: variable "api_spec" is unused
+```
+
+Prefix it. The contract keeps referencing the unprefixed name, and the
+warning goes away:
+
+```elixir
+@pre is_api_spec: is_api_spec(api_spec)
+def matches?(%{id: id} = _api_spec, value), do: id == value
+```
+
+Names destructured *inside* the pattern (`id` above) stay available to the
+contracts of a single-clause function, prefixed or not.
+
 ### Naming consistency is only required where contracts depend on it
 
 The naming-agreement rule applies *positionally*: only positions whose

@@ -526,13 +526,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
          function_info
        ) do
     first_clause = List.first(annotated_function.clauses)
-
-    referenced_names =
-      Clauses.referenced_param_names(
-        annotated_function.preconditions ++
-          annotated_function.postconditions ++ annotated_function.invariants,
-        annotated_function.clauses
-      )
+    referenced_names = referenced_param_names(annotated_function)
 
     {:ok, names} =
       Clauses.assert_clauses_agree!(
@@ -547,6 +541,17 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
   defp resolve_canonical_names(%__MODULE__{canonical_names_override: override}, _function_info),
     do: override
+
+  # The parameter names this function's own contracts reference. Shared by canonical-name
+  # resolution (which positions must agree across clauses) and by the single-clause lifted defp
+  # head (which `= _name` bindings to rebind), so the two always answer from the same set.
+  defp referenced_param_names(%__MODULE__{} = annotated_function) do
+    Clauses.referenced_param_names(
+      annotated_function.preconditions ++
+        annotated_function.postconditions ++ annotated_function.invariants,
+      annotated_function.clauses
+    )
+  end
 
   # Lifted-defp parameter strategy depends on whether the function has one clause or many.
   #
@@ -584,8 +589,18 @@ defmodule Bond.Compiler.AnnotatedFunction do
     Enum.map(canonical_names, &Macro.var(&1, nil))
   end
 
-  defp lifted_defp_params(%__MODULE__{clauses: [_single]}, _canonical_names, first_clause) do
-    ClauseWrapper.strip_default_args(first_clause.params)
+  defp lifted_defp_params(
+         %__MODULE__{clauses: [_single]} = annotated_function,
+         _canonical_names,
+         first_clause
+       ) do
+    # The user's pattern is reproduced so contracts can reference names destructured in the head,
+    # but a top-level `= _name` binding has to be rebound to the canonical `name` the contract
+    # expressions were written against — otherwise it is bound only under its underscored name and
+    # the contract fails to compile (#64). See `Clauses.bind_referenced_canonical_names/2`.
+    first_clause.params
+    |> ClauseWrapper.strip_default_args()
+    |> Clauses.bind_referenced_canonical_names(referenced_param_names(annotated_function))
   end
 
   defp lifted_defp_params(_annotated_function, canonical_names, _first_clause) do
