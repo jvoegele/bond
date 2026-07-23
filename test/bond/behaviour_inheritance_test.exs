@@ -195,9 +195,18 @@ defmodule Bond.BehaviourInheritanceTest do
     end
   end
 
-  def forward_telemetry(_event, _measurements, metadata, %{pid: pid}) do
+  # Telemetry handlers are attached VM-wide, so this one also sees contract violations raised by
+  # other tests running concurrently in the async phase. Filter on the module under test rather
+  # than forwarding every failure — otherwise `assert_received {:telemetry, metadata}` below can
+  # match a foreign event and assert against the wrong metadata.
+  def forward_telemetry(_event, _measurements, %{module: module} = metadata, %{
+        pid: pid,
+        module: module
+      }) do
     send(pid, {:telemetry, metadata})
   end
+
+  def forward_telemetry(_event, _measurements, _metadata, _config), do: :ok
 
   describe "telemetry" do
     test "assertion-failure metadata carries the source behaviour" do
@@ -207,7 +216,7 @@ defmodule Bond.BehaviourInheritanceTest do
         handler,
         [:bond, :assertion, :failure],
         &__MODULE__.forward_telemetry/4,
-        %{pid: self()}
+        %{pid: self(), module: BankAccount}
       )
 
       assert_raise Bond.PreconditionError, fn -> BankAccount.withdraw(100, 0) end
