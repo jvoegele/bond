@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **FAQ: "Can I write a contract for the failure path?"**
+  ([#33](https://github.com/jvoegele/bond/issues/33)). Documents that `@post` already covers
+  failure contracts for failures modelled as values — constraining the set of errors a function
+  may return, and asserting what must hold when a particular one occurs — and why there is no
+  exception contract. Failure contracts (`signals`-style) were considered and declined: in an
+  immutable language "state is unchanged on failure" is a tautology, a crashed process has no
+  state left to constrain, and enforcing "may only raise X" would have to change which exception
+  propagates, making a purged build fail differently from an unpurged one.
+
 - **A clear compile error for `where`/`whenever` used inside a larger expression**
   ([#63](https://github.com/jvoegele/bond/issues/63)). The binding forms are recognised at the
   *start* of a contract, so a nested one — `result ~> where(…)`, `where(…) or whenever(…)` —

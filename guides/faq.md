@@ -375,6 +375,64 @@ function *accepts*, and let contracts say what it *promises* — the
 relationships between arguments, and between arguments and the result, that a
 guard cannot express at all.
 
+## Can I write a contract for the failure path?
+
+Yes — if you model failure the way Elixir recommends, as a **value**. Bond
+has no exception contract (no `signals`/`throws` clause), deliberately.
+
+For a function that returns `{:ok, _} | {:error, reason}`, `@post` already
+gives you both halves of a failure contract. Constrain the set of failures
+a function is allowed to produce:
+
+```elixir
+@post only_known_errors:
+        match?({:ok, _}, result) or
+          match?({:error, r} when r in [:insufficient, :frozen, :unknown_account], result)
+def withdraw(account, amount), do: ...
+```
+
+An undeclared error tag now fails the postcondition with
+`label: :only_known_errors`. And to say what must hold *when* a particular
+failure occurs, scope it with `whenever` — `old/1` is available, so you can
+relate the failure to the state at entry:
+
+```elixir
+@post whenever({:error, :insufficient} <- result),
+      untouched: ledger_total() == old(ledger_total())
+```
+
+### Why there is no exception contract
+
+For raised exceptions, three things take the motivation away.
+
+**"State is unchanged on failure" is a tautology here.** The classic reason
+failure contracts exist is that a failed operation can leave its target
+half-mutated. Elixir's data is immutable, so a caller's value cannot change
+no matter what the callee does or how it fails. An assertion like
+`account.balance == old(account.balance)` on the failure path can never be
+false.
+
+**A crashed process has no state left to constrain.** If a `GenServer`
+callback raises, the process dies and its state is discarded; the supervisor
+restarts it from a known-good one. There is no inconsistent state surviving
+the failure for a contract to check.
+
+**Enforcing "may only raise X" would have to change what propagates.** To
+report the violation, Bond would have to replace or wrap the exception that
+was already on its way out — breaking `rescue` clauses that matched the
+original type, and making a build with contracts purged fail *differently*
+from one with them enabled. Every other Bond contract only adds a check;
+this one would alter the failure itself.
+
+So exception expectations belong where they already work well:
+`assert_raise/2` in your tests for the behaviour, and `@doc` plus the `!`
+naming convention for the documentation.
+
+The one case this genuinely leaves uncovered is a function that mutates
+**external** state — ETS, a database, a file — and raises partway through,
+where "if this raised, nothing was written" is a real property. That is
+normally a transaction's job rather than a contract's.
+
 ## Are contracts evaluated on the recursion path?
 
 No — Bond implements Bertrand Meyer's
