@@ -197,6 +197,55 @@ read from the `@pre` only: a significant constant in the function *body* (the `5
 `Enum.split(items, 5)`, say) is invisible to `probe_contract/2`, so generate around such an edge
 yourself — or lift it into a `@pre` if it is genuinely part of the contract.
 
+#### Choosing a generator `probe_contract/2` can actually drive
+
+The commonest reason a `probe_contract/2` property fails to get off the ground is a
+generator that disagrees with the precondition. Three things to know.
+
+**Your generator must satisfy `@pre` at every generation size, not just on average.**
+StreamData ramps the size up from 0, and a size-dependent generator sits at the bottom
+of its range early on — `StreamData.list_of(gen, length: 4..6)` produces only length-4
+lists at the opening sizes. A `@pre` that excludes 4 rejects every one of them and the
+run ends with `FilterTooRestrictiveError` before the size ever grows, however healthy
+the average acceptance rate looks. When the precondition constrains a size, pin it:
+
+```elixir
+# @pre five_segments: length(Path.split(key)) == 5
+probe_contract &Keys.decode/1,
+  args: [
+    StreamData.map(
+      StreamData.list_of(StreamData.string(:alphanumeric, min_length: 1), length: 5),
+      &Enum.join(&1, "/")
+    )
+  ]
+```
+
+**Boundaries are read from a bare parameter.** `@pre length(items) <= 3` yields size
+boundaries; `@pre length(Path.split(key)) == 5` does not, because the size constrains a
+computed value rather than an argument. Bond injects nothing in that case and falls back
+to your generator plus the filter — which is why the generator above encodes the size
+itself.
+
+**Boundary probing pays off for inequality preconditions.** For `@pre length(items) <= 3`
+the injected sizes 2 and 3 both satisfy `@pre`, so the edge is really exercised. For an
+equality precondition like `@pre length(items) == 3`, the injected neighbours 2 and 4 are
+exactly what `@pre` excludes — the filter discards them, and probing adds nothing beyond
+what your generator already produces. Reach for `probe_contract/2` when the precondition
+bounds a range; for an exact-shape precondition, `contract_holds/2` with a generator that
+produces only valid inputs says the same thing more directly.
+
+#### Pure functions probe best
+
+`probe_contract/2` calls the function once per generated input, so a function that reaches
+an external collaborator needs that collaborator stubbed for *every* iteration — `Mox.stub/3`
+rather than `expect/4`. Worse, a `@post` that constrains what the collaborator returned is
+then partly testing the stub rather than the function.
+
+Prefer extracting the pure core and probing that, or injecting the collaborator so a
+deterministic double can stand in. The same split makes the contract easier to state: the
+pure core usually has the interesting `@pre`/`@post`, and the shell that calls out has
+little to say beyond "passes its arguments along".
+
 ### `invariants_hold/2` — stateful module sequences
 
 Where the previous two macros drive a single function, `invariants_hold/2` drives

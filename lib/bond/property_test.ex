@@ -215,6 +215,26 @@ defmodule Bond.PropertyTest do
     * If a single-clause function destructures an argument in its head (e.g.
       `def f(%Account{} = a, n)`), your generator for that argument must produce shape-matching
       values, exactly as the function itself requires.
+    * **Boundaries are read from a bare parameter, not a derived expression.**
+      `@pre length(items) <= 3` yields size boundaries; `@pre length(Path.split(key)) == 5` does
+      not, because the size constrains a computed value rather than an argument. Bond emits no
+      boundary candidates in that case and degrades to your generator plus the `@pre` filter.
+    * **Boundary probing pays off for inequality preconditions.** For `@pre length(items) <= 3`
+      the injected sizes 2 and 3 both satisfy `@pre`, so the edge is genuinely exercised. For an
+      *equality* precondition such as `@pre length(items) == 3`, the injected neighbours 2 and 4
+      are exactly what `@pre` excludes, so the filter discards them and only the exact size
+      survives — probing adds nothing a plain generator would not already produce.
+    * **Your generator must satisfy `@pre` at every generation size, not just on average.**
+      StreamData ramps the size up from 0, and a size-dependent generator sits at the bottom of
+      its range early on: `StreamData.list_of(gen, length: 4..6)` produces only length-4 lists at
+      the opening sizes. A `@pre` that excludes 4 therefore rejects every one of them and the run
+      ends before the size grows — no matter how healthy the average acceptance rate looks. When
+      the precondition constrains a size, pin it (`length: 5`) rather than letting it range.
+    * **`probe_contract/2` is turnkey for pure functions.** It calls the function once per
+      generated input, so a function that reaches an external collaborator needs that collaborator
+      stubbed for every iteration (`Mox.stub/3`, not `expect/4`), and a `@post` that constrains the
+      collaborator's output then partly tests the stub. Prefer extracting the pure core and probing
+      that, or inject the collaborator so a deterministic double can stand in.
     * If the precondition is so restrictive that too many generated inputs are discarded,
       `probe_contract/2` raises `Bond.PropertyTest.FilterTooRestrictiveError`, which names the
       function and suggests narrowing your base generators (or using `StreamData.bind/2` for

@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **Guidance on choosing a generator `probe_contract/2` can actually drive**
+  ([#50](https://github.com/jvoegele/bond/issues/50)). A new section in the testing guide, plus
+  notes on `probe_contract/2` itself, covering the three things that decide whether a property
+  gets off the ground: a generator must satisfy `@pre` at *every* generation size (StreamData
+  ramps the size from 0, so `list_of(gen, length: 4..6)` yields only length-4 lists at the
+  opening sizes and a `@pre` excluding 4 rejects all of them before the size grows); boundaries
+  are read from a bare parameter, not a derived expression such as `length(Path.split(key))`;
+  and boundary probing pays off for *inequality* preconditions, since for an equality one the
+  injected neighbours are exactly what `@pre` discards. Also documents that `probe_contract/2`
+  is turnkey for pure functions, and what to do when the target is impure.
+
+  Derived-size boundary extraction was considered and declined: the motivating case is an
+  equality precondition, where the injected neighbours are filtered out by definition, so it
+  would add no coverage to the example that motivates it.
+
 - **FAQ: "Can I write a contract for the failure path?"**
   ([#33](https://github.com/jvoegele/bond/issues/33)). Documents that `@post` already covers
   failure contracts for failures modelled as values — constraining the set of errors a function
@@ -35,6 +50,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   motivating case is already expressible, and a nested `where` would have to evaluate to `false`
   on a shape mismatch rather than raise (otherwise the left branch of an `or` would blow up
   before the right was tried), leaving one keyword with two failure behaviours.
+
+### Changed
+
+- **`Bond.PropertyTest.FilterTooRestrictiveError` now names the generation-size trap.** Its
+  advice to narrow the base generators is right in spirit but doesn't point at the usual cause,
+  which is a size-dependent generator sitting at the bottom of its range during StreamData's
+  opening low-size runs.
 
 ## [1.13.1] - 2026-07-22
 

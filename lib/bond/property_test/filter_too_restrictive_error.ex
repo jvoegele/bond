@@ -34,7 +34,13 @@ defmodule Bond.PropertyTest.FilterTooRestrictiveError do
 
     Narrow your base generators so they produce valid inputs more often, or use StreamData.bind/2 \
     to build inputs that satisfy a relational precondition (e.g. `amount <= account.balance`), \
-    which boundary injection can't probe for you.\
+    which boundary injection can't probe for you.
+
+    A generator must satisfy @pre at *every* generation size, not just on average. StreamData \
+    ramps the size up from 0, and a size-dependent generator sits at the bottom of its range \
+    early on: `StreamData.list_of(gen, length: 4..6)` yields only length-4 lists at the opening \
+    sizes, so a `@pre` excluding 4 rejects every one of them and the run ends before the size \
+    grows. Pin the size instead (`length: 5`) when the precondition constrains it.\
     #{last_generated_hint(error.last_generated_value)}
     """
   end
