@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.13.2] - 2026-07-23
+
+A documentation and diagnostics release. Three feature requests were investigated and declined
+after their motivating examples turned out to be expressible with what already ships; each is
+answered here with guidance, and two with a clearer diagnostic pointing at the alternative.
+
 ### Added
 
 - **Guidance on choosing a generator `probe_contract/2` can actually drive**
