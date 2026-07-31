@@ -24,6 +24,10 @@ defmodule Bond.PropertyTest.ServerSequence do
   ops; `StreamData`'s `list_of` shrinker minimises the failing sequence for free.
   """
 
+  # See the note in `Bond.PropertyTest`: `stream_data` is optional, so these remote
+  # calls must not warn when it is absent.
+  @compile {:no_warn_undefined, StreamData}
+
   @type category :: :call | :cast | :info
   @typedoc "One message op: a category and the term sent/handled."
   @type op :: {category(), term()}
