@@ -406,7 +406,14 @@ defmodule Bond.Compiler.AnnotatedFunction do
   #   - inv_mode != :purge (user hasn't explicitly opted out)
   #   - resolved warn flag is true (per-function override > module/global config)
   #   - no clause has either a struct in head or a statically-detectable struct
-  #     return (so invariants are truly skipped both on entry and exit)
+  #     return, AND no clause mentions the struct anywhere at all (#80)
+  #
+  # The second condition is the one that keeps this honest. The post-invariant
+  # check is emitted unconditionally and matches the return value's shape at
+  # runtime, so a function returning the struct by any means has its invariants
+  # checked on exit — even when the static heuristic cannot see it. Warning on
+  # the strength of the heuristic alone fired on functions that were demonstrably
+  # covered. See `Invariants.any_clause_mentions_struct?/2`.
   defp maybe_warn_skipped_invariants(
          %__MODULE__{kind: :def, invariants: [_ | _], module: struct_module} = annotated_function,
          inv_mode,
@@ -417,6 +424,10 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
     if warn? and
          not Invariants.any_clause_checks_invariants?(
+           annotated_function.clauses,
+           struct_module
+         ) and
+         not Invariants.any_clause_mentions_struct?(
            annotated_function.clauses,
            struct_module
          ) do
@@ -456,9 +467,12 @@ defmodule Bond.Compiler.AnnotatedFunction do
          arity: arity
        }) do
     "public function `#{fun}/#{arity}` in invariant-declaring module " <>
-      "`#{inspect(module)}` has no clause that pattern-matches the struct " <>
-      "or returns one; invariants are skipped here. If intentional, " <>
-      "suppress with `@bond_warn_skipped_invariants false` (per function), " <>
+      "`#{inspect(module)}` never mentions the struct: no clause matches " <>
+      "`%#{inspect(module)}{}` in its head or builds one in its body, so the " <>
+      "entry check is skipped and invariants are skipped here. (The exit check " <>
+      "still fires if this function returns a `%#{inspect(module)}{}` at " <>
+      "runtime.) If intentional, suppress with " <>
+      "`@bond_warn_skipped_invariants false` (per function), " <>
       "`use Bond, warn_skipped_invariants: false` (per module), or " <>
       "`config :bond, warn_skipped_invariants: false` (globally)."
   end

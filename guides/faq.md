@@ -533,12 +533,17 @@ struct parameter in the function head and pre-checks against it:
 - **Never for `defp`** — private functions are exempt by the Eiffel
   convention (they often hold transiently-invalid state mid-operation).
 
-If a function has neither a struct-matching head **nor** a return
-value Bond recognises as the struct (a literal `%__MODULE__{}` or
-`{:ok, %__MODULE__{}}`), both the on-entry and on-exit checks are
-skipped — invariants don't fire for that function at all. The other
-contract kinds still apply. Bond emits a compile-time warning when it
-detects this case — see the next entry.
+The on-exit check is a **runtime** shape test, not a static one: it is
+emitted for every public function in an invariant-declaring module and
+matches whatever the function actually returns. So it fires no matter
+*how* the struct was built — `struct/2`, a `case`, a helper call, a
+pipeline. Only the on-entry check depends on Bond recognising a shape
+at compile time.
+
+A function with neither a struct-matching head **nor** a struct-shaped
+return value skips invariants entirely; the other contract kinds still
+apply. Bond emits a compile-time warning when it can see that coming —
+see the next entry.
 
 Violations raise `Bond.InvariantError` and emit `[:bond, :assertion, :failure]`
 telemetry with `:kind => :invariant`. See the
@@ -551,44 +556,49 @@ You're seeing something like:
 
 ```
 public function `update/2` in invariant-declaring module
-`MyApp.BoundedStack` has no clause that pattern-matches the struct or
-returns one; invariants are skipped here. If intentional, suppress
-with `@bond_warn_skipped_invariants false` (per function), `use Bond,
+`MyApp.BoundedStack` never mentions the struct: no clause matches
+`%MyApp.BoundedStack{}` in its head or builds one in its body, so the
+entry check is skipped and invariants are skipped here. (The exit check
+still fires if this function returns a `%MyApp.BoundedStack{}` at
+runtime.) If intentional, suppress with
+`@bond_warn_skipped_invariants false` (per function), `use Bond,
 warn_skipped_invariants: false` (per module), or `config :bond,
 warn_skipped_invariants: false` (globally).
 ```
 
 Bond's invariants fire in two places: on entry (when the function head
 pattern-matches the struct, giving Bond a `subject` to bind) and on
-exit (when the return value is a literal `%__MODULE__{}` or
-`{:ok, %__MODULE__{}}`). Bond warns when a public function (`def`, not
-`defp`) in an invariant-declaring module has **neither** mechanism —
-neither a struct-matching head nor a statically-detectable struct
-return. In that case both the on-entry and on-exit checks are skipped,
-and the function silently bypasses invariants entirely.
+exit (a runtime shape test on the return value). The warning fires when
+a public function (`def`, not `defp`) in an invariant-declaring module
+**never mentions the struct at all** — no `%__MODULE__{}` pattern or
+literal anywhere in the head, guards, or body, and no
+`struct/2`/`struct!/2` call naming the module.
 
-The detection is intentionally conservative on the post-side: only the
-literal shapes `%__MODULE__{...}` and `{:ok, %__MODULE__{...}}` (or
-the same as the last expression of a block) suppress the warning.
-Functions that build the struct via a helper call (`def from_map(m),
-do: build(m)`) still warn, because Bond can't tell statically that the
-helper returns a struct — use per-function suppression there.
-
-A **build-style constructor** that assembles the struct in a variable
-and returns it wrapped trips this too:
+That is deliberately a wide net, because the exit check is a runtime
+test and Bond cannot prove statically that it won't fire. If the struct
+appears anywhere in the clause, Bond stays quiet — a function that
+plainly handles the struct is not the footgun this warning is for:
 
 ```elixir
+# All of these are silent: the struct is mentioned, so the runtime
+# post-check has something to match, and it does.
+def unwrap({:wrapped, %__MODULE__{} = s}), do: s   # nested in a pattern
+def new(v), do: struct(__MODULE__, v: v)           # dynamic constructor
+
 def build(opts) do
   state = %__MODULE__{count: opts[:count]}
-  {:ok, state}   # Bond sees `{:ok, <variable>}`, not a literal struct
+  {:ok, state}                                     # struct in a variable
 end
 ```
 
-The runtime post-check still fires on the returned value, so the
-invariant *is* enforced — the warning only means Bond couldn't prove it
-statically. This is the common shape for an `invariants_hold/2` target's
-constructor, so expect the warning there and suppress it per function
-with `@bond_warn_skipped_invariants false`.
+> #### This warning used to be noisier {: .info}
+>
+> Earlier versions ran this check on a narrow static heuristic — only a
+> literal `%__MODULE__{...}` or `{:ok, %__MODULE__{...}}` return
+> suppressed it — so all three functions above warned even though their
+> invariants demonstrably ran. If you suppressed those with
+> `@bond_warn_skipped_invariants false`, the suppression is now
+> unnecessary and can be removed. It remains harmless.
 
 **If the function is supposed to operate on the struct**, the fix is
 usually a missing pattern or guard on the head:
@@ -607,8 +617,7 @@ See "When does Bond check invariants?" above for every shape Bond
 detects on entry, and the shapes it recognises on exit.
 
 **If the function is genuinely not about the struct** (a utility
-function, a class-name helper, a constructor whose body Bond can't
-statically read as a struct return), suppress the warning at the right
+function, a class-name helper), suppress the warning at the right
 scope. From narrowest to broadest:
 
 ```elixir

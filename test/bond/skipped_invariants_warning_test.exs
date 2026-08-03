@@ -45,6 +45,27 @@ defmodule Bond.SkippedInvariantsWarningTest do
              }) == 7
     end
 
+    test "invariants really are enforced where the struct is nested or built dynamically" do
+      # The point of #80: the warning's silence for these has to be *earned*.
+      # Each of these compiled without a warning (the fixture module is
+      # unsuppressed), and each raises here — so the invariant genuinely runs,
+      # via the unconditional runtime post-check.
+      alias BondTest.SkippedInvariants.StructPositions, as: SP
+
+      bad = struct(SP, v: -5)
+
+      assert_raise Bond.InvariantError, fn -> SP.from_tuple({:wrapped, bad}) end
+      assert_raise Bond.InvariantError, fn -> SP.from_map(%{payload: bad}) end
+      assert_raise Bond.InvariantError, fn -> SP.from_list([bad]) end
+      assert_raise Bond.InvariantError, fn -> SP.via_struct_fun(-5) end
+      assert_raise Bond.InvariantError, fn -> SP.via_case(-5) end
+
+      # And the happy path still returns normally.
+      good = struct(SP, v: 5)
+      assert SP.from_tuple({:wrapped, good}) == good
+      assert SP.via_struct_fun(5) == good
+    end
+
     test "multi-clause def where ONE clause matches the struct does not warn" do
       # Mixed-match → at least one clause runs invariants. No footgun, no warn.
       assert %BondTest.SkippedInvariants.MixedClauses{value: 3} =
@@ -337,6 +358,110 @@ defmodule Bond.SkippedInvariantsWarningTest do
                d.severity == :warning and String.contains?(d.message, "update/2")
              end),
              "expected a warning for the genuine footgun (Map.put return); got #{inspect(diagnostics)}"
+    end
+
+    # Issue #80. The pre-check detection reads top-level head parameters, and the
+    # post-check detection reads two literal return shapes. Neither limit means
+    # invariants are skipped: the post-invariant check is emitted unconditionally
+    # and matches the return value's shape at runtime, so any function that
+    # produces the struct is covered. The warning used to fire on all of these.
+    # `MOD` is substituted with a per-case module name: all of these compile in
+    # the same VM, so a shared name would only produce "redefining module".
+    for {{label, definition}, index} <-
+          Enum.with_index([
+            {"nested in a tuple", "def unwrap({:wrapped, %__MODULE__{} = s}), do: s"},
+            {"nested in a map", "def unwrap(%{payload: %__MODULE__{} = s}), do: s"},
+            {"nested in a list", "def unwrap([%__MODULE__{} = s]), do: s"},
+            {"built with struct/2", "def new(v), do: struct(__MODULE__, v: v)"},
+            {"built with struct!/2", "def new(v), do: struct!(__MODULE__, v: v)"},
+            {"returned from a case",
+             "def new(v), do: (case v do\n  _ -> %__MODULE__{v: v}\nend)"},
+            {"returned from a pipe", "def new(v), do: v |> then(&%__MODULE__{v: &1})"},
+            {"named by an explicit alias rather than __MODULE__",
+             "def unwrap({:wrapped, %MOD{} = s}), do: s"}
+          ]) do
+      test "does NOT fire when the struct is #{label}" do
+        module = "BondTest.SkippedScratch.Positions#{unquote(index)}"
+
+        source =
+          """
+          defmodule MOD do
+            use Bond
+            defstruct [:v]
+            @invariant positive: subject.v > 0
+
+            #{unquote(definition)}
+          end
+          """
+          |> String.replace("MOD", module)
+
+        diagnostics = capture_diagnostics(source)
+
+        refute Enum.any?(diagnostics, &(&1.severity == :warning)),
+               "expected no diagnostics when the struct is #{unquote(label)}; " <>
+                 "got #{inspect(diagnostics)}"
+      end
+    end
+
+    test "FIRES exactly once for a single function (not once per hook or clause)" do
+      # #80 reported the warning being emitted twice for one function. Pinned
+      # here so the CI matrix answers it on every supported Elixir.
+      source = """
+      defmodule BondTest.SkippedScratch.EmittedOnce do
+        use Bond
+        defstruct [:value]
+        @invariant subject.value >= 0
+
+        def label, do: "hello"
+      end
+      """
+
+      warnings = capture_diagnostics(source) |> Enum.filter(&(&1.severity == :warning))
+
+      assert length(warnings) == 1,
+             "expected exactly one warning for label/0; got #{inspect(warnings)}"
+    end
+
+    test "FIRES exactly once for a multi-clause function" do
+      source = """
+      defmodule BondTest.SkippedScratch.EmittedOnceMultiClause do
+        use Bond
+        defstruct [:value]
+        @invariant subject.value >= 0
+
+        def label(:a), do: "a"
+        def label(:b), do: "b"
+        def label(_), do: "other"
+      end
+      """
+
+      warnings = capture_diagnostics(source) |> Enum.filter(&(&1.severity == :warning))
+
+      assert length(warnings) == 1,
+             "expected exactly one warning for label/1 across three clauses; " <>
+               "got #{inspect(warnings)}"
+    end
+
+    test "the message no longer claims total non-coverage" do
+      # The old wording said "invariants are skipped here" full stop, which was
+      # false whenever the exit check applied. It now says which check is
+      # skipped and which still fires.
+      source = """
+      defmodule BondTest.SkippedScratch.MessageAccuracy do
+        use Bond
+        defstruct [:value]
+        @invariant subject.value >= 0
+
+        def util(x), do: x
+      end
+      """
+
+      warning = capture_diagnostics(source) |> Enum.find(&(&1.severity == :warning))
+
+      assert warning
+      assert String.contains?(warning.message, "never mentions the struct")
+      assert String.contains?(warning.message, "entry check is skipped")
+      assert String.contains?(warning.message, "exit check still fires")
     end
 
     test "does NOT fire for a module with no @invariant declarations" do

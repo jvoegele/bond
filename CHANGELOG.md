@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **`warn_skipped_invariants` no longer fires on functions whose invariants demonstrably run**
+  ([#80](https://github.com/jvoegele/bond/issues/80)). The warning decided whether invariants were
+  skipped from a static heuristic: a struct pattern among the *top-level* head parameters, or a
+  return of a *literal* `%__MODULE__{...}` / `{:ok, %__MODULE__{...}}`. But the post-invariant
+  check is emitted unconditionally and matches the return value's shape at **runtime**, so a
+  function that produces the struct is covered however it was built. The two were not the same
+  question, and the gap was wide — measured against a six-case matrix, the warning fired on four
+  functions, three of which raised `Bond.InvariantError` exactly as intended:
+
+  ```elixir
+  def unwrap({:wrapped, %__MODULE__{} = s}), do: s   # struct nested in a pattern
+  def new(v), do: struct(__MODULE__, v: v)           # dynamic constructor
+  def new(v), do: case v do _ -> %__MODULE__{v: v} end
+  ```
+
+  The warning now fires only when a clause never mentions the struct at all — no `%Struct{}`
+  pattern or literal anywhere in the head, guards, or body, and no `struct/2`/`struct!/2` call
+  naming the module. Erring toward silence is the right bias for a warning whose failure mode is
+  teaching people to suppress it wholesale, which takes the true positives with it.
+
+  The message no longer claims total non-coverage either. It now names which check is skipped
+  (entry) and which still applies (exit), so the remaining undecidable cases — a function that
+  returns a struct fetched from elsewhere — read as the caution they are rather than a false
+  statement of fact.
+
+  Any `@bond_warn_skipped_invariants false` added to work around the old behavior is now
+  unnecessary, and harmless to leave in place.
+
 - **Installing Bond without `stream_data` no longer emits 15 compile warnings**
   ([#76](https://github.com/jvoegele/bond/issues/76)). `stream_data` is an optional dependency,
   but the three `Bond.PropertyTest` modules that call it were compiled unconditionally, so every
