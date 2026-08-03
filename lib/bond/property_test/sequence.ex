@@ -33,6 +33,10 @@ defmodule Bond.PropertyTest.Sequence do
   it as a property failure with shrinking.
   """
 
+  # See the note in `Bond.PropertyTest`: `stream_data` is optional, so these remote
+  # calls must not warn when it is absent.
+  @compile {:no_warn_undefined, StreamData}
+
   @type op_spec :: {atom(), [StreamData.t(any())]}
   @type module_name :: module()
 

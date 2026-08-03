@@ -166,3 +166,53 @@ jobs:
       - run: mix compile --warnings-as-errors
       - run: mix test
       - run: mix dialyzer --format github
+
+  # The `downstream` consumer above declares `stream_data`, so it cannot see
+  # warnings that only appear when Bond's optional dependency is absent — the
+  # default adoption path, and the one issue #76 was about. This job builds a
+  # throwaway app that depends on Bond and nothing else, and fails on any
+  # warning. The app is generated here rather than checked in because its whole
+  # point is that it has no source and no deps of its own.
+  no_optional_deps:
+    name: Adopter without stream_data (no compile warnings)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: bond
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27.2"
+          elixir-version: "1.18.3"
+      - name: Generate an app that depends on Bond alone
+        run: |
+          mix new adopter
+          cat > adopter/mix.exs <<'EOF'
+          defmodule Adopter.MixProject do
+            use Mix.Project
+
+            def project do
+              [app: :adopter, version: "0.1.0", elixir: "~> 1.16", deps: deps()]
+            end
+
+            def application, do: [extra_applications: [:logger]]
+
+            # Bond and nothing else -- deliberately no stream_data.
+            defp deps, do: [{:bond, path: "../bond"}]
+          end
+          EOF
+      # `--warnings-as-errors` is deliberately NOT used here: it applies to the
+      # current project's own compilation, and every warning this job exists to
+      # catch comes from Bond, a *dependency* of the generated app. Verified: with
+      # the warnings present, `mix compile --warnings-as-errors` still exits 0.
+      # Inspecting the compile output is what actually discriminates.
+      - name: Compile and fail on any warning
+        working-directory: adopter
+        run: |
+          set -o pipefail
+          mix deps.get
+          mix compile 2>&1 | tee compile.log
+          if grep -q "warning:" compile.log; then
+            echo "::error::Compiling Bond without stream_data produced warnings (see the log above)."
+            exit 1
+          fi

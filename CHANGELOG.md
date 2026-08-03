@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Installing Bond without `stream_data` no longer emits 15 compile warnings**
+  ([#76](https://github.com/jvoegele/bond/issues/76)). `stream_data` is an optional dependency,
+  but the three `Bond.PropertyTest` modules that call it were compiled unconditionally, so every
+  adopter who did not use property testing saw a wall of
+  `StreamData.bind/2 is undefined (module StreamData is not available or is yet to be defined)`
+  the first time they compiled Bond — the default adoption path, and a user's first impression of
+  the library. The existing `Code.ensure_loaded?/1` guards are *runtime* checks and correctly
+  prevented a crash, but the compiler still resolved the remote calls and warned. The three
+  modules now carry `@compile {:no_warn_undefined, StreamData}`, the idiomatic opt-out for an
+  optional dependency, leaving the runtime guards to do their job.
+
+  A new CI job guards against the regression by compiling a generated app that depends on Bond
+  and nothing else, and failing on any warning. Bond's own suite cannot catch this class of bug,
+  because it always has `stream_data` available — as does the existing downstream consumer
+  project.
+
 ## [1.13.2] - 2026-07-23
 
 A documentation and diagnostics release. Three feature requests were investigated and declined

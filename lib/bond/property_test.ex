@@ -81,6 +81,12 @@ defmodule Bond.PropertyTest do
   Then run `mix deps.get`.
   """
 
+  # `stream_data` is an optional dependency, so `StreamData` is genuinely absent for
+  # adopters who don't use property testing. The calls below are reached only through
+  # macros guarded by `Code.ensure_loaded?(StreamData)`, but that is a runtime check —
+  # the compiler still resolves the remote calls and would warn on every such install.
+  @compile {:no_warn_undefined, StreamData}
+
   @doc """
   When `use`d in an ExUnit test module, brings in `ExUnitProperties` (for the underlying
   `property/2` and `check all` macros) and imports `Bond.PropertyTest` so `contract_holds`

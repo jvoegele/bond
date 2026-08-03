@@ -58,9 +58,13 @@ defmodule Bond.MixProject do
       {:telemetry, "~> 1.0"},
       # `stream_data` is optional: users who want property-based testing via
       # `Bond.PropertyTest` add it to their own deps; everyone else doesn't pay the cost.
-      # Marked `optional: true` so it's available for Bond's own test suite (and to lib/
-      # references guarded by `Code.ensure_loaded?/1`) without becoming a transitive dep
-      # for downstream apps.
+      # Marked `optional: true` so it's available for Bond's own test suite without becoming
+      # a transitive dep for downstream apps.
+      #
+      # The lib/ references are guarded two ways, because one guard is not enough: at runtime
+      # by `Code.ensure_loaded?/1`, and at compile time by `@compile {:no_warn_undefined,
+      # StreamData}` in the three `Bond.PropertyTest` modules. The runtime guard alone still
+      # let the compiler resolve the remote calls and warn — see issue #76.
       {:stream_data, "~> 1.0", optional: true},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
