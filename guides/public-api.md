@@ -149,8 +149,8 @@ any `:overrides` entry that matches the module:
     module?"
   * `:warn_skipped_invariants` — boolean (default `true`). Controls the
     compile-time warning Bond emits when a public function in an
-    invariant-declaring module has no clause that pattern-matches the
-    struct or returns one. See the FAQ entry "Why is Bond warning about
+    invariant-declaring module never mentions the struct at all, so its
+    invariants are skipped. See the FAQ entry "Why is Bond warning about
     skipped invariants?"
   * `:behaviours` — a module or list of `Bond.Behaviour` modules whose callback
     contracts this module inherits and enforces. Also emits `@behaviour` for

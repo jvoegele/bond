@@ -81,6 +81,33 @@ defmodule BondTest.SkippedInvariants.ConstructorReturnsStruct do
   def try_new(_), do: {:error, :invalid}
 end
 
+defmodule BondTest.SkippedInvariants.StructPositions do
+  @moduledoc false
+
+  # Issue #80. The struct is present but not where the *pre*-check detection
+  # looks (top-level head parameters), or is built in a way the *post*-check
+  # heuristic can't read statically. Deliberately unsuppressed: these must
+  # compile silently, because the runtime post-invariant check enforces every
+  # one of them — which the companion test asserts by calling each function
+  # with a struct that violates the invariant.
+  use Bond
+
+  defstruct [:v]
+
+  @invariant positive: subject.v > 0
+
+  def from_tuple({:wrapped, %__MODULE__{} = s}), do: s
+  def from_map(%{payload: %__MODULE__{} = s}), do: s
+  def from_list([%__MODULE__{} = s]), do: s
+  def via_struct_fun(v), do: struct(__MODULE__, v: v)
+
+  def via_case(v) do
+    case v do
+      _ -> %__MODULE__{v: v}
+    end
+  end
+end
+
 defmodule BondTest.SkippedInvariants.MixedClauses do
   @moduledoc false
 

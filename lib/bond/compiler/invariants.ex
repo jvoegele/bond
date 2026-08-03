@@ -112,9 +112,8 @@ defmodule Bond.Compiler.Invariants do
   heuristic is intentionally conservative: it detects the common constructor
   shapes (`%__MODULE__{...}`, `{:ok, %__MODULE__{...}}`, and the same as the last
   expression in a block) but not function calls or branching expressions whose
-  return shape can't be determined statically. Users with constructors that
-  build the struct via a helper call still suppress with
-  `@bond_warn_skipped_invariants false`.
+  return shape can't be determined statically. `any_clause_mentions_struct?/2` is
+  the wider net that keeps that conservatism from producing false warnings.
   """
   @spec any_clause_checks_invariants?([term()], module()) :: boolean()
   def any_clause_checks_invariants?(clauses, struct_module) when is_list(clauses) do
@@ -123,6 +122,83 @@ defmodule Bond.Compiler.Invariants do
         body_returns_struct?(clause.body, struct_module)
     end)
   end
+
+  @doc """
+  Returns `true` when the struct appears *anywhere* in any clause — head, guards,
+  or body — as a `%Struct{}` pattern/literal or a `struct/2`/`struct!/2` call
+  naming the module.
+
+  This is deliberately wider than `any_clause_checks_invariants?/2`, and it exists
+  because the two questions are not the same one (#80):
+
+    * `any_clause_checks_invariants?/2` asks "can Bond *prove* a check fires?",
+      which drives nothing at runtime — it is a static approximation.
+    * The post-invariant check is emitted unconditionally and matches the return
+      value's shape at runtime (see `post_invariant_stmts/5`), so a function that
+      returns the struct by *any* means has its invariants checked on exit,
+      whether or not the static heuristic could see it.
+
+  That gap made the warning fire on functions whose invariants demonstrably do
+  run: a struct matched inside a tuple (`def unwrap({:wrapped, %__MODULE__{} = s}),
+  do: s`), a constructor built with `struct/2`, one returned out of a `case`. A
+  warning that cries wolf gets suppressed wholesale, taking the true positives
+  with it — so the warning now fires only when the struct is not mentioned at all,
+  which is the case where invariants are genuinely, entirely skipped.
+
+  Erring toward silence is the right bias here: a missed warning costs one
+  unchecked function, while a false one costs trust in every warning.
+  """
+  @spec any_clause_mentions_struct?([term()], module()) :: boolean()
+  def any_clause_mentions_struct?(clauses, struct_module) when is_list(clauses) do
+    Enum.any?(clauses, fn clause ->
+      asts = (clause.params || []) ++ (clause.guards || []) ++ clause_body_asts(clause.body)
+      Enum.any?(asts, &mentions_struct?(&1, struct_module))
+    end)
+  end
+
+  defp clause_body_asts(body) when is_list(body), do: Enum.map(body, fn {_key, ast} -> ast end)
+  defp clause_body_asts(_body), do: []
+
+  defp mentions_struct?(ast, struct_module) do
+    {_ast, found?} =
+      Macro.prewalk(ast, false, fn
+        node, true -> {node, true}
+        node, false -> {node, struct_reference?(node, struct_module)}
+      end)
+
+    found?
+  end
+
+  # `%__MODULE__{...}` / `%Struct{...}`, in a pattern or an expression.
+  defp struct_reference?({:%, _, [name | _]}, struct_module),
+    do: module_reference?(name, struct_module)
+
+  # `struct(__MODULE__, ...)` / `struct!(Struct, ...)`, the common dynamic
+  # constructor. Both the bare and `Kernel.`-qualified forms.
+  defp struct_reference?({fun, _, [name | _]}, struct_module) when fun in [:struct, :struct!],
+    do: module_reference?(name, struct_module)
+
+  defp struct_reference?({{:., _, [{:__aliases__, _, [:Kernel]}, fun]}, _, [name | _]}, mod)
+       when fun in [:struct, :struct!],
+       do: module_reference?(name, mod)
+
+  defp struct_reference?(_node, _struct_module), do: false
+
+  # `__MODULE__` is the idiomatic form inside the struct's own module; an explicit
+  # alias is accepted too, matched on the trailing segments so `MyApp.Cart` and a
+  # locally-aliased `Cart` both resolve.
+  defp module_reference?({:__MODULE__, _, _}, _struct_module), do: true
+
+  defp module_reference?({:__aliases__, _, segments}, struct_module)
+       when is_list(segments) do
+    struct_segments = Module.split(struct_module) |> Enum.map(&String.to_atom/1)
+
+    Enum.all?(segments, &is_atom/1) and
+      List.starts_with?(Enum.reverse(struct_segments), Enum.reverse(segments))
+  end
+
+  defp module_reference?(module, struct_module) when is_atom(module), do: module == struct_module
+  defp module_reference?(_name, _struct_module), do: false
 
   # Detects whether a function clause's body statically returns the struct (so
   # the runtime post-invariant check will fire). Returns true for:
