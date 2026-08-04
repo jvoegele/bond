@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+
+- **The README now opens with a contract that a guard could not express**
+  ([#82](https://github.com/jvoegele/bond/issues/82)). It previously led with
+  `@pre positive_amount: amount > 0` and `@pre numeric_x: is_number(x)` — contracts the FAQ
+  correctly explains can never fire, because the guard runs first. A skeptical reader met the
+  weakest case first and had no reason to keep reading.
+
+  The opening example is now relational (`@post debited: result == balance - amount`, which
+  mentions `result` and so has no guard equivalent), followed by the actual failure output, and
+  by the FAQ's framing promoted out of hiding: **guards say what a function accepts; contracts
+  say what it promises**.
+
+  A new "What only a contract can say" section carries a class invariant plus `old/1` — an
+  `add_item/2` that forgets to update a derived total, caught on the way out with the offending
+  state in the binding. Both examples and both diagnostics were run and copied from real output
+  rather than composed.
+
+  Also added: a "When not to reach for Bond" section (guard-enforced constraints, hot paths,
+  type-shaped constraints), and half a sentence on the `Math.sqrt` example noting that its
+  type-check preconditions document the guard rather than replace it.
+
 ### Added
 
 - **`Bond.AssertionEvaluationError`**, raised when an assertion *expression* itself raises rather

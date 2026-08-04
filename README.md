@@ -6,24 +6,102 @@
 
 Design by Contract for Elixir.
 
-Bond lets you attach preconditions and postconditions to your functions and
-verify them at runtime. A contract is a plain Elixir boolean expression with
-optional labels:
+A contract is a plain Elixir expression attached to a function and checked at
+runtime:
 
 ```elixir
 defmodule Account do
   use Bond
 
-  @pre positive_amount: amount > 0
-  @post non_negative_balance: result >= 0
+  @pre sufficient_funds: amount <= balance
+  @post debited: result == balance - amount
   def withdraw(balance, amount), do: balance - amount
 end
 ```
 
-When a contract fails, Bond raises a `Bond.PreconditionError` or
-`Bond.PostconditionError` with the failing assertion's label, expression,
-location, and the local binding — telling you exactly what went wrong and
-where.
+`@pre` states what the caller must satisfy. `@post` states what the function
+promises in return — and it mentions `result`, the return value, which a `when`
+guard cannot do at all.
+
+When a contract fails, Bond tells you which one, and on what input:
+
+```
+# Account.withdraw(100, 250)
+** (Bond.PreconditionError) precondition failed for call to Account.withdraw/2
+|   at: lib/account.ex:4
+|   label: :sufficient_funds
+|   assertion: amount <= balance
+|   binding: [amount: 250, balance: 100]
+```
+
+That is the division of labour worth keeping in mind: **guards say what a
+function accepts; contracts say what it promises** — the relationships between
+arguments, and between arguments and the result. Guards and patterns stay
+exactly where they are; contracts are an additive layer over them, not a
+replacement (see
+[Should I remove guards when I add contracts?](guides/faq.md#should-i-remove-guards-and-pattern-matches-when-i-add-contracts)).
+
+## What only a contract can say
+
+The example above is deliberately small. The reason to reach for contracts is
+the properties that have nowhere else to live:
+
+```elixir
+defmodule Cart do
+  use Bond
+
+  defstruct items: [], total_cents: 0
+
+  # Must hold before and after every public function in this module.
+  @invariant total_matches_items:
+               subject.total_cents == Enum.sum(Enum.map(subject.items, & &1.cents))
+
+  # `old(...)` snapshots a value before the call, so a postcondition can relate
+  # the state afterwards to the state before.
+  @post added_one: length(result.items) == length(old(cart.items)) + 1
+  def add_item(%Cart{} = cart, item) do
+    %{cart | items: [item | cart.items]}
+  end
+end
+```
+
+`add_item/2` forgot to update `total_cents`. No guard, typespec, or pattern
+would catch that — but the invariant is checked around every public function, so
+it fails on the way out and hands you the offending state:
+
+```
+# Cart.add_item(%Cart{}, %{sku: "A", cents: 500})
+** (Bond.InvariantError) invariant violated around Cart.add_item/2
+|   at: lib/cart.ex:7
+|   label: :total_matches_items
+|   assertion: subject.total_cents == Enum.sum(Enum.map(subject.items, & &1.cents))
+|   binding: [subject: %Cart{items: [%{cents: 500, sku: "A"}], total_cents: 0}]
+```
+
+Three things there are beyond a guard's reach: a **class invariant** enforced at
+every boundary of the module, a postcondition relating the result to the
+**pre-call state** via `old/1`, and a failure message naming the property that
+broke and the value that broke it. Contracts also double as
+[property-test oracles](guides/testing-contracts.md) and can be
+[inherited from a behaviour](guides/contract-inheritance.md), so the same
+statement is checked in every implementation.
+
+## When not to reach for Bond
+
+Volunteering the boundary is more useful than overselling:
+
+  * **Anything a guard already enforces.** `@pre is_binary(name)` next to
+    `when is_binary(name)` is documentation, not enforcement — the guard runs
+    first, so the precondition can never fire. Write the guard; add the `@pre`
+    only if you want it in the generated docs.
+  * **Hot paths.** Contracts cost real nanoseconds per call. They can be
+    disabled at runtime or compiled out entirely with `:purge`, so the usual
+    answer is to leave them on in dev and test and purge them in production —
+    see the [Overhead](guides/overhead.md) guide for measured figures.
+  * **Type-shaped constraints alone.** If all you want to say is "this is an
+    integer", a typespec plus Dialyzer says it at compile time and costs nothing
+    at runtime. Contracts earn their keep on the *relationships* types cannot
+    express.
 
 Bond is an implementation of the
 [Design by Contract](https://en.wikipedia.org/wiki/Design_by_contract)
@@ -50,6 +128,13 @@ defmodule Math do
   def sqrt(x), do: :math.sqrt(x)
 end
 ```
+
+This one is chosen to show the syntax rather than to argue the case: the two
+preconditions restate what a `when is_number(x) and x >= 0` guard would enforce,
+so as written they document the guard rather than replace it. The three
+implication clauses (`~>`) are the interesting half — each relates the input to
+the result, which no guard can express. See
+[Should I remove guards when I add contracts?](guides/faq.md#should-i-remove-guards-and-pattern-matches-when-i-add-contracts).
 
 `@pre` and `@post` accept one or more labelled assertions. Preconditions
 have access to the function's parameters; postconditions also have access
