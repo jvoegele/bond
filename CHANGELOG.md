@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **Bond's own generated variable names no longer appear in the `binding:` of a violation**
+  ([#78](https://github.com/jvoegele/bond/issues/78)). The binding snapshot is one of the best
+  things about a Bond diagnostic, so a name the user never wrote reads as internals leaking out.
+  Two could reach it, and they needed different treatment:
+
+  - `bond_invariant_value` is a **pure duplicate** — the invariant body binds `subject` to exactly
+    that value, so every struct-invariant violation printed the same struct twice under two names.
+    It is dropped. (If `subject` were somehow absent it is renamed rather than dropped, so the
+    value can never be lost.)
+  - `bond_arg_<idx>` is **not** redundant: it is the synthesised canonical for a position whose
+    clauses disagreed on a name, and the only representation of that argument in the binding, so
+    dropping it would lose information. It now renders as `arg_<idx + 1>` — 1-based, because that
+    is how people refer to "the first argument", and positional rather than borrowed from one
+    clause, since a name taken from the first clause would be wrong for a call that matched a
+    different one. The rename backs off if the user already has a variable of that name, rather
+    than producing two identical keys.
+
+  The filter sits at the single point where a failure captures its binding, so it applies to the
+  exception message and to the `[:bond, :assertion, :failure]` telemetry metadata alike, and runs
+  only on the failure path — where the snapshot is already captured lazily — so nothing changes on
+  the happy path.
+
+  Error-message text is outside the semver contract (see the Stability guide), but telemetry
+  `:binding` is a documented metadata key: **a handler matching on `:bond_invariant_value` or
+  `:bond_arg_0` will no longer find them.** Matching on the names a user actually wrote is
+  unaffected.
+
 - **`use Bond` no longer degrades the stacktrace of an ordinary `FunctionClauseError`**
   ([#75](https://github.com/jvoegele/bond/issues/75)). A call matching no clause of a contracted
   function raised with **no file/line at all**, and reported a compiler-internal name:

@@ -323,7 +323,51 @@ defmodule Bond.Runtime.Eval do
         detail -> Map.put(assertion_info, :quantifier, detail)
       end
 
-    throw({:assertion_failure, Map.put(assertion_info, :binding, Enum.sort(binding))})
+    throw({:assertion_failure, Map.put(assertion_info, :binding, present_binding(binding))})
+  end
+
+  # The binding snapshot is the user's window into a failed assertion, so it should
+  # hold only names the user wrote. Two Bond-generated names can reach it (#78):
+  #
+  #   * `bond_invariant_value` — the struct the invariant is checked against. The
+  #     invariant body binds `subject` to exactly this value, so it is a pure
+  #     duplicate and is dropped. Should `subject` somehow be absent it is renamed
+  #     rather than dropped, so the value is never lost.
+  #
+  #   * `bond_arg_<idx>` — the synthesised canonical name for a position whose
+  #     clauses disagreed on what to call it. Unlike the above it is the *only*
+  #     representation of that argument, so dropping it would lose information. It
+  #     becomes `arg_<idx + 1>`: 1-based, because that is how people refer to "the
+  #     first argument", and positional rather than borrowed from one clause,
+  #     because a name taken from the first clause would be wrong for a call that
+  #     matched a different one.
+  #
+  # This runs only on the failure path, where the snapshot is captured lazily
+  # anyway, so the happy path is unaffected.
+  defp present_binding(binding) do
+    subject? = Keyword.has_key?(binding, :subject)
+
+    binding
+    |> Enum.flat_map(fn
+      {:bond_invariant_value, value} ->
+        if subject?, do: [], else: [{:subject, value}]
+
+      {name, value} ->
+        [{present_name(name, binding), value}]
+    end)
+    |> Enum.sort()
+  end
+
+  defp present_name(name, binding) do
+    with "bond_arg_" <> index <- Atom.to_string(name),
+         {idx, ""} <- Integer.parse(index),
+         renamed = :"arg_#{idx + 1}",
+         # Never shadow a variable the user actually named `arg_N`.
+         false <- Keyword.has_key?(binding, renamed) do
+      renamed
+    else
+      _ -> name
+    end
   end
 
   @spec evaluate_preconditions(assertion_fun()) :: term()

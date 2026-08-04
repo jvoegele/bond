@@ -379,7 +379,10 @@ Public fields on every error struct:
   * `:line` — `integer()`.
   * `:module` — `module()`.
   * `:function` — `{name :: atom(), arity :: non_neg_integer()}` tuple.
-  * `:binding` — `keyword()` of in-scope variables at the assertion site.
+  * `:binding` — `keyword()` of in-scope variables at the assertion site. Bond's
+    own generated variables are filtered out, so the keys are names you wrote,
+    with one exception: an argument whose clauses disagreed on a name has no name
+    to show, and appears under a 1-based positional label (`arg_1`, `arg_2`, …).
   * `:source_behaviour` — `module() | nil`. The behaviour an inherited contract
     came from (`Bond.Behaviour`), or `nil`.
   * `:source_protocol` — `module() | nil`. The protocol a contract was declared
