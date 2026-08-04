@@ -13,9 +13,13 @@ runtime:
 defmodule Account do
   use Bond
 
-  @pre sufficient_funds: amount <= balance
-  @post debited: result == balance - amount
-  def withdraw(balance, amount), do: balance - amount
+  defstruct [:balance]
+
+  @pre sufficient_funds: amount <= account.balance
+  @post debited: result.balance == account.balance - amount
+  def withdraw(%Account{} = account, amount) do
+    %{account | balance: account.balance - amount}
+  end
 end
 ```
 
@@ -26,12 +30,12 @@ guard cannot do at all.
 When a contract fails, Bond tells you which one, and on what input:
 
 ```
-# Account.withdraw(100, 250)
+# Account.withdraw(%Account{balance: 100}, 250)
 ** (Bond.PreconditionError) precondition failed for call to Account.withdraw/2
-|   at: lib/account.ex:4
+|   at: lib/account.ex:6
 |   label: :sufficient_funds
-|   assertion: amount <= balance
-|   binding: [amount: 250, balance: 100]
+|   assertion: amount <= account.balance
+|   binding: [account: %Account{balance: 100}, amount: 250]
 ```
 
 That is the division of labour worth keeping in mind: **guards say what a

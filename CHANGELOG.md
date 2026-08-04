@@ -15,8 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   correctly explains can never fire, because the guard runs first. A skeptical reader met the
   weakest case first and had no reason to keep reading.
 
-  The opening example is now relational (`@post debited: result == balance - amount`, which
-  mentions `result` and so has no guard equivalent), followed by the actual failure output, and
+  The opening example is now relational and struct-based
+  (`@post debited: result.balance == account.balance - amount`, which mentions `result` and so has
+  no guard equivalent), followed by the actual failure output, and
   by the FAQ's framing promoted out of hiding: **guards say what a function accepts; contracts
   say what it promises**.
 
