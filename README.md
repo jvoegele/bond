@@ -23,9 +23,10 @@ defmodule Account do
 end
 ```
 
-`@pre` states what the caller must satisfy. `@post` states what the function
-promises in return — and it mentions `result`, the return value, which a `when`
-guard cannot do at all.
+`@pre` declares a **precondition** — what the caller must satisfy for the call to
+be valid. `@post` declares a **postcondition** — what the function promises in
+return, provided the precondition held. A postcondition can mention `result`, the
+function's return value, which a `when` guard cannot do at all.
 
 When a contract fails, Bond tells you which one, and on what input:
 
@@ -91,24 +92,31 @@ broke and the value that broke it. Contracts also double as
 [inherited from a behaviour](guides/contract-inheritance.md), so the same
 statement is checked in every implementation.
 
-## When not to reach for Bond
+## You choose what they cost
 
-Volunteering the boundary is more useful than overselling:
+Contracts are checked at runtime, so they are not free — the
+[Overhead](guides/overhead.md) guide publishes measured per-call figures. What
+makes that affordable is that the decision is yours, per environment and per
+contract kind:
 
-  * **Anything a guard already enforces.** `@pre is_binary(name)` next to
-    `when is_binary(name)` is documentation, not enforcement — the guard runs
-    first, so the precondition can never fire. Write the guard; add the `@pre`
-    only if you want it in the generated docs.
-  * **Hot paths.** Contracts cost real nanoseconds per call. They can be
-    switched off at runtime, or removed at compile time so that not even the
-    check remains (the `:purge` setting, covered under
-    [Configuring Contracts](guides/configuration.md)). The usual
-    answer is to leave them on in dev and test and purge them in production —
-    see the [Overhead](guides/overhead.md) guide for measured figures.
-  * **Type-shaped constraints alone.** If all you want to say is "this is an
-    integer", a typespec plus Dialyzer says it at compile time and costs nothing
-    at runtime. Contracts earn their keep on the *relationships* types cannot
-    express.
+```elixir
+# config/prod.exs
+config :bond, preconditions: :purge, postconditions: :purge, invariants: :purge
+```
+
+Purged contracts are not compiled in at all — there is no check to skip, and the
+function runs exactly as if the contract had never been written. Your published
+documentation still shows it, because `mix docs` runs in `:dev` where contracts
+are enabled: the contract stays part of the module's stated interface even in
+builds that do not check it.
+
+Between "on" and "purged" there is a third setting that compiles the check in but
+leaves it switched off, so a release can run with contracts inert and have them
+enabled from a remote console while a problem is being diagnosed. See
+[Configuring Contracts](guides/configuration.md).
+
+The usual arrangement is contracts on in dev and test, purged in production —
+which is why it is worth writing the expensive, interesting ones.
 
 Bond is an implementation of the
 [Design by Contract](https://en.wikipedia.org/wiki/Design_by_contract)
@@ -138,9 +146,11 @@ machinery, and the runtime side is plain function calls.
 Bond does more than the two examples above. The rest of the documentation is
 organised around the questions that tend to arrive in this order:
 
-  * **Still evaluating?** The examples above are the argument, and
-    [When not to reach for Bond](#module-when-not-to-reach-for-bond) is the other
-    half of it. Nothing else is needed to judge whether Bond is for you.
+  * **Still evaluating?** The two examples above are the argument. The
+    [FAQ](guides/faq.md) answers the comparisons that usually decide it —
+    ["What does Bond do that typespecs don't?"](guides/faq.md#what-does-bond-do-that-typespecs-don-t)
+    and
+    ["Should I remove guards when I add contracts?"](guides/faq.md#should-i-remove-guards-and-pattern-matches-when-i-add-contracts).
   * **[Getting Started](guides/getting-started.md)** — a walkthrough that builds
     one example at a time. The place to go next.
   * **[Writing Contracts](guides/writing-contracts.md)** — the full reference for

@@ -50,9 +50,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   state in the binding. Both examples and both diagnostics were run and copied from real output
   rather than composed.
 
-  Also added: a "When not to reach for Bond" section (guard-enforced constraints, hot paths,
-  type-shaped constraints), and half a sentence on the `Math.sqrt` example noting that its
-  type-check preconditions document the guard rather than replace it.
+  The opening also now names the concepts the annotations abbreviate — a reader met `@pre` and
+  `@post`, and then a `Bond.PreconditionError`, without ever being given the words *precondition*
+  and *postcondition*. And half a sentence on the `Math.sqrt` example notes that its type-check
+  preconditions document the guard rather than replace it.
+
+  A "When not to reach for Bond" section was added and then removed before release. Of its three
+  points, two were strengths written as concessions — the guards-versus-contracts division, which
+  the pitch already states positively, and the runtime cost, which is really the story that
+  contracts can be compiled out entirely. The third, typespecs for type-shaped constraints, is
+  already answered in the FAQ. In its place is "You choose what they cost", which makes the
+  purge story a claim rather than an apology.
 
 - **The README is ordered for a reader rather than by feature.** It is three documents at once —
   the GitHub front page, the hexdocs landing page (`main: "Bond"`), and the `Bond` module
