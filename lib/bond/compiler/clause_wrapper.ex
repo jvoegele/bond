@@ -88,8 +88,9 @@ defmodule Bond.Compiler.ClauseWrapper do
     # exclude them from the underscore-prefixing pass — the emitted `when`
     # guard (below) references them.
     guard_vars = Clauses.guard_var_names(guards)
-    head_params = Clauses.rewrite_clause_params(clean_params, canonical_names, guard_vars)
-    super_args = Enum.map(canonical_names, &Macro.var(&1, nil))
+    clause_names = resolve_clause_names(clean_params, canonical_names)
+    head_params = Clauses.rewrite_clause_params(clean_params, clause_names, guard_vars)
+    super_args = Enum.map(clause_names, &Macro.var(&1, nil))
 
     # Invariant struct detection runs on the rewritten head — so destructure-
     # only positions, now wrapped as `canonical = %__MODULE__{...}`, are
@@ -158,6 +159,39 @@ defmodule Bond.Compiler.ClauseWrapper do
       end
 
     put_clause_position(wrapper, clause.env)
+  end
+
+  # The canonical name for a position is agreed across all clauses, so one
+  # clause can end up with a canonical name that its OWN pattern already binds
+  # further down — a sibling clause named the whole argument `key`, while this
+  # clause destructures `%{correlation_id: key}`. The rewrite would then bind the
+  # canonical name around a pattern that rebinds it:
+  #
+  #     def via(key = %{correlation_id: key})
+  #     ** (CompileError) the variable "key" is defined in function of itself
+  #
+  # which fails to compile at all. The two bindings mean different things — the
+  # positional argument versus a field inside it — so they genuinely cannot share
+  # a name.
+  #
+  # The user's meaning is the one to keep: their pattern and any guard over it
+  # must survive verbatim, or dispatch changes. So the *wrapper's* binding moves
+  # aside to the generated positional name instead, for this clause only. The
+  # wrapper body refers to positions by name, and the lifted assertion defps bind
+  # the canonical names in their own params, so the name used here only has to be
+  # free — assertions still see the positional argument, exactly as they do in the
+  # sibling clause that named it directly.
+  defp resolve_clause_names(params, canonical_names) do
+    params
+    |> Enum.zip(canonical_names)
+    |> Enum.with_index()
+    |> Enum.map(fn {{param, canonical}, idx} ->
+      if Clauses.binds_below_top_level?(param, canonical) do
+        Clauses.generated_name(idx)
+      else
+        canonical
+      end
+    end)
   end
 
   # Position the wrapper clause at the source location of the user clause it

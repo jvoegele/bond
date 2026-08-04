@@ -37,6 +37,28 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   — the same warning an uncontracted module has always produced, so this is parity rather than
   new noise.
 
+- **A clause that destructures into a sibling clause's parameter name no longer fails to compile.**
+  Found while building a fixture for the issue above. The canonical name for a position is agreed
+  across all clauses, so one clause can end up with a canonical name that its own pattern already
+  binds further down:
+
+  ```elixir
+  @pre present: not is_nil(key)
+  def via(%{correlation_id: key}), do: key   # `key` is a field
+  def via(key) when is_binary(key), do: key  # `key` is the whole argument
+  ```
+
+  The wrapper bound the canonical name around a pattern that rebinds it —
+  `def via(key = %{correlation_id: key})` — and the module failed to compile with *"the variable
+  `key` is defined in function of itself"*. It affected map, tuple, and list destructures alike.
+
+  The two bindings mean different things (the positional argument versus a field inside it), so
+  they cannot share a name. The user's pattern and guards are the ones that must survive verbatim,
+  or dispatch changes — so the *wrapper's* binding now moves aside to the generated positional
+  name for that clause. Guards continue to test the inner value, and contracts continue to see the
+  positional argument, which is their documented meaning and what the sibling clause already gave
+  them.
+
 - **`warn_skipped_invariants` no longer fires on functions whose invariants demonstrably run**
   ([#80](https://github.com/jvoegele/bond/issues/80)). The warning decided whether invariants were
   skipped from a static heuristic: a struct pattern among the *top-level* head parameters, or a
