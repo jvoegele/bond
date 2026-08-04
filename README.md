@@ -33,10 +33,18 @@ be valid. `@post` declares a **postcondition** — what the function promises in
 return, provided the precondition held. A postcondition can mention `result`, the
 function's return value, which a `when` guard cannot do at all.
 
+Those two lines are not equivalent in that respect. `amount <= from.balance` is a
+guard's kind of statement — write `when amount <= from.balance` and the guard
+does the enforcing. `conserved` has no such alternative, because no guard can
+mention the result. That is the division of labour: **guards say what a function
+accepts; contracts say what it promises**. Guards and patterns stay exactly where
+they are — contracts are a layer over them, not a replacement (see
+[Should I remove guards when I add contracts?](guides/faq.md#should-i-remove-guards-and-pattern-matches-when-i-add-contracts)).
+
 Note what `conserved` is *not*: a restatement of the body. The body moves money;
 the contract states the law the movement must obey. So when someone later adds a
 transfer fee and takes it out of the sender only, the arithmetic still looks
-plausible and the contract does not:
+plausible — and the contract fails:
 
 ```
 # Ledger.transfer(ana, bo, 200)   # after a 1% fee is deducted from the sender
@@ -55,20 +63,14 @@ plausible and the contract does not:
 ]
 ```
 
-1048, not 1050. The failure names the property that broke and hands you both
-states.
+The failure names the property that broke, and hands you both states to compare.
 
-That is the division of labour worth keeping in mind: **guards say what a
-function accepts; contracts say what it promises**. Guards and patterns stay
-exactly where they are — contracts are an additive layer over them, not a
-replacement (see
-[Should I remove guards when I add contracts?](guides/faq.md#should-i-remove-guards-and-pattern-matches-when-i-add-contracts)).
+## Beyond preconditions and postconditions
 
-## One statement, checked in places you didn't write
-
-A contract on a single function is worth something. What makes contracts worth a
-dependency is that one statement can be enforced far beyond the line it is
-written on.
+`@pre` and `@post` constrain one call at a time. The rest of Bond is about
+getting more out of the same statements — enforcing them across a whole module,
+across every implementation of a behaviour, and against inputs you never wrote
+down.
 
 **Checked at every entrance and exit of a module.** An `@invariant` is a property
 of the struct rather than of any one call, so Bond checks it around every public
@@ -83,9 +85,7 @@ defmodule Cart do
   @invariant total_matches_items:
                subject.total_cents == Enum.sum(Enum.map(subject.items, & &1.cents))
 
-  # `old(...)` snapshots a value before the call, so a postcondition can relate
-  # the state afterwards to the state before.
-  @post added_one: length(result.items) == length(old(cart.items)) + 1
+  @post added_one: length(result.items) == length(cart.items) + 1
   def add_item(%Cart{} = cart, item) do
     %{cart | items: [item | cart.items]}
   end
@@ -140,15 +140,29 @@ written are a specification, so they can serve as the oracle for property-based
 testing. You supply generators; Bond supplies the expected behaviour:
 
 ```elixir
+defmodule Roots do
+  use Bond
+
+  @pre non_negative: x >= 0.0
+  @post never_negative: result >= 0.0
+  @post shrinks_above_one: (x > 1.0) ~> (result < x)
+  def sqrt(x), do: :math.sqrt(x)
+end
+```
+
+```elixir
+# in test/roots_test.exs
 use Bond.PropertyTest
 
 contract_holds &Roots.sqrt/1, args: [StreamData.float(min: 0.0)]
 ```
 
-That runs `sqrt/1` against hundreds of generated floats and fails if any
+That runs `sqrt/1` against a stream of generated floats and fails if any
 precondition, postcondition, or `check` is violated, with StreamData shrinking to
-a minimal counterexample. There is no separate model of "expected output" to
-write or keep in step — the contract already said it. See
+a minimal counterexample. Those two postconditions are the whole oracle — there
+is no separate model of "expected output" to write or keep in step, because the
+contract already said it. (`~>` is implication: `shrinks_above_one` asserts
+nothing unless `x > 1.0`.) See
 [Testing Contracts](guides/testing-contracts.md) for `probe_contract/2`, which
 reads the boundaries out of your `@pre` and aims generators at them, and
 `invariants_hold/2`, which throws random *sequences* of operations at a struct.
