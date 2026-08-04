@@ -116,6 +116,40 @@ methodology (also called _programming by contract_), introduced by Bertrand
 Meyer with the Eiffel language. See the
 [About](guides/about.md) guide for background.
 
+## Installation
+
+Add `bond` to your dependencies in `mix.exs`:
+
+```elixir
+def deps do
+  [
+    {:bond, "~> 1.13"}
+  ]
+end
+```
+
+Then run `mix deps.get`. Bond's only dependency is `:telemetry`; `:stream_data`
+is optional and needed solely for the property-testing macros. Bond starts no
+processes and adds nothing to your supervision tree — `use Bond` is compile-time
+machinery, and the runtime side is plain function calls.
+
+## Where to start
+
+Bond has more surface than the two examples above, and the rest of this page is
+the reference for all of it. Two shortcuts:
+
+  * **Still evaluating?** The examples above are the argument, and
+    [When not to reach for Bond](#module-when-not-to-reach-for-bond) is the
+    other half of it. That is the whole pitch; nothing below is needed to judge it.
+  * **Decided to use it?** The [Getting Started](guides/getting-started.md) guide
+    covers the same ground as this page but in learning order, one example at a
+    time. Come back here for the details.
+
+The rest of this page runs: the annotations and the assertion language they are
+written in, then the larger features built on those (invariants, process state,
+inheritance), then the operational concerns — documenting contracts, compiling
+them out, telemetry, and testing.
+
 ## Usage
 
 `use Bond` in any module to enable the `@pre`, `@post`, and `@invariant`
@@ -240,6 +274,86 @@ assertion expressions, so you can use these operators directly:
 
 See `Bond.Predicates` for the full list of predicates and operators.
 
+## `old` expressions
+
+`old` expressions in postconditions snapshot a value before the function
+body runs, so the postcondition can compare the after-state to the
+before-state. Useful when a function mutates state that the postcondition
+needs to talk about as both "before" and "after."
+
+```elixir
+defmodule TurnCounter do
+  use Bond
+
+  # Per-process turn counter stored in the process dictionary. Single-
+  # process state by design — owned by exactly the process running the
+  # function, so `old` captures a snapshot nothing else can interleave
+  # against.
+
+  def current_turn, do: Process.get(:turn, 0)
+
+  @post incremented: current_turn() == old(current_turn()) + 1
+  def take_turn do
+    Process.put(:turn, current_turn() + 1)
+    :ok
+  end
+end
+```
+
+Bond resolves every `old(...)` expression at the start of function
+execution and threads the captured value into the postcondition. `old`
+is only available inside `@post`.
+
+The process dictionary fits the demo cleanly because it's stateful
+(otherwise there'd be no "old" to talk about — for an immutable
+parameter `x`, `old(x)` and `x` are the same value) but local to a
+single process (so the snapshot and the post-check observe the same
+world). The same shape works for any single-process-owned state: an
+ETS table created with `:protected` or `:private` access, a `Process`
+dictionary entry like above, a value held in the current process's
+closure.
+
+> #### Concurrent state needs a different pattern {: .warning}
+>
+> If `old(expr)` reads state that another process can write to between
+> the snapshot and the postcondition evaluation — an `Agent`, a
+> `GenServer.call/3`, a shared ETS table — another process can
+> interleave and the comparison becomes meaningless. The
+> [Contracts in a Concurrent World](guides/contracts-and-concurrency.md)
+> guide covers the locking pattern that recovers correctness there.
+> For struct-based state machines, `@invariant` is usually a better
+> fit than `old` — it constrains every operation's input and output
+> struct rather than a single delta.
+
+## Inline `check/1` assertions
+
+Bond's `check/1` macro places assertions at arbitrary points inside a
+function body — useful for sanity checks during development. It honours
+the `:bond, :checks` config (see [Conditional
+compilation](#module-conditional-compilation)) and is safe to disable in
+production builds.
+
+```elixir
+def total(items) do
+  raw = Enum.sum(items)
+
+  check raw >= 0
+  check total_is_integer: is_integer(raw)
+
+  raw
+end
+```
+
+On success `check` returns the assertion's value (or list of values for
+the keyword-list form). On failure it raises `Bond.CheckError`.
+
+> #### When to use `check` {: .warning}
+>
+> Don't use `check` for input validation, validating data from external
+> systems, or anything else that protects the integrity of your code. If
+> the check were removed (or compiled out via config), the system must
+> still behave correctly. Use ordinary control flow for that.
+
 ## Destructuring bindings: `where` and `whenever`
 
 The `<~` operator matches a pattern but its bindings don't escape — names
@@ -248,6 +362,25 @@ are a closed sublanguage (no `exists`/`forall`, no function calls, no
 comparisons against computed values). When you need Bond's **full** assertion
 syntax on a value nested inside a result — a list inside a map inside a tuple,
 say — reach for `where` or `whenever`.
+
+> #### `forall` and `exists` {: .info}
+>
+> `forall` and `exists`, mentioned just above and used in the examples below,
+> are Bond's two quantifiers. `forall(x <- enum, predicate)` asserts the
+> predicate holds for every element; `exists(x <- enum, predicate)` asserts it
+> holds for at least one.
+>
+> They earn their place by what they say on failure. A hand-written
+> `Enum.all?(urls, &String.starts_with?(&1, "https"))` reports only `false`;
+> `forall` reports the **counterexample** — which element failed, and its index:
+>
+> ```
+> |   counterexample: element at index 2 ("http://x") does not satisfy `String.starts_with?(u, "https")`
+> ```
+>
+> See `Bond.Predicates` for both, and the
+> [Quantified assertions](guides/getting-started.md#quantified-assertions)
+> section of the Getting Started guide for a walkthrough.
 
 Both wrap a destructuring binding and scope a set of ordinary (optionally
 labelled) assertions to the names it binds:
@@ -285,24 +418,6 @@ single lumped label for a `<~`-with-`when`-guard alternation. If you migrate an
 existing guarded `<~` contract to per-shape `whenever` clauses this way, expect
 the reported violation labels to become more specific — handy in practice, but
 something to update if you have tests asserting on the old label.
-
-> #### `forall` and `exists` {: .info}
->
-> The examples above use Bond's two quantifiers, which appear here for the first
-> time. `forall(x <- enum, predicate)` asserts the predicate holds for every
-> element; `exists(x <- enum, predicate)` asserts it holds for at least one.
->
-> They earn their place by what they say on failure. A hand-written
-> `Enum.all?(urls, &String.starts_with?(&1, "https"))` reports only `false`;
-> `forall` reports the **counterexample** — which element failed, and its index:
->
-> ```
-> |   counterexample: element at index 2 ("http://x") does not satisfy `String.starts_with?(u, "https")`
-> ```
->
-> See `Bond.Predicates` for both, and the
-> [Quantified assertions](guides/getting-started.md#quantified-assertions)
-> section of the Getting Started guide for a walkthrough.
 
 The scoped assertions are ordinary assertions — bare or labelled, using any
 predicate, operator, quantifier, or function call — and each is reported
@@ -564,86 +679,6 @@ and the error struct and telemetry carry `:source_protocol` and `:impl`.
 > not supported in a protocol `@post`. See the [Contract
 > Inheritance](guides/contract-inheritance.md#protocols) guide for the full
 > rules.
-
-## Inline `check/1` assertions
-
-Bond's `check/1` macro places assertions at arbitrary points inside a
-function body — useful for sanity checks during development. It honours
-the `:bond, :checks` config (see [Conditional
-compilation](#module-conditional-compilation)) and is safe to disable in
-production builds.
-
-```elixir
-def total(items) do
-  raw = Enum.sum(items)
-
-  check raw >= 0
-  check total_is_integer: is_integer(raw)
-
-  raw
-end
-```
-
-On success `check` returns the assertion's value (or list of values for
-the keyword-list form). On failure it raises `Bond.CheckError`.
-
-> #### When to use `check` {: .warning}
->
-> Don't use `check` for input validation, validating data from external
-> systems, or anything else that protects the integrity of your code. If
-> the check were removed (or compiled out via config), the system must
-> still behave correctly. Use ordinary control flow for that.
-
-## `old` expressions
-
-`old` expressions in postconditions snapshot a value before the function
-body runs, so the postcondition can compare the after-state to the
-before-state. Useful when a function mutates state that the postcondition
-needs to talk about as both "before" and "after."
-
-```elixir
-defmodule TurnCounter do
-  use Bond
-
-  # Per-process turn counter stored in the process dictionary. Single-
-  # process state by design — owned by exactly the process running the
-  # function, so `old` captures a snapshot nothing else can interleave
-  # against.
-
-  def current_turn, do: Process.get(:turn, 0)
-
-  @post incremented: current_turn() == old(current_turn()) + 1
-  def take_turn do
-    Process.put(:turn, current_turn() + 1)
-    :ok
-  end
-end
-```
-
-Bond resolves every `old(...)` expression at the start of function
-execution and threads the captured value into the postcondition. `old`
-is only available inside `@post`.
-
-The process dictionary fits the demo cleanly because it's stateful
-(otherwise there'd be no "old" to talk about — for an immutable
-parameter `x`, `old(x)` and `x` are the same value) but local to a
-single process (so the snapshot and the post-check observe the same
-world). The same shape works for any single-process-owned state: an
-ETS table created with `:protected` or `:private` access, a `Process`
-dictionary entry like above, a value held in the current process's
-closure.
-
-> #### Concurrent state needs a different pattern {: .warning}
->
-> If `old(expr)` reads state that another process can write to between
-> the snapshot and the postcondition evaluation — an `Agent`, a
-> `GenServer.call/3`, a shared ETS table — another process can
-> interleave and the comparison becomes meaningless. The
-> [Contracts in a Concurrent World](guides/contracts-and-concurrency.md)
-> guide covers the locking pattern that recovers correctness there.
-> For struct-based state machines, `@invariant` is usually a better
-> fit than `old` — it constrains every operation's input and output
-> struct rather than a single delta.
 
 ## Documenting contracts
 
@@ -962,18 +997,6 @@ If you're building on Bond and want to know whether something you depend
 on is safe across upgrades, those two guides are the source of truth.
 
 <!-- README END -->
-
-## Installation
-
-`bond` can be installed by adding it to your list of dependencies in `mix.exs`:
-
-```elixir
-def deps do
-  [
-    {:bond, "~> 1.13"}
-  ]
-end
-```
 
 ## Documentation
 

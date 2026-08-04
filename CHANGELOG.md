@@ -30,6 +30,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   type-shaped constraints), and half a sentence on the `Math.sqrt` example noting that its
   type-check preconditions document the guard rather than replace it.
 
+- **The README is ordered for a reader rather than by feature.** It is three documents at once —
+  the GitHub front page, the hexdocs landing page (`main: "Bond"`), and the `Bond` module
+  reference — and the reference had won. Most consequentially, `## Installation` sat *after* the
+  `<!-- README END -->` marker, so the hexdocs landing page never told you how to install Bond:
+  a reader convinced by the pitch had nowhere to go. Installation now follows the pitch, inside
+  the moduledoc, and a short "Where to start" section routes evaluators and adopters differently
+  and says how the rest of the page is laid out.
+
+  The reference sections were also reordered so the assertion vocabulary comes before the features
+  built on it: `old` expressions and inline `check/1` now sit with "Assertion syntax" rather than
+  200 lines below the invariant, process-state, and inheritance sections that assume them.
+
 - **Concepts are now explained where a reader first meets them.** A pass over the README as a
   newcomer would read it found several used long before their definitions: `subject` (~300 lines),
   `:purge` (~560), and `~>` (~90). `forall`/`exists` were used twice and never explained at all,
