@@ -31,15 +31,9 @@ end
 `@pre` declares a **precondition** — what the caller must satisfy for the call to
 be valid. `@post` declares a **postcondition** — what the function promises in
 return, provided the precondition held. A postcondition can mention `result`, the
-function's return value, which a `when` guard cannot do at all.
-
-Those two lines are not equivalent in that respect. `amount <= from.balance` is a
-guard's kind of statement — write `when amount <= from.balance` and the guard
-does the enforcing. `conserved` has no such alternative, because no guard can
-mention the result. That is the division of labour: **guards say what a function
-accepts; contracts say what it promises**. Guards and patterns stay exactly where
-they are — contracts are a layer over them, not a replacement (see
-[Should I remove guards when I add contracts?](guides/faq.md#should-i-remove-guards-and-pattern-matches-when-i-add-contracts)).
+function's return value, which a `when` guard cannot do at all. (Contracts sit
+alongside guards and patterns rather than replacing them — see
+[Should I remove guards when I add contracts?](guides/faq.md#should-i-remove-guards-and-pattern-matches-when-i-add-contracts).)
 
 Note what `conserved` is *not*: a restatement of the body. The body moves money;
 the contract states the law the movement must obey. So when someone later adds a
