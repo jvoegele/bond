@@ -88,8 +88,9 @@ defmodule Bond.Compiler.ClauseWrapper do
     # exclude them from the underscore-prefixing pass — the emitted `when`
     # guard (below) references them.
     guard_vars = Clauses.guard_var_names(guards)
-    head_params = Clauses.rewrite_clause_params(clean_params, canonical_names, guard_vars)
-    super_args = Enum.map(canonical_names, &Macro.var(&1, nil))
+    clause_names = resolve_clause_names(clean_params, canonical_names)
+    head_params = Clauses.rewrite_clause_params(clean_params, clause_names, guard_vars)
+    super_args = Enum.map(clause_names, &Macro.var(&1, nil))
 
     # Invariant struct detection runs on the rewritten head — so destructure-
     # only positions, now wrapped as `canonical = %__MODULE__{...}`, are
@@ -150,12 +151,78 @@ defmodule Bond.Compiler.ClauseWrapper do
         gs -> {:when, [], [head_call | gs]}
       end
 
-    quote do
-      unquote(kind)(unquote(guarded_head)) do
-        (unquote_splicing(body_stmts))
+    wrapper =
+      quote do
+        unquote(kind)(unquote(guarded_head)) do
+          (unquote_splicing(body_stmts))
+        end
       end
-    end
+
+    put_clause_position(wrapper, clause.env)
   end
+
+  # The canonical name for a position is agreed across all clauses, so one
+  # clause can end up with a canonical name that its OWN pattern already binds
+  # further down — a sibling clause named the whole argument `key`, while this
+  # clause destructures `%{correlation_id: key}`. The rewrite would then bind the
+  # canonical name around a pattern that rebinds it:
+  #
+  #     def via(key = %{correlation_id: key})
+  #     ** (CompileError) the variable "key" is defined in function of itself
+  #
+  # which fails to compile at all. The two bindings mean different things — the
+  # positional argument versus a field inside it — so they genuinely cannot share
+  # a name.
+  #
+  # The user's meaning is the one to keep: their pattern and any guard over it
+  # must survive verbatim, or dispatch changes. So the *wrapper's* binding moves
+  # aside to the generated positional name instead, for this clause only. The
+  # wrapper body refers to positions by name, and the lifted assertion defps bind
+  # the canonical names in their own params, so the name used here only has to be
+  # free — assertions still see the positional argument, exactly as they do in the
+  # sibling clause that named it directly.
+  defp resolve_clause_names(params, canonical_names) do
+    params
+    |> Enum.zip(canonical_names)
+    |> Enum.with_index()
+    |> Enum.map(fn {{param, canonical}, idx} ->
+      if Clauses.binds_below_top_level?(param, canonical) do
+        Clauses.generated_name(idx)
+      else
+        canonical
+      end
+    end)
+  end
+
+  # Position the wrapper clause at the source location of the user clause it
+  # stands in for (#75).
+  #
+  # Without this, a call matching no clause raises a `FunctionClauseError` with
+  # NO file/line at all, and reports a mangled `-inlined-count/1-` name — so
+  # `use Bond` degrades the diagnostics of the most common runtime error there
+  # is, in a library whose point is better diagnostics.
+  #
+  # The cause is not this module's `quote` lacking a position, as one might
+  # expect: `quote file: ..., line: ...` here makes no difference whatsoever.
+  # Elixir marks AST returned from a `@before_compile` callback as
+  # `generated: true` with `location: 0` unless the node already carries an
+  # explicit `:line`, and a `generated: true` clause is both position-less and a
+  # candidate for the Erlang compiler's inliner — which is where the mangled
+  # name comes from. Setting `:line` on the `def` node itself is what prevents
+  # the marking; the file follows from the compile unit, which is the user's own
+  # source file.
+  #
+  # Only the outermost `def` node is stamped. Bond's generated body statements
+  # keep whatever the surrounding machinery gives them, so warning suppression on
+  # generated code is unchanged — the only thing gained is a real position for the
+  # clause head, which is the part a stacktrace reports.
+  defp put_clause_position({form, meta, args}, %Macro.Env{line: line})
+       when is_list(meta) and is_integer(line) do
+    {form, Keyword.put(meta, :line, line), args}
+  end
+
+  # No env captured (a hand-built clause in a unit test, say) — emit as before.
+  defp put_clause_position(wrapper, _env), do: wrapper
 
   @doc """
   Strips default-arg syntax (`x \\\\ default`) from a param list, leaving the

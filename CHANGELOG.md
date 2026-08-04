@@ -9,6 +9,56 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **`use Bond` no longer degrades the stacktrace of an ordinary `FunctionClauseError`**
+  ([#75](https://github.com/jvoegele/bond/issues/75)). A call matching no clause of a contracted
+  function raised with **no file/line at all**, and reported a compiler-internal name:
+
+  ```
+  ** (FunctionClauseError) no function clause matching in Edges."-inlined-count/1-"/1
+      (adopt 0.1.0) Edges."-inlined-count/1-"(5)          <-- no file:line
+  ```
+
+  Since `FunctionClauseError` is far more common in a working codebase than a contract violation,
+  this made the most frequent failure worse in a library whose value proposition is better
+  diagnostics. Both halves are fixed — the frame now reads
+  `(adopt 0.1.0) lib/edges.ex:5: Edges.count(5)`, matching an uncontracted module exactly.
+
+  The cause was **not** the clause wrapper's `quote` lacking a position, which is the obvious
+  suspect: adding `quote file: ..., line: ...` there changes nothing at all. Elixir marks AST
+  returned from a `@before_compile` callback as `generated: true` with `location: 0` unless the
+  node already carries an explicit `:line`, and a `generated: true` clause is both position-less
+  and a candidate for the Erlang compiler's inliner — which is where the mangled name came from.
+  Setting `:line` on the emitted `def` node is what prevents the marking; the file follows from
+  the compile unit, which is the user's own source.
+
+  One visible consequence beyond the stacktrace: because the wrapper now carries a real position,
+  Elixir's type checker analyses it as it would any hand-written function. A call whose argument
+  matches no clause can therefore produce a compile-time type warning where it previously did not
+  — the same warning an uncontracted module has always produced, so this is parity rather than
+  new noise.
+
+- **A clause that destructures into a sibling clause's parameter name no longer fails to compile.**
+  Found while building a fixture for the issue above. The canonical name for a position is agreed
+  across all clauses, so one clause can end up with a canonical name that its own pattern already
+  binds further down:
+
+  ```elixir
+  @pre present: not is_nil(key)
+  def via(%{correlation_id: key}), do: key   # `key` is a field
+  def via(key) when is_binary(key), do: key  # `key` is the whole argument
+  ```
+
+  The wrapper bound the canonical name around a pattern that rebinds it —
+  `def via(key = %{correlation_id: key})` — and the module failed to compile with *"the variable
+  `key` is defined in function of itself"*. It affected map, tuple, and list destructures alike.
+
+  The two bindings mean different things (the positional argument versus a field inside it), so
+  they cannot share a name. The user's pattern and guards are the ones that must survive verbatim,
+  or dispatch changes — so the *wrapper's* binding now moves aside to the generated positional
+  name for that clause. Guards continue to test the inner value, and contracts continue to see the
+  positional argument, which is their documented meaning and what the sibling clause already gave
+  them.
+
 - **`warn_skipped_invariants` no longer fires on functions whose invariants demonstrably run**
   ([#80](https://github.com/jvoegele/bond/issues/80)). The warning decided whether invariants were
   skipped from a static heuristic: a struct pattern among the *top-level* head parameters, or a

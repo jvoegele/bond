@@ -407,6 +407,21 @@ defmodule Bond.Compiler.Clauses do
     |> collect_var_names()
   end
 
+  @doc """
+  Returns `true` when `param` binds `name` somewhere *below* its top level — a
+  destructure such as `%{correlation_id: key}`, `{:wrapped, key}`, or
+  `[key | _rest]` where `name` is `key`.
+
+  The wrapper rewrite uses this to detect a position where it cannot bind the
+  canonical name, because the user's own pattern already binds that name to a
+  different (inner) value at the same position. See
+  `Bond.Compiler.ClauseWrapper`.
+  """
+  @spec binds_below_top_level?(Macro.t(), atom()) :: boolean()
+  def binds_below_top_level?(param, name) when is_atom(name) do
+    top_level_name(param) != name and MapSet.member?(collect_var_names(param), name)
+  end
+
   # Walks an AST collecting every bare-variable reference. A bare variable in
   # Elixir AST is `{name, _meta, ctx}` where both `name` and `ctx` are atoms
   # (call AST has a list args at elem 2 instead of an atom context, so it's
