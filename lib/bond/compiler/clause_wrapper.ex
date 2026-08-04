@@ -150,12 +150,45 @@ defmodule Bond.Compiler.ClauseWrapper do
         gs -> {:when, [], [head_call | gs]}
       end
 
-    quote do
-      unquote(kind)(unquote(guarded_head)) do
-        (unquote_splicing(body_stmts))
+    wrapper =
+      quote do
+        unquote(kind)(unquote(guarded_head)) do
+          (unquote_splicing(body_stmts))
+        end
       end
-    end
+
+    put_clause_position(wrapper, clause.env)
   end
+
+  # Position the wrapper clause at the source location of the user clause it
+  # stands in for (#75).
+  #
+  # Without this, a call matching no clause raises a `FunctionClauseError` with
+  # NO file/line at all, and reports a mangled `-inlined-count/1-` name — so
+  # `use Bond` degrades the diagnostics of the most common runtime error there
+  # is, in a library whose point is better diagnostics.
+  #
+  # The cause is not this module's `quote` lacking a position, as one might
+  # expect: `quote file: ..., line: ...` here makes no difference whatsoever.
+  # Elixir marks AST returned from a `@before_compile` callback as
+  # `generated: true` with `location: 0` unless the node already carries an
+  # explicit `:line`, and a `generated: true` clause is both position-less and a
+  # candidate for the Erlang compiler's inliner — which is where the mangled
+  # name comes from. Setting `:line` on the `def` node itself is what prevents
+  # the marking; the file follows from the compile unit, which is the user's own
+  # source file.
+  #
+  # Only the outermost `def` node is stamped. Bond's generated body statements
+  # keep whatever the surrounding machinery gives them, so warning suppression on
+  # generated code is unchanged — the only thing gained is a real position for the
+  # clause head, which is the part a stacktrace reports.
+  defp put_clause_position({form, meta, args}, %Macro.Env{line: line})
+       when is_list(meta) and is_integer(line) do
+    {form, Keyword.put(meta, :line, line), args}
+  end
+
+  # No env captured (a hand-built clause in a unit test, say) — emit as before.
+  defp put_clause_position(wrapper, _env), do: wrapper
 
   @doc """
   Strips default-arg syntax (`x \\\\ default`) from a param list, leaving the

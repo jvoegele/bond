@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **`use Bond` no longer degrades the stacktrace of an ordinary `FunctionClauseError`**
+  ([#75](https://github.com/jvoegele/bond/issues/75)). A call matching no clause of a contracted
+  function raised with **no file/line at all**, and reported a compiler-internal name:
+
+  ```
+  ** (FunctionClauseError) no function clause matching in Edges."-inlined-count/1-"/1
+      (adopt 0.1.0) Edges."-inlined-count/1-"(5)          <-- no file:line
+  ```
+
+  Since `FunctionClauseError` is far more common in a working codebase than a contract violation,
+  this made the most frequent failure worse in a library whose value proposition is better
+  diagnostics. Both halves are fixed — the frame now reads
+  `(adopt 0.1.0) lib/edges.ex:5: Edges.count(5)`, matching an uncontracted module exactly.
+
+  The cause was **not** the clause wrapper's `quote` lacking a position, which is the obvious
+  suspect: adding `quote file: ..., line: ...` there changes nothing at all. Elixir marks AST
+  returned from a `@before_compile` callback as `generated: true` with `location: 0` unless the
+  node already carries an explicit `:line`, and a `generated: true` clause is both position-less
+  and a candidate for the Erlang compiler's inliner — which is where the mangled name came from.
+  Setting `:line` on the emitted `def` node is what prevents the marking; the file follows from
+  the compile unit, which is the user's own source.
+
+  One visible consequence beyond the stacktrace: because the wrapper now carries a real position,
+  Elixir's type checker analyses it as it would any hand-written function. A call whose argument
+  matches no clause can therefore produce a compile-time type warning where it previously did not
+  — the same warning an uncontracted module has always produced, so this is parity rather than
+  new noise.
+
 - **`warn_skipped_invariants` no longer fires on functions whose invariants demonstrably run**
   ([#80](https://github.com/jvoegele/bond/issues/80)). The warning decided whether invariants were
   skipped from a static heuristic: a struct pattern among the *top-level* head parameters, or a
