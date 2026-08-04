@@ -19,6 +19,53 @@ reading does not match their behaviour.
 > See [Asserting a contract is violated](testing-contracts.md#example-based-testing-with-bond-test).
 > An assertion you have never seen fail is an assertion you have not tested.
 
+## Assertions must be total, not merely side-effect-free
+
+An assertion has to return a truthy or falsy value for *every* input it can see.
+One that raises instead has not been shown to hold or to fail — it could not be
+evaluated at all.
+
+```elixir
+@pre valid: String.contains?(email, "@")
+def normalize(email), do: String.downcase(email)
+
+normalize(nil)
+** (Bond.AssertionEvaluationError) precondition could not be evaluated for call to MyApp.normalize/1
+|   label: :valid
+|   assertion: String.contains?(email, "@")
+|   binding: [email: nil]
+|   raised: ** (FunctionClauseError) no function clause matching in String.contains?/2
+```
+
+`String.contains?/2` requires a binary, so the precondition is partial: it
+answers for strings and raises for everything else. Bond reports this as its own
+error rather than as a violation, because "the contract is false" and "the
+contract is unevaluable" are different facts and conflating them would hide a bug
+in the predicate.
+
+The fix is almost always to lead with a type check, so the assertion is total
+over anything that can reach it:
+
+```elixir
+@pre valid: is_binary(email) and String.contains?(email, "@")
+```
+
+Now `normalize(nil)` raises an ordinary `Bond.PreconditionError` — the contract
+did its job.
+
+> #### Why this matters more than it looks {: .warning}
+>
+> Everywhere else in Bond, turning contracts *on* can only add a `Bond.*Error`
+> where the code would otherwise have proceeded. A partial assertion is the one
+> exception: it can turn a call that would have worked — or returned a clean
+> `{:error, _}` — into a raise, and `:purge` makes it disappear again. That is a
+> behavioural difference between your contracted and purged builds, which is
+> exactly what contracts are supposed not to introduce.
+
+Common partial predicates to watch for: `String.*` on a possibly-`nil` value,
+`length/1` on a non-list, `map_size/1` on a non-map, arithmetic on a
+possibly-`nil` field, and `Enum.*` on something that may not be enumerable.
+
 ## Surface-misleading operators
 
 ### `|||` is exclusive-or, not "or"

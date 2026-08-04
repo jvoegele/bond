@@ -435,13 +435,34 @@ defmodule Bond.Compiler.Assertion do
          function_module
        ) do
     assertion_info = assertion_info(assertion, function_info, function_module)
+    escaped_info = Macro.escape(assertion_info)
 
+    # The `rescue` is what makes an unevaluable assertion attributable (#77). The
+    # expression is an *argument* to `check_assertion/3`, so a raise inside it
+    # escapes before the call is made and before any per-assertion metadata is in
+    # scope — the caller then sees a bare `FunctionClauseError` from inside their
+    # predicate with nothing naming Bond. Wrapping here is the only place the
+    # label, expression, and binding for *this* assertion are available.
+    #
+    # Cost is on the entry to the try block only; the rescue clause itself runs
+    # only on the raising path. Measured at no change to the enabled-contract
+    # figures in bench/runtime_check_overhead.exs.
     quote do
-      Bond.Runtime.Eval.unquote(check_assertion_fun())(
-        unquote(expression),
-        unquote(Macro.escape(assertion_info)),
-        fn -> binding() end
-      )
+      try do
+        Bond.Runtime.Eval.unquote(check_assertion_fun())(
+          unquote(expression),
+          unquote(escaped_info),
+          fn -> binding() end
+        )
+      rescue
+        unquote(Macro.var(:bond_raised, nil)) ->
+          Bond.Runtime.Eval.evaluation_error(
+            unquote(Macro.var(:bond_raised, nil)),
+            __STACKTRACE__,
+            unquote(escaped_info),
+            fn -> binding() end
+          )
+      end
     end
   end
 

@@ -334,6 +334,11 @@ defmodule Bond.Runtime.Eval do
   #     duplicate and is dropped. Should `subject` somehow be absent it is renamed
   #     rather than dropped, so the value is never lost.
   #
+  #   * `bond_raised` — the exception bound by the `rescue` the compiler emits
+  #     around each assertion (#77). It is in lexical scope when the binding is
+  #     captured on the unevaluable-assertion path, and it is Bond's own variable,
+  #     not the user's. It is already reported on its own `raised:` line.
+  #
   #   * `bond_arg_<idx>` — the synthesised canonical name for a position whose
   #     clauses disagreed on what to call it. Unlike the above it is the *only*
   #     representation of that argument, so dropping it would lose information. It
@@ -349,6 +354,9 @@ defmodule Bond.Runtime.Eval do
 
     binding
     |> Enum.flat_map(fn
+      {:bond_raised, _exception} ->
+        []
+
       {:bond_invariant_value, value} ->
         if subject?, do: [], else: [{:subject, value}]
 
@@ -580,6 +588,35 @@ defmodule Bond.Runtime.Eval do
     }
 
     :telemetry.execute([:bond, :assertion, :failure], measurements, assertion_info)
+  end
+
+  @doc """
+  Reports an exception raised *by* an assertion expression, rather than a contract
+  violation.
+
+  An assertion that raises has not been shown to hold or to fail — it could not be
+  evaluated at all. Everywhere else, turning contracts on can only add a
+  `Bond.*Error` where the code would otherwise have proceeded; here it could
+  convert a working call into an unrelated crash, and purging made the crash
+  disappear again. That asymmetry is what this closes (#77): the raise still
+  propagates, but wrapped in a diagnostic that names the contract and preserves
+  the original exception.
+
+  Called from the `rescue` the compiler emits around each assertion's evaluation,
+  which is where the per-assertion metadata is in scope.
+  """
+  @spec evaluation_error(Exception.t(), Exception.stacktrace(), map(), (-> keyword())) ::
+          no_return()
+  def evaluation_error(exception, stacktrace, assertion_info, binding_fun) do
+    info =
+      assertion_info
+      |> Map.put(:binding, present_binding(binding_fun.()))
+      |> Map.put(:exception, exception)
+      |> Map.put(:original_stacktrace, stacktrace)
+
+    emit_failure_event(info)
+
+    :erlang.raise(:error, Bond.AssertionEvaluationError.exception(info), stacktrace)
   end
 
   defp prune_stacktrace(stacktrace) do

@@ -16,7 +16,11 @@ defmodule Bond.AssertionError do
         :source_contract,
         :source_protocol,
         :impl,
-        :quantifier
+        :quantifier,
+        # Set only on `Bond.AssertionEvaluationError`: the exception the assertion
+        # expression raised, and its stacktrace. `nil` on every violation type.
+        :exception,
+        :original_stacktrace
       ]
 
       @typedoc """
@@ -55,7 +59,9 @@ defmodule Bond.AssertionError do
               source_contract: {module(), atom()} | nil,
               source_protocol: module() | nil,
               impl: module() | nil,
-              quantifier: map() | nil
+              quantifier: map() | nil,
+              exception: Exception.t() | nil,
+              original_stacktrace: Exception.stacktrace() | nil
             }
 
       @impl Exception
@@ -269,4 +275,68 @@ defmodule Bond.InvariantError do
   defp headline(:state_invariant, mfa), do: "state invariant violated after #{mfa}"
   defp headline(:transition_invariant, mfa), do: "transition invariant violated across #{mfa}"
   defp headline(_struct_invariant, mfa), do: "invariant violated around #{mfa}"
+end
+
+defmodule Bond.AssertionEvaluationError do
+  @moduledoc """
+  Exception raised when an assertion expression itself raises, rather than
+  returning a truthy or falsy value.
+
+  This is distinct from a contract *violation*, and deliberately so: a violation
+  means the assertion was evaluated and found false, while this means it could
+  not be evaluated at all. Conflating the two would mask genuine bugs in a
+  predicate — an assertion that raises is not evidence that the contract holds or
+  fails, it is evidence the assertion is not total over its inputs.
+
+      @pre valid: String.contains?(email, "@")
+      def normalize(email), do: String.downcase(email)
+
+      normalize(nil)
+      ** (Bond.AssertionEvaluationError) precondition could not be evaluated for
+         call to MyApp.normalize/1
+      |   label: :valid
+      |   assertion: String.contains?(email, "@")
+      |   binding: [email: nil]
+      |   raised: ** (FunctionClauseError) no function clause matching in String.contains?/2
+
+  `:exception` is the original exception and `:original_stacktrace` its
+  stacktrace, so the underlying failure is never lost. The rest of the fields
+  carry the same contract metadata a violation would.
+
+  See the "Assertions must be total" section of the
+  [Writing sound assertions](writing-sound-assertions.md) guide for how to avoid
+  this — usually by leading with a type check.
+  """
+
+  use Bond.AssertionError
+
+  @impl Exception
+  def message(%{kind: kind, module: module, function: {function, arity}} = error) do
+    Bond.AssertionError.message(
+      error,
+      "#{kind_noun(kind)}#{Bond.AssertionError.attribution(error)} could not be evaluated " <>
+        "#{preposition(kind)} #{inspect(module)}.#{function}/#{arity}"
+    ) <> raised_line(error)
+  end
+
+  defp kind_noun(:precondition), do: "precondition"
+  defp kind_noun(:postcondition), do: "postcondition"
+  defp kind_noun(:state_invariant), do: "state invariant"
+  defp kind_noun(:transition_invariant), do: "transition invariant"
+  defp kind_noun(:invariant), do: "invariant"
+  defp kind_noun(:check), do: "check"
+  defp kind_noun(other), do: to_string(other)
+
+  defp preposition(:precondition), do: "for call to"
+  defp preposition(_other), do: "in"
+
+  # The original failure is the actionable part, so it is rendered in full rather
+  # than reduced to a type name.
+  defp raised_line(%{exception: nil}), do: ""
+
+  defp raised_line(%{exception: exception}) do
+    "|   raised: ** (#{inspect(exception.__struct__)}) #{Exception.message(exception)}\n"
+  end
+
+  defp raised_line(_error), do: ""
 end
