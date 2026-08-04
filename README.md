@@ -7,18 +7,23 @@
 Design by Contract for Elixir.
 
 A contract is a plain Elixir expression attached to a function and checked at
-runtime:
+runtime. Here is one that says money is neither created nor destroyed:
 
 ```elixir
 defmodule Account do
+  defstruct [:owner, :balance]
+end
+
+defmodule Ledger do
   use Bond
 
-  defstruct [:balance]
-
-  @pre sufficient_funds: amount <= account.balance
-  @post debited: result.balance == account.balance - amount
-  def withdraw(%Account{} = account, amount) do
-    %{account | balance: account.balance - amount}
+  @pre sufficient_funds: amount <= from.balance
+  @post conserved: result.from.balance + result.to.balance == from.balance + to.balance
+  def transfer(%Account{} = from, %Account{} = to, amount) do
+    %{
+      from: %{from | balance: from.balance - amount},
+      to: %{to | balance: to.balance + amount}
+    }
   end
 end
 ```
@@ -28,28 +33,46 @@ be valid. `@post` declares a **postcondition** — what the function promises in
 return, provided the precondition held. A postcondition can mention `result`, the
 function's return value, which a `when` guard cannot do at all.
 
-When a contract fails, Bond tells you which one, and on what input:
+Note what `conserved` is *not*: a restatement of the body. The body moves money;
+the contract states the law the movement must obey. So when someone later adds a
+transfer fee and takes it out of the sender only, the arithmetic still looks
+plausible and the contract does not:
 
 ```
-# Account.withdraw(%Account{balance: 100}, 250)
-** (Bond.PreconditionError) precondition failed for call to Account.withdraw/2
-|   at: lib/account.ex:6
-|   label: :sufficient_funds
-|   assertion: amount <= account.balance
-|   binding: [account: %Account{balance: 100}, amount: 250]
+# Ledger.transfer(ana, bo, 200)   # after a 1% fee is deducted from the sender
+** (Bond.PostconditionError) postcondition failed in Ledger.transfer/3
+|   at: lib/ledger.ex:9
+|   label: :conserved
+|   assertion: result.from.balance + result.to.balance == from.balance + to.balance
+|   binding: [
+  amount: 200,
+  from: %Account{owner: "ana", balance: 1000},
+  result: %{
+    to: %Account{owner: "bo", balance: 250},
+    from: %Account{owner: "ana", balance: 798}
+  },
+  to: %Account{owner: "bo", balance: 50}
+]
 ```
+
+1048, not 1050. The failure names the property that broke and hands you both
+states.
 
 That is the division of labour worth keeping in mind: **guards say what a
-function accepts; contracts say what it promises** — the relationships between
-arguments, and between arguments and the result. Guards and patterns stay
-exactly where they are; contracts are an additive layer over them, not a
+function accepts; contracts say what it promises**. Guards and patterns stay
+exactly where they are — contracts are an additive layer over them, not a
 replacement (see
 [Should I remove guards when I add contracts?](guides/faq.md#should-i-remove-guards-and-pattern-matches-when-i-add-contracts)).
 
-## What only a contract can say
+## One statement, checked in places you didn't write
 
-The example above is deliberately small. The reason to reach for contracts is
-the properties that have nowhere else to live:
+A contract on a single function is worth something. What makes contracts worth a
+dependency is that one statement can be enforced far beyond the line it is
+written on.
+
+**Checked at every entrance and exit of a module.** An `@invariant` is a property
+of the struct rather than of any one call, so Bond checks it around every public
+function — including the ones a colleague adds next year:
 
 ```elixir
 defmodule Cart do
@@ -57,8 +80,6 @@ defmodule Cart do
 
   defstruct items: [], total_cents: 0
 
-  # Must hold before and after every public function in this module.
-  # `subject` is the struct instance being checked.
   @invariant total_matches_items:
                subject.total_cents == Enum.sum(Enum.map(subject.items, & &1.cents))
 
@@ -71,26 +92,66 @@ defmodule Cart do
 end
 ```
 
-`add_item/2` forgot to update `total_cents`. No guard, typespec, or pattern
-would catch that — but the invariant is checked around every public function, so
-it fails on the way out and hands you the offending state:
+`add_item/2` forgot to update `total_cents`. Nothing in the function is wrong on
+its own terms, and no guard, typespec, or pattern would object — but the
+invariant is checked on the way out:
 
 ```
 # Cart.add_item(%Cart{}, %{sku: "A", cents: 500})
 ** (Bond.InvariantError) invariant violated around Cart.add_item/2
-|   at: lib/cart.ex:7
+|   at: lib/cart.ex:6
 |   label: :total_matches_items
 |   assertion: subject.total_cents == Enum.sum(Enum.map(subject.items, & &1.cents))
 |   binding: [subject: %Cart{items: [%{cents: 500, sku: "A"}], total_cents: 0}]
 ```
 
-Three things there are beyond a guard's reach: a **class invariant** enforced at
-every boundary of the module, a postcondition relating the result to the
-**pre-call state** via `old/1`, and a failure message naming the property that
-broke and the value that broke it. Contracts also double as
-[property-test oracles](guides/testing-contracts.md) and can be
-[inherited from a behaviour](guides/contract-inheritance.md), so the same
-statement is checked in every implementation.
+**Checked in every implementation of a behaviour.** Declare the contract once, on
+the callback, and every implementing module enforces it — without a line of
+contract code in any of them:
+
+```elixir
+defmodule Paginator do
+  use Bond.Behaviour
+
+  @post never_over_limit: length(result) <= limit
+  @callback fetch(page :: pos_integer(), limit :: pos_integer()) :: list()
+end
+
+defmodule LegacyPages do
+  use Bond, behaviours: [Paginator]
+
+  @impl true
+  def fetch(page, _limit), do: Enum.map(1..50, &{page, &1})   # ignores limit
+end
+```
+
+```
+** (Bond.PostconditionError) postcondition (inherited from Paginator) failed in LegacyPages.fetch/2
+|   at: lib/paginator.ex:4
+|   label: :never_over_limit
+```
+
+The violation is attributed to the behaviour that declared it, and points at the
+line in *that* file. A promise made by an interface, kept by everything that
+implements it.
+
+**Checked against inputs you never thought of.** The contracts you have already
+written are a specification, so they can serve as the oracle for property-based
+testing. You supply generators; Bond supplies the expected behaviour:
+
+```elixir
+use Bond.PropertyTest
+
+contract_holds &Roots.sqrt/1, args: [StreamData.float(min: 0.0)]
+```
+
+That runs `sqrt/1` against hundreds of generated floats and fails if any
+precondition, postcondition, or `check` is violated, with StreamData shrinking to
+a minimal counterexample. There is no separate model of "expected output" to
+write or keep in step — the contract already said it. See
+[Testing Contracts](guides/testing-contracts.md) for `probe_contract/2`, which
+reads the boundaries out of your `@pre` and aims generators at them, and
+`invariants_hold/2`, which throws random *sequences* of operations at a struct.
 
 ## You choose what they cost
 
@@ -117,12 +178,6 @@ enabled from a remote console while a problem is being diagnosed. See
 
 The usual arrangement is contracts on in dev and test, purged in production —
 which is why it is worth writing the expensive, interesting ones.
-
-Bond is an implementation of the
-[Design by Contract](https://en.wikipedia.org/wiki/Design_by_contract)
-methodology (also called _programming by contract_), introduced by Bertrand
-Meyer with the Eiffel language. See the
-[About](guides/about.md) guide for background.
 
 ## Installation
 
@@ -177,6 +232,8 @@ organised around the questions that tend to arrive in this order:
   * **[Stability](guides/stability.md)** and
     **[Public API surface](guides/public-api.md)** — what semver covers.
   * **[FAQ](guides/faq.md)** — including how contracts relate to guards and typespecs.
+  * **[About](guides/about.md)** — Design by Contract as Bertrand Meyer introduced
+    it with Eiffel, and what Bond keeps and drops from it.
 
 <!-- README END -->
 

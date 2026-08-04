@@ -55,6 +55,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   and *postcondition*. And half a sentence on the `Math.sqrt` example notes that its type-check
   preconditions document the guard rather than replace it.
 
+  The pitch was then rewritten again, because it argued the wrong thing. It argued
+  *expressiveness* — contracts can say what guards cannot — to which an Elixir developer's fair
+  reply is "I would write that check in the function, or in a test." Worse, the opening example
+  undercut itself: its precondition `amount <= account.balance` is exactly guard-expressible
+  (`when amount <= account.balance` compiles), and its postcondition restated the function body, so
+  the first thing a skeptic saw was the function written twice at runtime cost.
+
+  It now argues *leverage* — one statement enforced in places you did not write it — with a worked
+  example of each: an invariant checked at every entrance and exit of a module, a contract on a
+  behaviour callback enforced in every implementation (and attributed to the behaviour on failure),
+  and the same contracts reused as the oracle for property-based testing. The opening example is a
+  ledger transfer whose postcondition states conservation of money, which is a law the body must
+  obey rather than a restatement of it, and which a later-added transfer fee breaks.
+
   A "When not to reach for Bond" section was added and then removed before release. Of its three
   points, two were strengths written as concessions — the guards-versus-contracts division, which
   the pitch already states positively, and the runtime cost, which is really the story that
