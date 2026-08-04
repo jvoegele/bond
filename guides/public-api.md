@@ -22,6 +22,7 @@ The full set of modules in published API docs is the source-of-truth for
   * `Bond.PostconditionError`
   * `Bond.InvariantError`
   * `Bond.CheckError`
+  * `Bond.AssertionEvaluationError`
 
 Everything under `Bond.Compiler.*` and `Bond.Runtime.*` is internal (marked
 `@moduledoc internal: true` and filtered out of hexdocs by `filter_modules`
@@ -365,6 +366,11 @@ shape (defined by the internal `Bond.AssertionError` `__using__` macro):
   * `Bond.InvariantError` — covers struct `@invariant` and, for `Bond.Server`,
     `@state_invariant` / `@transition_invariant`; the `:kind` field distinguishes them
   * `Bond.CheckError`
+  * `Bond.AssertionEvaluationError` — raised when an assertion *expression* itself
+    raises rather than returning truthy/falsy. Not a violation: the assertion could
+    not be evaluated, so it is neither known to hold nor known to fail. See the
+    "Assertions must be total" section of the
+    [Writing sound assertions](writing-sound-assertions.md) guide.
 
 Public fields on every error struct:
 
@@ -379,7 +385,12 @@ Public fields on every error struct:
   * `:line` — `integer()`.
   * `:module` — `module()`.
   * `:function` — `{name :: atom(), arity :: non_neg_integer()}` tuple.
-  * `:binding` — `keyword()` of in-scope variables at the assertion site. Bond's
+  * `:binding` — `keyword()` of in-scope variables at the assertion site.
+  * `:exception` — `Exception.t() | nil`. Set only when the assertion *expression*
+    raised rather than returning truthy/falsy, in which case the raised error is a
+    `Bond.AssertionEvaluationError` and this is the original exception (with
+    `:original_stacktrace`). `nil` for an ordinary violation, which is what
+    distinguishes the two in a handler. Bond's
     own generated variables are filtered out, so the keys are names you wrote,
     with one exception: an argument whose clauses disagreed on a name has no name
     to show, and appears under a 1-based positional label (`arg_1`, `arg_2`, …).

@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+
+- **`Bond.AssertionEvaluationError`**, raised when an assertion *expression* itself raises rather
+  than returning truthy or falsy ([#77](https://github.com/jvoegele/bond/issues/77)). Previously
+  the caller got the bare exception from inside the predicate, with nothing naming Bond:
+
+  ```elixir
+  @pre valid: String.contains?(email, "@")
+  def normalize(email), do: String.downcase(email)
+
+  normalize(nil)
+  ** (FunctionClauseError) no function clause matching in String.contains?/2   # before
+  ```
+
+  ```
+  ** (Bond.AssertionEvaluationError) precondition could not be evaluated for call to
+     MyApp.normalize/1                                                          # after
+  |   label: :valid
+  |   assertion: String.contains?(email, "@")
+  |   binding: [email: nil]
+  |   raised: ** (FunctionClauseError) no function clause matching in String.contains?/2
+  ```
+
+  This mattered more than a cosmetic message: everywhere else in Bond, turning contracts *on* can
+  only add a `Bond.*Error` where the code would otherwise have proceeded. A partial assertion was
+  the exception — it could turn a call that would have worked, or returned a clean `{:error, _}`,
+  into an unrelated crash, and `:purge` made the crash disappear again. That is a behavioural
+  difference between the contracted and purged builds that contracts are supposed not to
+  introduce.
+
+  A raise is deliberately **not** treated as a violation. An assertion that raises has not been
+  shown to hold or to fail, so folding it into `Bond.PreconditionError` would let a broken
+  predicate masquerade as a contract failure and mask the bug. The original exception and its
+  stacktrace are carried on `:exception` and `:original_stacktrace`.
+
+  Telemetry keeps the existing `[:bond, :assertion, :failure]` event and keeps `:kind` as the
+  contract kind, so handlers filtering on `:kind` or aggregating on `:assertion_id` are unaffected.
+  The new `:exception` metadata key is what distinguishes an unevaluable assertion from a
+  violation, and is absent for the latter.
+
+  Measured against `bench/runtime_check_overhead.exs`: no regression on any fixture.
+
+- A "Assertions must be total, not merely side-effect-free" section in the
+  [Writing sound assertions](guides/writing-sound-assertions.md) guide, covering the common partial
+  predicates and the fix (lead with a type check).
+
 ### Fixed
 
 - **Bond's own generated variable names no longer appear in the `binding:` of a violation**
