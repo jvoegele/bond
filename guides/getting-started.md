@@ -3,7 +3,8 @@
 This guide walks you through adding Bond to a project, writing your first
 contract, and the most common patterns you'll encounter.
 
-For full reference material see the `Bond` module docs.
+For the full reference, see the [Writing Contracts](writing-contracts.md)
+guide and the guides it links to.
 
 ## Installation
 
@@ -319,9 +320,8 @@ public function's head (`%__MODULE__{} = name` pattern,
 and rebinds `subject` to it — you write the invariant once and Bond
 applies it everywhere.
 
-See the [`@invariant`](invariants.md)
-section of the moduledoc for head-shape detection, multi-struct
-heads, and per-module configuration.
+See the [Invariants](invariants.md) guide for head-shape detection,
+multi-struct heads, and per-module configuration.
 
 ## Invariants for process state
 
@@ -382,8 +382,7 @@ effect — the runtime state is cached; use `Bond.Config`.) `:purge` is the
 only setting with no runtime presence (the code isn't there).
 
 For finer control, the `:overrides` config lets you set per-module rules.
-See the `Bond` moduledoc's "Conditional compilation" and "Per-module
-overrides" sections for the full story.
+See [Configuring Contracts](configuration.md) for the full story.
 
 ## Testing contract violations
 
@@ -412,9 +411,9 @@ where contracts act as the oracle for random inputs — see the
 
 ## Next steps
 
-- The `Bond` moduledoc has the full reference, including the
-  [`@invariant`](invariants.md) section
-  for module-wide constraints on every instance of a struct.
+- The [Writing Contracts](writing-contracts.md) guide is the full reference for
+  the annotations and the assertion language, and [Invariants](invariants.md)
+  covers module-wide constraints on every instance of a struct.
 - The [Testing Contracts](testing-contracts.md) guide covers the whole
   testing surface — `Bond.Test`'s example-based assertions and
   `Bond.PropertyTest`'s `contract_holds/2`, `probe_contract/2`, and

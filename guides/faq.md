@@ -546,9 +546,7 @@ apply. Bond emits a compile-time warning when it can see that coming —
 see the next entry.
 
 Violations raise `Bond.InvariantError` and emit `[:bond, :assertion, :failure]`
-telemetry with `:kind => :invariant`. See the
-[Invariants](invariants.md) section in the
-moduledoc.
+telemetry with `:kind => :invariant`. See the [Invariants](invariants.md) guide.
 
 ## Why is Bond warning about skipped invariants?
 

@@ -188,7 +188,7 @@ Some rules of thumb that fall out of the numbers:
     when you need to debug a specific incident.
   * **`:purge` is the right default for hot-path modules in
     production.** Per-module overrides give you per-module control —
-    see the `Bond` moduledoc on `:overrides`.
+    see [Per-module overrides](configuration.md#per-module-overrides).
 
 ## Re-running on your hardware
 

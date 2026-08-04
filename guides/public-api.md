@@ -71,8 +71,9 @@ x > 0`) likewise raises a `CompileError` with a specific diagnostic.
     `@transition_invariant`, and inherited contracts (`Bond.Behaviour` callbacks
     and `Bond.Protocol` functions). The keyword fixes the arrow (`where` ⇒ `=`,
     `whenever` ⇒ `<-`); a mismatched pair, a non-binding argument, or an empty
-    body each raise a `CompileError`. See the `Bond` moduledoc for semantics and
-    rendering.
+    body each raise a `CompileError`. See
+    [Destructuring bindings](writing-contracts.md#destructuring-bindings-where-and-whenever)
+    for semantics and rendering.
   * **All-inside form** — `where(pattern = source, <assertions>)`, with the
     assertions inside the call. Used by the fixed-arity call macros:
     `Bond.pre`/`Bond.post`/`Bond.invariant` (`at_annotations: false`) and
@@ -119,7 +120,8 @@ through the `Bond.` prefix.
 
   * `check/1` — runtime assertion of an expression or a keyword list of
     labelled expressions. Behaviour under the four `:checks` modes
-    (`true | false | :purge`) is documented in the main `Bond` moduledoc.
+    (`true | false | :purge`) is documented in
+    [Configuring Contracts](configuration.md).
   * `old/1` — captures a value at function-entry for use in a `@post`
     expression. Only valid inside `@post`.
   * `subject` — implicit binding inside `@invariant` expressions, bound to
