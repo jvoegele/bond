@@ -25,22 +25,28 @@ Not if you `:purge` them. Bond supports
 config :bond,
   preconditions: :purge,
   postconditions: :purge,
+  invariants: :purge,
   checks: :purge
 ```
 
-When both `:preconditions` and `:postconditions` are `:purge`d for a
-function, Bond emits no override at all and the function runs with zero
-per-call overhead. The compiled BEAM contains no contract evaluation code
-for that function.
+When every contract kind on a function is `:purge`d, Bond emits no override
+at all and the function runs with zero per-call overhead. The compiled BEAM
+contains no contract evaluation code for that function.
+
+Purge from the top down: the contract-checking chain requires that if you
+`:purge` a kind, every kind above it is `:purge`d too, so
+`preconditions: :purge` without `invariants: :purge` is a compile error. See
+[Why can't I have postconditions on while preconditions are off?](#why-can-t-i-have-postconditions-on-while-preconditions-are-off)
+below.
 
 A typical pattern: contracts on in dev/test, `:purge`d in prod.
 
 For concrete numbers — how many nanoseconds each contract kind adds per
 call, and how much compile time Bond costs per module — see the
 [Overhead](overhead.md) guide. Headline figures from the reference
-environment: a `:purge`d contract is free; an enabled `@pre` adds ~130
-ns/call; an enabled `@invariant` (entry + exit) adds ~440 ns/call; Bond
-compile-time overhead is ~10 ms per module that uses contracts.
+environment: a `:purge`d contract is free; an enabled `@pre` adds ~75
+ns/call; an enabled `@invariant` (entry + exit) adds ~215 ns/call; Bond
+compile-time overhead is ~30 ms per module that uses contracts.
 
 ## Can I toggle contracts at runtime without recompiling?
 
@@ -78,7 +84,7 @@ In the source:
 
 ```elixir
 defmodule MyApp.HotPath do
-  use Bond, preconditions: :purge, postconditions: :purge
+  use Bond, preconditions: :purge, postconditions: :purge, invariants: :purge
 end
 ```
 
@@ -87,7 +93,7 @@ Or in config (handy when you don't want to touch the source):
 ```elixir
 config :bond,
   overrides: [
-    {MyApp.HotPath, preconditions: :purge, postconditions: :purge},
+    {MyApp.HotPath, preconditions: :purge, postconditions: :purge, invariants: :purge},
     {~r/Workers\./, postconditions: false}
   ]
 ```
@@ -450,10 +456,10 @@ contracts are safe to use even when they call into the rest of your API.
 ## Can I use `check/1` to assert input validity?
 
 No — `check/1` is for **sanity checks during development**, not input
-validation. A `check` can be compiled out entirely via
-`config :bond, :checks, false`, and the wrapped expression is then not
-evaluated at all. If your code's correctness depends on something being
-checked, use ordinary control flow:
+validation. A `check` can be switched off with `config :bond, checks: false`
+(or removed from the build entirely with `checks: :purge`), and the wrapped
+expression is then not evaluated at all. If your code's correctness depends
+on something being checked, use ordinary control flow:
 
 ```elixir
 # DON'T: relies on check for correctness

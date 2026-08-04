@@ -3,6 +3,7 @@
 Bond emits a telemetry event on every assertion failure, so violations can be
 counted, alerted on, and attributed without wrapping anything.
 
+## The event
 
 Bond emits a [`:telemetry`](https://hexdocs.pm/telemetry/readme.html)
 event whenever a `@pre`, `@post`, `@invariant`, `@state_invariant`,
@@ -31,7 +32,10 @@ per failure, immediately before the corresponding `Bond.PreconditionError` /
 - `:binding` — sorted snapshot of `binding()` at the failure site
 
 For example, a violated `@pre non_negative_x: x >= 0` on
-`BondTest.Math.sqrt(-1)` produces a metadata map of this shape:
+`BondTest.Math.sqrt(-1)` produces a metadata map of this shape. (`sqrt` here
+is declared `def sqrt(x, trap_door \\ nil)`, which is why `:function` reports
+arity 2 and `trap_door` appears in the binding — see
+[Why does my error message report `sqrt/2` when I wrote `sqrt/1`?](faq.md#why-does-my-error-message-report-sqrt-2-when-i-wrote-sqrt-1).)
 
 ```elixir
 %{

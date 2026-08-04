@@ -74,8 +74,11 @@ defmodule Bond do
   of the global config.
 
       defmodule MyApp.HotPath do
-        use Bond, preconditions: :purge, postconditions: :purge
+        use Bond, preconditions: :purge, postconditions: :purge, invariants: :purge
       end
+
+  Purge from the top down: the contract-checking chain requires that a `:purge`d kind has every
+  kind above it `:purge`d too, so `preconditions: :purge` on its own is a compile error.
 
   ### `:at_annotations`
 

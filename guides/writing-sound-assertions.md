@@ -188,9 +188,10 @@ assertions ahead of time, because they are arbitrary runtime expressions. The pi
 are the ones a type checker would catch in a typed contract language; in Bond, a little
 discipline (and one failing test per assertion) stands in for that checker.
 
-A future Bond release may flag a high-confidence subset of these — provably-constant
-comparisons, quantifiers whose body ignores their binding — as compile-time warnings or a
-Credo check. Until then, this guide is the checklist.
+The high-confidence subset — provably-constant comparisons, quantifiers whose body ignores
+their binding — is already caught by the [assertion
+linter](#the-assertion-linter-catches-the-obvious-cases) above. Everything that needs to know
+a value's *type* stays yours; this guide is the checklist for it.
 
 ## See also
 

@@ -71,7 +71,7 @@ single assertion:
 
 ```elixir
 @pre positive_x: x > 0
-@post non_decreasing: result >= old(result)
+@post non_decreasing: result >= x
 @pre numeric_x: is_number(x), non_negative_x: x >= 0
 @pre "x must be positive": x > 0
 ```
@@ -184,8 +184,8 @@ closure.
 
 Bond's `check/1` macro places assertions at arbitrary points inside a
 function body — useful for sanity checks during development. It honours
-the `:bond, :checks` config (see [Conditional
-compilation](configuration.md)) and is safe to disable in
+the `:bond, :checks` config (see
+[Configuring Contracts](configuration.md)) and is safe to disable in
 production builds.
 
 ```elixir
@@ -287,8 +287,8 @@ where the binding source references the callback/function's argument names (and
 Both forms are recognised at the **start** of a contract — they are not boolean
 sub-expressions, so they can't appear inside `~>`, `or`, or a larger expression.
 Bond raises a compile error naming the alternatives if you try. See
-[How do I bind names inside `~>` or `or`?](faq.md) for the three patterns
-that cover this, all of which keep per-assertion labels.
+[How do I bind names inside `~>` or `or`?](faq.md#how-do-i-bind-names-inside-or-or)
+for the three patterns that cover this, all of which keep per-assertion labels.
 
 ### The all-inside form (call contexts)
 
@@ -340,7 +340,7 @@ and respects `@moduledoc false`.
 > #### Conditional compilation and docs {: .info}
 >
 > When a function has **all** of its contracts `:purge`d (see
-> [Conditional compilation](configuration.md)), the function runs
+> [Configuring Contracts](configuration.md)), the function runs
 > with zero contract overhead and its auto-generated contract sections are
 > suppressed; likewise, `:invariants` set to `:purge` suppresses the generated
 > `## Invariants` section.

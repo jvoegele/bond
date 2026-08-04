@@ -7,6 +7,7 @@ are meaningful.
 For what contracts *cost* when they are on — measured, per call — see the
 [Overhead](overhead.md) guide.
 
+## The three modes
 
 Bond reads four application-config keys at compile time. Each accepts one
 of three values:
@@ -65,7 +66,7 @@ config :bond, invariants: :purge
 config :bond, invariants: false
 
 # Compile error: lower purged, higher present.
-config :bond, preconditions: :purge   # postconditions and invariants still :true
+config :bond, preconditions: :purge   # postconditions and invariants still true
 ```
 
 ## Runtime toggling
@@ -98,14 +99,9 @@ setting falls back to its compile-time default (including any per-module
 compiled in, so nothing can bring it back.
 
 The runtime check is a single lock-free `:persistent_term` read per call
-per contract kind. A trivial benchmark (`bench/runtime_check_overhead.exs`,
-baseline subtracted) for a `@pre is_number(x)` fixture:
-
-| Mode      | overhead / call | note                              |
-|-----------|-----------------|-----------------------------------|
-| `:purge`  | ~0 ns           | no code emitted                   |
-| `false`   | ~15 ns          | the gate alone                    |
-| `true`    | ~85 ns          | gate + assertion evaluation       |
+per contract kind — the whole reason `false` is affordable enough to leave
+compiled into a production build. The [Overhead](overhead.md) guide has the
+measured per-call figures for each kind in each mode.
 
 The enabled (`true`) cost is dominated by the gate and by evaluating the
 assertion expressions themselves — **not** by the function's size. The
@@ -113,11 +109,9 @@ failure `binding()` snapshot (reported in error messages) is captured
 lazily and only materialised when an assertion actually fails, so the
 per-call overhead does not grow with the number of parameters or
 `old(...)` captures. A wide signature with `old(...)` postconditions pays
-about the same as the one-argument fixture above.
+about the same as a one-argument one.
 
-For genuinely hot-path code, prefer `:purge`. Run the benchmark on your
-own hardware to reproduce; absolute numbers vary by machine and Elixir
-version.
+For genuinely hot-path code, prefer `:purge`.
 
 ## Per-module overrides
 
@@ -131,7 +125,7 @@ config :bond,
   preconditions: true,
   postconditions: true,
   overrides: [
-    {MyApp.HotPath, preconditions: :purge, postconditions: :purge},
+    {MyApp.HotPath, preconditions: :purge, postconditions: :purge, invariants: :purge},
     {~r/Workers\./, postconditions: false}
   ]
 ```
@@ -147,6 +141,10 @@ A module can also opt out (or in) directly at the `use` site:
 
 ```elixir
 defmodule MyApp.HotPath do
-  use Bond, preconditions: :purge, postconditions: :purge
+  use Bond, preconditions: :purge, postconditions: :purge, invariants: :purge
 end
 ```
+
+The same top-down rule applies here as in global config: a `:purge`d kind
+requires every kind above it to be `:purge`d too, whether the setting arrives
+from `config :bond`, an `:overrides` entry, or `use Bond`.

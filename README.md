@@ -206,10 +206,10 @@ machinery, and the runtime side is plain function calls.
 
 ## Where to go from here
 
-Bond does more than the two examples above. The rest of the documentation is
+Bond does more than the examples above. The rest of the documentation is
 organised around the questions that tend to arrive in this order:
 
-  * **Still evaluating?** The two examples above are the argument. The
+  * **Still evaluating?** The examples above are the argument. The
     [FAQ](guides/faq.md) answers the comparisons that usually decide it —
     ["What does Bond do that typespecs don't?"](guides/faq.md#what-does-bond-do-that-typespecs-don-t)
     and
@@ -239,14 +239,13 @@ organised around the questions that tend to arrive in this order:
   * **[Telemetry](guides/telemetry.md)** — the assertion-failure event.
   * **[Stability](guides/stability.md)** and
     **[Public API surface](guides/public-api.md)** — what semver covers.
-  * **[FAQ](guides/faq.md)** — including how contracts relate to guards and typespecs.
-  * **[About](guides/about.md)** — Design by Contract as Bertrand Meyer introduced
-    it with Eiffel, and what Bond keeps and drops from it.
+  * **[About](guides/about.md)** and **[History](guides/history.md)** — Design by
+    Contract as Bertrand Meyer introduced it with Eiffel, what Bond keeps and
+    drops from it, and the Elixir libraries that came before.
 
 <!-- README END -->
 
 ## Documentation
 
 Documentation is generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm/bond/Bond.html) and be found at
-<https://hexdocs.pm/bond/Bond.html>.
+and published on HexDocs at <https://hexdocs.pm/bond>.

@@ -438,7 +438,7 @@ that core and keep the server a thin, separately tested shell.
 The tools above prove a contract *can* fire. `Bond.Coverage` answers the complementary
 question across a whole suite: **which assertions ran but were never once false?** An
 assertion checked hundreds of times that has never failed is a candidate for vacuity — the
-runtime counterpart to the compile-time [assertion linter](writing-sound-assertions.html).
+runtime counterpart to the compile-time [assertion linter](writing-sound-assertions.md).
 It is a *prompt*, not a verdict: a correct assertion over correct code also never fails, so
 treat `⚠ never failed` as "either write a test that makes this fail, or delete it."
 
@@ -468,7 +468,7 @@ Bond contract coverage
 ```
 
 A `⚠` row is a candidate to interrogate with `Bond.Test` (prove it can fail) — the "prove
-every assertion can fail" habit from the [Writing Sound Assertions](writing-sound-assertions.html)
+every assertion can fail" habit from the [Writing Sound Assertions](writing-sound-assertions.md)
 guide. `Bond.Coverage.entries/0` and `report/0` are also readable directly if you want to
 inspect coverage in a test or write it to a file.
 
