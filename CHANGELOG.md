@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+
+- **The README now opens with a contract that a guard could not express**
+  ([#82](https://github.com/jvoegele/bond/issues/82)). It previously led with
+  `@pre positive_amount: amount > 0` and `@pre numeric_x: is_number(x)` — contracts the FAQ
+  correctly explains can never fire, because the guard runs first. A skeptical reader met the
+  weakest case first and had no reason to keep reading.
+
+  The opening example is now relational and struct-based
+  (`@post debited: result.balance == account.balance - amount`, which mentions `result` and so has
+  no guard equivalent), followed by the actual failure output, and
+  by the FAQ's framing promoted out of hiding: **guards say what a function accepts; contracts
+  say what it promises**.
+
+  A new "What only a contract can say" section carries a class invariant plus `old/1` — an
+  `add_item/2` that forgets to update a derived total, caught on the way out with the offending
+  state in the binding. Both examples and both diagnostics were run and copied from real output
+  rather than composed.
+
+  Also added: a "When not to reach for Bond" section (guard-enforced constraints, hot paths,
+  type-shaped constraints), and half a sentence on the `Math.sqrt` example noting that its
+  type-check preconditions document the guard rather than replace it.
+
+- **The README is ordered for a reader rather than by feature.** It is three documents at once —
+  the GitHub front page, the hexdocs landing page (`main: "Bond"`), and the `Bond` module
+  reference — and the reference had won. Most consequentially, `## Installation` sat *after* the
+  `<!-- README END -->` marker, so the hexdocs landing page never told you how to install Bond:
+  a reader convinced by the pitch had nowhere to go. Installation now follows the pitch, inside
+  the moduledoc, and a short "Where to start" section routes evaluators and adopters differently
+  and says how the rest of the page is laid out.
+
+  The reference sections were also reordered so the assertion vocabulary comes before the features
+  built on it: `old` expressions and inline `check/1` now sit with "Assertion syntax" rather than
+  200 lines below the invariant, process-state, and inheritance sections that assume them.
+
+- **Concepts are now explained where a reader first meets them.** A pass over the README as a
+  newcomer would read it found several used long before their definitions: `subject` (~300 lines),
+  `:purge` (~560), and `~>` (~90). `forall`/`exists` were used twice and never explained at all,
+  which also meant the counterexample they produce — a genuine differentiator over
+  `Enum.all?/2` — went unmentioned. Each is now introduced at first use. The `Account` example in
+  the Getting Started guide was aligned with the README's, so the two front-door documents share
+  one running example instead of contradicting each other.
+
 ### Added
 
 - **`Bond.AssertionEvaluationError`**, raised when an assertion *expression* itself raises rather

@@ -56,15 +56,24 @@ value:
 defmodule Account do
   use Bond
 
+  defstruct [:balance]
+
   @pre amount > 0
-  @post result >= 0
-  def withdraw(balance, amount), do: balance - amount
+  @post non_negative: result.balance >= 0
+  def withdraw(%Account{} = account, amount) do
+    %{account | balance: account.balance - amount}
+  end
 end
 ```
 
-`Account.withdraw(100, 30)` returns `70`. `Account.withdraw(20, 50)` raises
-`Bond.PostconditionError` — the function returned a negative balance, which
-the postcondition forbids.
+`Account.withdraw(%Account{balance: 100}, 30)` returns an account with a balance
+of `70`. `Account.withdraw(%Account{balance: 20}, 50)` raises
+`Bond.PostconditionError` — the function returned a negative balance, which the
+postcondition forbids.
+
+Note what the postcondition can say that a guard cannot: it constrains the
+*return value*. Guards only see the arguments, and by the time the balance has
+gone negative the arguments are long past.
 
 ## Labelled assertions
 
