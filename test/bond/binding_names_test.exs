@@ -21,7 +21,15 @@ defmodule Bond.BindingNamesTest do
 
   # Telemetry handler as an MFA capture rather than an anonymous function, which
   # telemetry warns about as a performance penalty.
-  def handle_failure(_event, _measurements, meta, test), do: send(test, {:binding, meta.binding})
+  # Telemetry handlers are global, and other async test modules fire this same
+  # event, so forward only failures originating in this module's own fixtures.
+  # Without the filter a concurrently-running test's violation can be received
+  # here and fail an unrelated assertion.
+  @fixture_modules [Cart, UserNamedArg, OldExpression]
+
+  def handle_failure(_event, _measurements, meta, test) do
+    if meta.module in @fixture_modules, do: send(test, {:binding, meta.binding})
+  end
 
   # The binding from a violation, via the raised exception. The exception types are
   # named explicitly so the type checker knows `:binding` exists on the struct.

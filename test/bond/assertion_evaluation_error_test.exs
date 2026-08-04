@@ -19,7 +19,11 @@ defmodule Bond.AssertionEvaluationErrorTest do
   alias Bond.AssertionEvaluationError
   alias BondTest.Raising
 
-  def relay(_event, _measurements, metadata, pid), do: send(pid, {:failure, metadata})
+  # Same reason as in Bond.BindingNamesTest: the failure event is global and other
+  # async modules emit it, so only this module's fixtures are forwarded.
+  def relay(_event, _measurements, metadata, pid) do
+    if to_string(metadata.module) =~ "BondTest.Raising", do: send(pid, {:failure, metadata})
+  end
 
   # The arguments below are deliberately wrong for the contract under test, which
   # Elixir's type checker flags on a direct call — correctly, and exactly as it

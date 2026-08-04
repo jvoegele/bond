@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   type-shaped constraints), and half a sentence on the `Math.sqrt` example noting that its
   type-check preconditions document the guard rather than replace it.
 
+- **Concepts are now explained where a reader first meets them.** A pass over the README as a
+  newcomer would read it found several used long before their definitions: `subject` (~300 lines),
+  `:purge` (~560), and `~>` (~90). `forall`/`exists` were used twice and never explained at all,
+  which also meant the counterexample they produce — a genuine differentiator over
+  `Enum.all?/2` — went unmentioned. Each is now introduced at first use. The `Account` example in
+  the Getting Started guide was aligned with the README's, so the two front-door documents share
+  one running example instead of contradicting each other.
+
 ### Added
 
 - **`Bond.AssertionEvaluationError`**, raised when an assertion *expression* itself raises rather

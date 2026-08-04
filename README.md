@@ -57,6 +57,7 @@ defmodule Cart do
   defstruct items: [], total_cents: 0
 
   # Must hold before and after every public function in this module.
+  # `subject` is the struct instance being checked.
   @invariant total_matches_items:
                subject.total_cents == Enum.sum(Enum.map(subject.items, & &1.cents))
 
@@ -99,7 +100,9 @@ Volunteering the boundary is more useful than overselling:
     first, so the precondition can never fire. Write the guard; add the `@pre`
     only if you want it in the generated docs.
   * **Hot paths.** Contracts cost real nanoseconds per call. They can be
-    disabled at runtime or compiled out entirely with `:purge`, so the usual
+    switched off at runtime, or removed at compile time so that not even the
+    check remains (the `:purge` setting, covered under
+    [Conditional compilation](#module-conditional-compilation)). The usual
     answer is to leave them on in dev and test and purge them in production —
     see the [Overhead](guides/overhead.md) guide for measured figures.
   * **Type-shaped constraints alone.** If all you want to say is "this is an
@@ -136,8 +139,10 @@ end
 This one is chosen to show the syntax rather than to argue the case: the two
 preconditions restate what a `when is_number(x) and x >= 0` guard would enforce,
 so as written they document the guard rather than replace it. The three
-implication clauses (`~>`) are the interesting half — each relates the input to
-the result, which no guard can express. See
+implication clauses are the interesting half — `~>` reads "implies", so
+`(x > 1) ~> (result < x)` asserts nothing at all unless `x > 1`, and asserts
+`result < x` when it does. Each relates the input to the result, which no guard
+can express. See
 [Should I remove guards when I add contracts?](guides/faq.md#should-i-remove-guards-and-pattern-matches-when-i-add-contracts).
 
 `@pre` and `@post` accept one or more labelled assertions. Preconditions
@@ -280,6 +285,24 @@ single lumped label for a `<~`-with-`when`-guard alternation. If you migrate an
 existing guarded `<~` contract to per-shape `whenever` clauses this way, expect
 the reported violation labels to become more specific — handy in practice, but
 something to update if you have tests asserting on the old label.
+
+> #### `forall` and `exists` {: .info}
+>
+> The examples above use Bond's two quantifiers, which appear here for the first
+> time. `forall(x <- enum, predicate)` asserts the predicate holds for every
+> element; `exists(x <- enum, predicate)` asserts it holds for at least one.
+>
+> They earn their place by what they say on failure. A hand-written
+> `Enum.all?(urls, &String.starts_with?(&1, "https"))` reports only `false`;
+> `forall` reports the **counterexample** — which element failed, and its index:
+>
+> ```
+> |   counterexample: element at index 2 ("http://x") does not satisfy `String.starts_with?(u, "https")`
+> ```
+>
+> See `Bond.Predicates` for both, and the
+> [Quantified assertions](guides/getting-started.md#quantified-assertions)
+> section of the Getting Started guide for a walkthrough.
 
 The scoped assertions are ordinary assertions — bare or labelled, using any
 predicate, operator, quantifier, or function call — and each is reported
