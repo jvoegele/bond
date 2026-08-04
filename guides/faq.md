@@ -347,37 +347,75 @@ balance minus the argument." Use both.
 
 ## Should I remove guards and pattern matches when I add contracts?
 
-**No.** Contracts are an additive layer over ordinary defensive Elixir, not
-a replacement for it. Guards (`when is_binary(x)`) and structural patterns
-(`%DateTime{utc_offset: 0} = dt`) should stay exactly where they were.
+It depends on what the guard is doing — and the question is worth taking
+seriously, because Design by Contract has a rule about it. Bertrand Meyer calls
+it the **Non-Redundancy Principle** (*Object-Oriented Software Construction*,
+2nd edition, §11.6, p. 343):
 
-Two reasons, and the second surprises people:
+> Under no circumstances shall the body of a routine ever test for the routine's
+> precondition.
 
-1. **Contracts can be switched off.** They can be disabled at runtime with
-   `Bond.Config`, or compiled out entirely with `:purge`. A guard you deleted
-   in favour of a `@pre` is gone in every build where contracts are off, and
-   the function silently accepts input it was written to reject.
+Either the condition is in the `require` clause, or it is in an `if` in the
+body — never both. Meyer presents this as the opposite of defensive programming:
+a condition checked in two places belongs to nobody, and the duplicate code is
+extra surface for bugs rather than extra safety.
 
-2. **The guard runs first.** Bond reproduces your `when` guards on the
-   wrapper clauses so multi-clause dispatch keeps working, which means an
-   argument that fails the guard raises `FunctionClauseError` before any
-   precondition is evaluated. A `@pre` that merely restates a guard is
-   therefore unreachable as a `Bond.PreconditionError` — the guard is the
-   real enforcer, and the `@pre` documents it.
+An Elixir guard is not quite Eiffel's `if`, though, which is what makes the
+answer three-way:
 
-| Layer | Role | Active when |
+| What the guard is doing | Example | Keep it? |
 |---|---|---|
-| Guard / structural pattern | Correctness enforcement | Always |
-| `@pre` / `@post` | Documentation, diagnostics, property-test oracle | Contracts enabled |
+| **Selecting a clause** | `def parse(x) when is_binary(x)`, beside a `when is_list(x)` clause | **Yes.** It's dispatch, not a check — delete it and different code runs. |
+| **Standing in for a type** | `when is_binary(email)` | **Yes.** This is Elixir's `email: STRING`. Don't restate it as a `@pre`. |
+| **Stating a domain rule** | `when amount <= account.balance` | **Pick one.** This is the case the principle governs. |
 
-This has a direct consequence for tests. Use
-`Bond.Test.assert_precondition_violation/2` for preconditions with *no*
-corresponding guard — semantic constraints that only a contract can express,
-like a cross-field relationship. For a precondition backed by a guard, assert
+Only the third is redundancy in Meyer's sense. The first two live in the
+signature rather than the body: Eiffel's answer to "is this a string?" is the
+declared type, and nothing in Design by Contract asks you to drop that.
+
+For the third, choose by **whose fault a violation is**. If calling with an
+amount over the balance is the caller's mistake, that is a precondition — write
+`@pre sufficient_funds: amount <= account.balance` and drop the guard. If the
+function is meant to cope with it, it isn't a precondition at all: handle it in
+the body and return `{:error, :insufficient_funds}`.
+
+### Why not keep both, just in case?
+
+Because a `@pre` that restates a guard can never fire. Bond reproduces your
+`when` guards on the wrapper clauses so multi-clause dispatch keeps working, so
+an argument that fails the guard raises `FunctionClauseError` *before* any
+precondition is evaluated. The `@pre` is unreachable as a
+`Bond.PreconditionError` — an assertion you will never see fail, which is
+exactly what [Writing sound assertions](writing-sound-assertions.md) is about.
+Bond's assertion linter cannot catch this one (it only warns where it can
+*prove* an assertion constant), so it stays advice rather than a warning.
+
+### But contracts can be purged — isn't the guard my safety net?
+
+This is the strongest argument for keeping both, and Meyer's answer is that it
+points at a misclassification rather than a need for redundancy. If a condition
+has to hold in a build with contracts compiled out, it was never a precondition:
+
+  * **Data from outside the system** — a request body, a config file, a CSV
+    row — has no contract to violate, because there is no caller of yours to
+    blame. Validate it at the boundary with ordinary code, and let the functions
+    behind that boundary take preconditions about data already known to be good.
+  * **A condition you don't trust callers to meet** is a statement that the
+    function is tolerant rather than demanding. Say so in the body, and return a
+    value.
+  * **A condition you do trust callers to meet** is a precondition, and purging
+    it in production is the trade you chose when you purged — the same trade as
+    switching off any other assertion.
+
+### Consequence for tests
+
+Use `Bond.Test.assert_precondition_violation/2` for preconditions with *no*
+corresponding guard — semantic constraints only a contract can express, like a
+cross-field relationship. Where a guard is doing the work, assert
 `FunctionClauseError` instead, because that is what fires and what should fire.
 
-The division of labour that works well: let guards and patterns say what the
-function *accepts*, and let contracts say what it *promises* — the
+The division of labour that falls out: guards and patterns say what the function
+*accepts* and which clause handles it; contracts say what it *promises* — the
 relationships between arguments, and between arguments and the result, that a
 guard cannot express at all.
 

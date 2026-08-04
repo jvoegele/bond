@@ -31,8 +31,8 @@ end
 `@pre` declares a **precondition** — what the caller must satisfy for the call to
 be valid. `@post` declares a **postcondition** — what the function promises in
 return, provided the precondition held. A postcondition can mention `result`, the
-function's return value, which a `when` guard cannot do at all. (Contracts sit
-alongside guards and patterns rather than replacing them — see
+function's return value, which a `when` guard cannot do at all. (Guards keep the
+jobs only they can do — dispatch, and standing in for types — see
 [Should I remove guards when I add contracts?](guides/faq.md#should-i-remove-guards-and-pattern-matches-when-i-add-contracts).)
 
 Note what `conserved` is *not*: a restatement of the body. The body moves money;

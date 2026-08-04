@@ -25,14 +25,15 @@ defmodule Math do
 end
 ```
 
-This one is chosen to show the syntax rather than to argue the case: the two
-preconditions restate what a `when is_number(x) and x >= 0` guard would enforce,
-so as written they document the guard rather than replace it. The three
-implication clauses are the interesting half — `~>` reads "implies", so
+This one is chosen to show the syntax rather than to argue the case, and the two
+preconditions are the half you should *not* copy: they restate what a
+`when is_number(x) and x >= 0` guard enforces, so with the guard present neither
+can ever fail. Write one or the other, not both — see
+[Should I remove guards when I add contracts?](faq.md#should-i-remove-guards-and-pattern-matches-when-i-add-contracts).
+The three implication clauses are the interesting half — `~>` reads "implies", so
 `(x > 1) ~> (result < x)` asserts nothing at all unless `x > 1`, and asserts
 `result < x` when it does. Each relates the input to the result, which no guard
-can express. See
-[Should I remove guards when I add contracts?](faq.md#should-i-remove-guards-and-pattern-matches-when-i-add-contracts).
+can express.
 
 `@pre` and `@post` accept one or more labelled assertions. Preconditions
 have access to the function's parameters; postconditions also have access
