@@ -18,7 +18,7 @@ contracts catch bugs sooner with less work.
 ## Will contracts slow down my production code?
 
 Not if you `:purge` them. Bond supports
-[compile-time conditional compilation](Bond.html#module-conditional-compilation):
+[compile-time conditional compilation](configuration.md):
 
 ```elixir
 # config/prod.exs — strip contracts entirely from this build
@@ -547,7 +547,7 @@ see the next entry.
 
 Violations raise `Bond.InvariantError` and emit `[:bond, :assertion, :failure]`
 telemetry with `:kind => :invariant`. See the
-[Invariants](Bond.html#module-invariant-for-struct-modules) section in the
+[Invariants](invariants.md) section in the
 moduledoc.
 
 ## Why is Bond warning about skipped invariants?

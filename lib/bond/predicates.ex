@@ -124,7 +124,8 @@ defmodule Bond.Predicates do
   Note that the `~>` operator has higher precedence than many other operators
   and it may be necessary to parenthesize the expressions on either side of
   the operator to get the expected result. See the
-  ["Operator precedence"](#module-operator-precedence) section above.
+  ["Operator precedence trap"](writing-contracts.md#assertion-syntax) note in the
+  Writing Contracts guide.
 
   ## Examples
 

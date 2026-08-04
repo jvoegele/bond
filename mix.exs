@@ -98,15 +98,22 @@ defmodule Bond.MixProject do
       extras: [
         {"LICENSE", [title: "License"]},
         "CHANGELOG.md",
+        # Ordered roughly by the questions a reader asks, in the order they ask
+        # them: learn it, write it, write it well, then the larger features, then
+        # the operational concerns, then reference.
         "guides/getting-started.md",
+        "guides/writing-contracts.md",
         "guides/writing-sound-assertions.md",
-        "guides/contract-inheritance.md",
+        "guides/invariants.md",
         "guides/reusable-contracts.md",
+        "guides/contract-inheritance.md",
         "guides/contracts-and-concurrency.md",
         "guides/testing-contracts.md",
+        "guides/configuration.md",
+        "guides/overhead.md",
+        "guides/telemetry.md",
         "guides/stability.md",
         "guides/public-api.md",
-        "guides/overhead.md",
         "guides/faq.md",
         "guides/about.md",
         "guides/history.md"

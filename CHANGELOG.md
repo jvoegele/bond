@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- **The reference moved off the landing page into four topical guides.** The `Bond` moduledoc was
+  doing three jobs — GitHub front page, hexdocs landing page (`main: "Bond"`), and module
+  reference — and the reference had won: 994 lines, of which 846 were reference. It is now 177.
+
+  New guides, all previously homeless material with no other home in the docs:
+
+  | guide | from |
+  |---|---|
+  | Writing Contracts | Usage, assertion syntax, `old`, `check/1`, `where`/`whenever`, documenting contracts |
+  | Invariants | `@invariant` for structs, and the `Bond.Server` bridge |
+  | Configuring Contracts | the contract-checking chain, runtime toggling, per-module overrides |
+  | Telemetry | the `[:bond, :assertion, :failure]` event |
+
+  Four further sections — contract inheritance for behaviours and protocols, testing, stability —
+  were lossy summaries of guides that already existed at three to ten times the length. They are
+  replaced by a "Where to go from here" map that lists every guide with a line on what it answers.
+
+  The landing page is now pitch, installation, and that map. Cross-references were rewritten (the
+  `#module-*` anchors that pointed into the moduledoc now point at the guide that owns the
+  section), and the sidebar reorders to follow the questions a reader actually asks: learn it,
+  write it, write it well, the larger features, then the operational concerns.
+
+### Changed
+
 - **The README now opens with a contract that a guard could not express**
   ([#82](https://github.com/jvoegele/bond/issues/82)). It previously led with
   `@pre positive_amount: amount > 0` and `@pre numeric_x: is_number(x)` — contracts the FAQ

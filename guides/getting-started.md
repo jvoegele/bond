@@ -319,7 +319,7 @@ public function's head (`%__MODULE__{} = name` pattern,
 and rebinds `subject` to it — you write the invariant once and Bond
 applies it everywhere.
 
-See the [`@invariant`](Bond.html#module-invariant-for-struct-modules)
+See the [`@invariant`](invariants.md)
 section of the moduledoc for head-shape detection, multi-struct
 heads, and per-module configuration.
 
@@ -413,7 +413,7 @@ where contracts act as the oracle for random inputs — see the
 ## Next steps
 
 - The `Bond` moduledoc has the full reference, including the
-  [`@invariant`](Bond.html#module-invariant-for-struct-modules) section
+  [`@invariant`](invariants.md) section
   for module-wide constraints on every instance of a struct.
 - The [Testing Contracts](testing-contracts.md) guide covers the whole
   testing surface — `Bond.Test`'s example-based assertions and
