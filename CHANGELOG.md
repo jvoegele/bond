@@ -208,26 +208,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   [Writing sound assertions](guides/writing-sound-assertions.md) guide, covering the common partial
   predicates and the fix (lead with a type check).
 
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
-
 ### Fixed
 
 - **Bond's own generated variable names no longer appear in the `binding:` of a violation**
@@ -415,26 +395,6 @@ intact — previously it was discarded on any function Bond did not wrap, includ
 function in a build with contracts purged — and `Bond.Server` no longer wraps functions that
 merely share a name and arity with a `GenServer` callback.
 
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
-
 ### Fixed
 
 - **`@doc` is no longer discarded on functions Bond does not wrap**
@@ -594,26 +554,6 @@ that warns on statically vacuous assertions. Also adds a minor, opt-in contract-
   signal — most postconditions and invariants over correct code legitimately never fail — so expect
   many such rows in a mature codebase and treat them as an occasional prompt, not a to-do list.
 
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
-
 ### Fixed
 
 - **A `forall`/`exists` generator-pattern mismatch is now a clean counterexample, not a crash**
@@ -633,26 +573,6 @@ that warns on statically vacuous assertions. Also adds a minor, opt-in contract-
 
 A formatter fix: downstream projects that put `:bond` in their `:import_deps` no longer have
 `mix format` re-parenthesise their contracts.
-
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
 
 ### Fixed
 
@@ -939,26 +859,6 @@ Promotes `1.8.0-rc.1` unchanged.
   documented limitations (nested quantifiers report the outermost element; a single
   generator per quantifier).
 
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
-
 ### Fixed
 
 - **Documentation: corrected stale runtime-toggle guidance.** The FAQ, getting-started
@@ -1025,26 +925,6 @@ feedback on the keywords and semantics is welcome via
   unaffected.
 
 ## [1.2.1] - 2026-06-12
-
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
 
 ### Fixed
 
@@ -1224,26 +1104,6 @@ See the entries below for the detailed changes made in each candidate.
 
 Fixes a soundness gap in multi-clause `@invariant` enforcement (GitHub #22).
 
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
-
 ### Fixed
 
 - **A struct clause's `@invariant` pre-check is no longer silently skipped on
@@ -1345,26 +1205,6 @@ single keyword-list form.
   `@pre expr` (bare) and `@pre label: expr` (keyword) are the two remaining
   forms. The removed positional shapes raise a `CompileError` with the migration
   message. The qualified `Bond.pre`/`Bond.post` calls are likewise keyword-only.
-
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
 
 ### Fixed
 
@@ -1670,26 +1510,6 @@ guard. Surfaced by a dogfood round in a real consumer (Photon) where every
 warning, forcing the consumer to suppress with `@dialyzer :no_match` per
 module.
 
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
-
 ### Fixed
 
 - **Lifted assertion defps no longer emit `if`/`else` inline.** The
@@ -1752,26 +1572,6 @@ new downstream-consumer integration test that compiles and Dialyzer-checks
 the code Bond generates into a using module. Also expands the CI matrix to
 five Elixir versions and eliminates a family of parallel-compile races
 exposed by Elixir 1.19's more aggressive parallel compiler.
-
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
 
 ### Fixed
 
@@ -1912,26 +1712,6 @@ otherwise have required renaming every parameter across all clauses.
   argument for the set of names requiring agreement. The 3-arg form
   remains (defaulting to `:all`) for strict-mode callers and existing
   tests.
-
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
 
 ### Fixed
 
@@ -2210,26 +1990,6 @@ conversation.
   examples and explicitly notes which forms aren't valid (bare
   literals, bare variables, non-call expressions).
 
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
-
 ### Fixed
 
 - **`@pre is_binary(x), positive: x > 0`** (bare assertion mixed with
@@ -2313,26 +2073,6 @@ date with 0.16.0.
   reference. The intro line at the top mentions `@invariant` alongside
   `@pre`/`@post`/`check/1`. The disabling-in-production config snippet
   now lists `:invariants` (was listing three of four keys).
-
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
 
 ### Fixed
 
@@ -2785,26 +2525,6 @@ events fire on assertion failures.
   flat within noise — `should_evaluate?/2` short-circuits before the
   closure is allocated.
 
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
-
 ### Fixed
 
 - `Bond.CheckError`'s `message/1` no longer crashes when the error's
@@ -2985,26 +2705,6 @@ refactor plus a handful of usability improvements.
 
 - `binding/0` captured in assertion-failure info is sorted by name so
   failure messages are reproducible across runs.
-
-### Changed
-
-- **Invariant entry checks now see through nested head patterns** (#84). A struct carried
-  inside a tuple, map, or list — `def handle({:wrapped, %__MODULE__{} = cart})` — is
-  checked on entry, provided the head binds it to a name. Heads nesting several structs
-  check each, left to right.
-
-  Previously only top-level parameters were classified, so these functions got an entry
-  check only by accident: if the function happened to *return* the struct, the exit check
-  covered it. One that took a nested struct and returned something else was unchecked, and
-  silently — the struct is "mentioned", so `:warn_skipped_invariants` stayed quiet.
-
-  Still not detected, and now documented in the head-shape table: a nested pattern that
-  binds nothing (`{:wrapped, %__MODULE__{items: items}}`), which leaves Bond no value to
-  hand the invariant. Add `= name` to get the check.
-
-  This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
-  map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
-  and raised only if the struct came back out.
 
 ### Fixed
 
