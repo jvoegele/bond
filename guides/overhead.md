@@ -83,9 +83,12 @@ For a typical application:
     your own codebase with `bench/compile_overhead.exs` before deciding
     whether `:purge`ing in dev is worth it.
 
-Compile-time cost is the dimension where Bond has grown, not shrunk: the
-same benchmark against 1.0.0-rc.1 measured ~10 ms/module (~4.4× baseline).
-Runtime overhead moved the other way over the same period.
+This figure is higher than it should be, and the cause is known. Every
+released version from 1.2.0 through 1.13.2 measures 9–11 ms per module on
+this same machine; the jump to ~31 ms came from a single unreleased change
+that wraps each assertion in a `try/rescue`, and is tracked as
+[#96](https://github.com/jvoegele/bond/issues/96). Runtime overhead moved
+the other way over the same period.
 
 Bond starts a `:gen_statem` per compiling module (stopped in
 `__after_compile__`), so the per-module overhead is roughly constant
