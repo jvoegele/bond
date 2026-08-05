@@ -39,7 +39,11 @@ Purge from the top down: the contract-checking chain requires that if you
 [Why can't I have postconditions on while preconditions are off?](#why-can-t-i-have-postconditions-on-while-preconditions-are-off)
 below.
 
-A typical pattern: contracts on in dev/test, `:purge`d in prod.
+Purging everything is one posture, not the only one. Keeping preconditions —
+the cheapest kind, and the only one that catches a caller's bug — while purging
+the rest is a common middle ground, and `false` keeps checks compiled in but
+inert so a remote console can switch them on mid-incident. See
+[Choosing what runs in production](configuration.md#choosing-what-runs-in-production).
 
 For concrete numbers — how many nanoseconds each contract kind adds per
 call, and how much compile time Bond costs per module — see the

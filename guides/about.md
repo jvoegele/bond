@@ -27,10 +27,10 @@ environments routinely surface contract violations on paths the test
 suite never exercised.
 
 **Without paying for it in production.** Per-kind configuration
-(`true | false | :purge`) lets you keep contracts on in dev/test and
-strip them entirely from prod builds. `:purge` removes the override at
-compile time, so the production BEAM contains no contract evaluation
-code at all.
+(`true | false | :purge`) lets you decide, per environment and per module,
+what a build actually checks — everything, preconditions only, or nothing.
+`:purge` removes the override at compile time, so a production BEAM can
+contain no contract evaluation code at all.
 
 **Alongside what you already have.** Contracts compose with StreamData
 (your contracts are the PBT oracle), telemetry

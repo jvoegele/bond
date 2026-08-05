@@ -184,8 +184,10 @@ leaves it switched off, so a release can run with contracts inert and have them
 enabled from a remote console while a problem is being diagnosed. See
 [Configuring Contracts](guides/configuration.md).
 
-The usual arrangement is contracts on in dev and test, purged in production —
-which is why it is worth writing the expensive, interesting ones.
+Contracts are normally on in dev and test. What you keep in production is a
+separate decision — often nothing, often just the preconditions, which are the
+cheapest kind and the only one that tells you a *caller* is at fault. Either way,
+that is why it is worth writing the expensive, interesting ones.
 
 ## Installation
 

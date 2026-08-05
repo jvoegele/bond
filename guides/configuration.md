@@ -122,6 +122,60 @@ about the same as a one-argument one.
 
 For genuinely hot-path code, prefer `:purge`.
 
+## Choosing what runs in production
+
+Dev and test almost always want everything on. Production is a real decision, and the
+three modes combine into three postures worth knowing:
+
+**Everything purged.** No contract code in the build at all.
+
+```elixir
+# config/prod.exs
+config :bond,
+  preconditions: :purge,
+  postconditions: :purge,
+  invariants: :purge,
+  checks: :purge
+```
+
+**Preconditions only.** The chain requires that a purged kind has every kind *above* it
+purged — so the lowest kind is the one you can keep:
+
+```elixir
+# config/prod.exs
+config :bond,
+  preconditions: true,
+  postconditions: :purge,
+  invariants: :purge,
+  checks: :purge
+```
+
+Preconditions have the best cost-to-value ratio of the three. They are the cheapest to
+evaluate — roughly a third of an invariant, which fires twice per call and shape-tests the
+return value (see [Overhead](overhead.md)) — and they are the only kind that catches a
+**caller's** bug. That is exactly the failure you cannot reconstruct from the callee's
+logs afterwards: a precondition violation names the caller and hands you the binding it
+called with. This is close to Eiffel's own default posture, where monitoring is set to
+`require` across the system and raised only for selected classes.
+
+**Compiled in, switched off.** Use `false` instead of `:purge` to keep the checks in the
+build but inert, so they can be enabled from a remote console mid-incident:
+
+```elixir
+# config/prod.exs
+config :bond, preconditions: false, postconditions: false, invariants: false
+```
+
+```elixir
+# then, in a remote console on the running release
+Bond.Config.enable(:preconditions)
+```
+
+You pay the runtime gate on every call (a single `:persistent_term` read) and nothing for
+the assertions until you switch them on. Mixing postures is fine, and
+[per-module overrides](#per-module-overrides) are how you do it — purge the hot paths,
+keep preconditions everywhere else.
+
 ## Per-module overrides
 
 Use `:overrides` in your `:bond` config to make exceptions to the global
@@ -145,32 +199,6 @@ Precedence (most specific wins):
 2. `:overrides` entry whose key is an exact module atom.
 3. `:overrides` entry whose key is a regex (first match in list order wins).
 4. Global `:bond` config (lowest).
-
-## Keeping preconditions on in production
-
-The usual arrangement — everything on in dev and test, everything purged in prod — is not
-the only sensible one, and Bond's docs shouldn't imply it is. Because the chain only
-requires that a purged kind has every kind *above* it purged, the lowest kind can stay:
-
-```elixir
-# config/prod.exs — keep the cheapest, most diagnostic layer
-config :bond,
-  preconditions: true,
-  postconditions: :purge,
-  invariants: :purge,
-  checks: :purge
-```
-
-Preconditions are the layer with the best cost-to-value ratio in production. They are the
-cheapest to evaluate (see [Overhead](overhead.md) — roughly a third the cost of an
-invariant, which fires twice per call and shape-tests the return value), and they are the
-only kind that catches a **caller's** bug, which is precisely the failure you cannot
-reproduce from the callee's logs. A precondition violation in production tells you who
-called you wrongly, with the binding attached.
-
-This is closer to Eiffel's own default posture than to all-or-nothing: Meyer's worked
-configuration enables `require` across the whole system and raises the level only for
-selected classes.
 
 A module can also opt out (or in) directly at the `use` site:
 

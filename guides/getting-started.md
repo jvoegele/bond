@@ -254,7 +254,7 @@ in mind:
   `Enum.all?/2` would. This is exactly what Bond's runtime gate is for —
   disable the kind in production (`config :bond, postconditions: false`, or
   `Bond.Config` at runtime; see
-  [Disabling contracts in production](#disabling-contracts-in-production))
+  [Deciding what runs in production](#deciding-what-runs-in-production))
   so the traversal never runs there.
 
 - **Assertions must be side-effect-free — and enumerating a lazy stream is
@@ -398,7 +398,7 @@ drops `count` below the previous value raises `Bond.InvariantError`. See
 `Bond.Server` and the
 [Contracts in a Concurrent World](contracts-and-concurrency.md) guide.
 
-## Disabling contracts in production
+## Deciding what runs in production
 
 Bond's four application-config keys — `:preconditions`, `:postconditions`,
 `:invariants`, `:checks` — each accept `true`, `false`, or `:purge`:
@@ -411,6 +411,11 @@ config :bond,
   invariants: :purge,
   checks: :purge
 ```
+
+That is one choice of several. Keeping preconditions on — the cheapest kind,
+and the only one that catches a *caller's* bug — while purging the rest is a
+common middle ground; see
+[Choosing what runs in production](configuration.md#choosing-what-runs-in-production).
 
 - **`true` (default)** — compiled in, runtime-togglable, evaluated by default.
 - **`false`** — compiled in, runtime-togglable, *not* evaluated by default.
