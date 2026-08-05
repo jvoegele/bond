@@ -725,6 +725,11 @@ struct parameter in the function head and pre-checks against it:
       rewrites the override clause to capture the struct under a
       generated name so the pre-check still fires.
 
+  A struct nested inside a tuple, map, or list is checked too, provided the
+  head binds it (`{:wrapped, %__MODULE__{} = cart}`). A nested pattern that
+  binds nothing (`{:wrapped, %__MODULE__{items: items}}`) gives Bond no value
+  to check — add `= name`.
+
   Any name that resolves to the module works in place of `__MODULE__` —
   `%MyApp.Cart{} = cart`, `is_struct(cart, MyApp.Cart)`, and a short `%Cart{}`
   where `alias __MODULE__` is in scope. Bond resolves names against the module's

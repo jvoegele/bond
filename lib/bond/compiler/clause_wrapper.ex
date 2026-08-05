@@ -89,8 +89,34 @@ defmodule Bond.Compiler.ClauseWrapper do
     # exclude them from the underscore-prefixing pass — the emitted `when`
     # guard (below) references them.
     guard_vars = Clauses.guard_var_names(guards)
+
+    # Names bound to the struct below the top level (`{:wrapped, %__MODULE__{} = s}`).
+    # The pre-invariant statement references them, so — like guard-referenced names —
+    # they must survive `rewrite_clause_params/3`'s underscore-prefixing pass. Collected
+    # from the *original* params, before the rewrite (#84).
+    nested_struct_vars =
+      if context.inv_mode == :purge do
+        []
+      else
+        Enum.flat_map(
+          clean_params,
+          &Invariants.nested_struct_vars(
+            &1,
+            context.struct_module,
+            Map.get(context, :aliases, [])
+          )
+        )
+      end
+
     clause_names = resolve_clause_names(clean_params, canonical_names)
-    head_params = Clauses.rewrite_clause_params(clean_params, clause_names, guard_vars)
+
+    head_params =
+      Clauses.rewrite_clause_params(
+        clean_params,
+        clause_names,
+        Enum.concat(guard_vars, nested_struct_vars)
+      )
+
     super_args = Enum.map(clause_names, &Macro.var(&1, nil))
 
     # Invariant struct detection runs on the rewritten head — so destructure-

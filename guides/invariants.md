@@ -71,6 +71,8 @@ parameter in any of these head shapes:
 | `def foo(%__MODULE__{} = name, ...)` | yes | yes, on the captured struct |
 | `def foo(x, ...) when is_struct(x, __MODULE__)` | yes | yes, on `x` |
 | `def foo(%__MODULE__{field: ...}, ...)` (destructure-only) | yes | yes, on the captured struct |
+| `def foo({:wrapped, %__MODULE__{} = name})` (nested, bound) | yes | yes, on `name` |
+| `def foo({:wrapped, %__MODULE__{field: ...}})` (nested, destructure-only) | no | skipped — nothing is bound to check |
 | `def foo(x, ...)` (no pattern, no guard) | no | skipped silently |
 | `defp ...` (any shape) | no | skipped — private functions exempt by Eiffel convention |
 
@@ -82,6 +84,17 @@ name against the module's own alias table, so it agrees with what Elixir itself 
 The corollary is that a name is only detected when it really does mean this module. A bare
 `%Cart{}` inside `MyApp.Cart` with **no** alias in scope refers to `Elixir.Cart`, a
 different module, and Bond treats it as one — as does Elixir.
+
+A struct carried *inside* a tuple, map, or list is checked too, as long as the head binds
+it to a name: `def handle({:wrapped, %__MODULE__{} = cart})` gets an entry check on
+`cart`, and a head nesting several structs checks each, left to right. What is not checked
+is a nested pattern that binds nothing —
+`def handle({:wrapped, %__MODULE__{items: items}})` gives Bond no value to hand the
+invariant. Add `= name` if you want the check:
+
+```elixir
+def handle({:wrapped, %__MODULE__{items: items} = cart}), do: ...
+```
 
 The post-check on exit matches both `%__MODULE__{}` and `{:ok,
 %__MODULE__{}}` return shapes. Other shapes (`{:error, _}`, bare
