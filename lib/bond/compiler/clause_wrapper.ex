@@ -100,7 +100,7 @@ defmodule Bond.Compiler.ClauseWrapper do
       if context.inv_mode == :purge do
         []
       else
-        Invariants.detect_struct_params(head_params, clause.guards || [])
+        Invariants.detect_struct_params(head_params, clause.guards || [], context.struct_module)
       end
 
     pre_invariant_stmts =

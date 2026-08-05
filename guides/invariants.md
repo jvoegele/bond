@@ -74,6 +74,17 @@ parameter in any of these head shapes:
 | `def foo(x, ...)` (no pattern, no guard) | no | skipped silently |
 | `defp ...` (any shape) | no | skipped — private functions exempt by Eiffel convention |
 
+You may write the module's name instead of `__MODULE__` throughout — `%MyApp.Cart{} = cart`
+and `is_struct(cart, MyApp.Cart)` are detected exactly as the `__MODULE__` forms are, in
+every position above.
+
+One spelling does *not* work, because it does not mean what it looks like: a bare
+`%Cart{}` inside `MyApp.Cart`. Elixir does not alias a module's own last segment, so that
+pattern names `Elixir.Cart` — a different module — and Bond treats it as one. (In a
+single-segment `defmodule Cart`, `%Cart{}` *is* the module, and is detected.) If you have
+aliased your own struct locally, write `__MODULE__` or the qualified name in heads that
+invariants should guard.
+
 The post-check on exit matches both `%__MODULE__{}` and `{:ok,
 %__MODULE__{}}` return shapes. Other shapes (`{:error, _}`, bare
 integers, etc.) fall through with no check. If your function returns the

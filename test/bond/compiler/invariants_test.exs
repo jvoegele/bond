@@ -5,20 +5,20 @@ defmodule Bond.Compiler.InvariantsTest do
 
   alias Bond.Compiler.Invariants
 
-  describe "detect_struct_params/2" do
+  describe "detect_struct_params/3" do
     test "detects `%__MODULE__{} = name` at position 0" do
       params = quote(do: [%__MODULE__{} = stack, item])
-      assert Invariants.detect_struct_params(params, []) == [{:bound, :stack, 0}]
+      assert Invariants.detect_struct_params(params, [], TestStruct) == [{:bound, :stack, 0}]
     end
 
     test "detects reversed `name = %__MODULE__{}` pattern" do
       params = quote(do: [stack = %__MODULE__{}, item])
-      assert Invariants.detect_struct_params(params, []) == [{:bound, :stack, 0}]
+      assert Invariants.detect_struct_params(params, [], TestStruct) == [{:bound, :stack, 0}]
     end
 
     test "detects destructure-and-bind `%__MODULE__{field: x} = name`" do
       params = quote(do: [%__MODULE__{field: x} = stack, item])
-      assert Invariants.detect_struct_params(params, []) == [{:bound, :stack, 0}]
+      assert Invariants.detect_struct_params(params, [], TestStruct) == [{:bound, :stack, 0}]
     end
 
     test "detects the nested `canonical = (%__MODULE__{} = inner)` rewrite shape" do
@@ -27,97 +27,97 @@ defmodule Bond.Compiler.InvariantsTest do
       # functions whose clauses disagree on the position's name). Binds the OUTER
       # (canonical) variable.
       params = quote(do: [bond_arg_0 = %__MODULE__{} = _ctx])
-      assert Invariants.detect_struct_params(params, []) == [{:bound, :bond_arg_0, 0}]
+      assert Invariants.detect_struct_params(params, [], TestStruct) == [{:bound, :bond_arg_0, 0}]
     end
 
     test "detects the nested rewrite over a destructuring inner pattern" do
       params = quote(do: [bond_arg_0 = %__MODULE__{field: x} = _ctx])
-      assert Invariants.detect_struct_params(params, []) == [{:bound, :bond_arg_0, 0}]
+      assert Invariants.detect_struct_params(params, [], TestStruct) == [{:bound, :bond_arg_0, 0}]
     end
 
     test "returns [] for a nested match wrapping an unrelated struct" do
       params = quote(do: [bond_arg_0 = %OtherMod{} = _ctx])
-      assert Invariants.detect_struct_params(params, []) == []
+      assert Invariants.detect_struct_params(params, [], TestStruct) == []
     end
 
     test "detects struct at a non-zero parameter position" do
       params = quote(do: [item, %__MODULE__{} = stack])
-      assert Invariants.detect_struct_params(params, []) == [{:bound, :stack, 1}]
+      assert Invariants.detect_struct_params(params, [], TestStruct) == [{:bound, :stack, 1}]
     end
 
     test "detects destructure-only `%__MODULE__{...}` without binding" do
       params = quote(do: [%__MODULE__{items: [h | _]}, item])
-      assert Invariants.detect_struct_params(params, []) == [{:destructure, 0}]
+      assert Invariants.detect_struct_params(params, [], TestStruct) == [{:destructure, 0}]
     end
 
     test "detects bare `name` plus `is_struct(name, __MODULE__)` guard" do
       params = quote(do: [x, item])
       guards = quote(do: [is_struct(x, __MODULE__)])
-      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+      assert Invariants.detect_struct_params(params, guards, TestStruct) == [{:bound, :x, 0}]
     end
 
     test "detects is_struct inside left side of compound `and` guard" do
       params = quote(do: [x, y])
       guards = quote(do: [is_struct(x, __MODULE__) and is_integer(y)])
-      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+      assert Invariants.detect_struct_params(params, guards, TestStruct) == [{:bound, :x, 0}]
     end
 
     test "detects is_struct inside right side of compound `and` guard" do
       params = quote(do: [x, y])
       guards = quote(do: [is_integer(y) and is_struct(x, __MODULE__)])
-      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+      assert Invariants.detect_struct_params(params, guards, TestStruct) == [{:bound, :x, 0}]
     end
 
     test "detects is_struct inside `or` guard" do
       params = quote(do: [x])
       guards = quote(do: [is_atom(x) or is_struct(x, __MODULE__)])
-      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+      assert Invariants.detect_struct_params(params, guards, TestStruct) == [{:bound, :x, 0}]
     end
 
     test "detects is_struct nested inside `and` inside `or`" do
       params = quote(do: [x, y])
       guards = quote(do: [is_nil(y) or (is_integer(y) and is_struct(x, __MODULE__))])
-      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+      assert Invariants.detect_struct_params(params, guards, TestStruct) == [{:bound, :x, 0}]
     end
 
     test "detects is_struct across multiple `when ... when ...` guards" do
       params = quote(do: [x])
       guards = quote(do: [is_atom(x), is_struct(x, __MODULE__)])
-      assert Invariants.detect_struct_params(params, guards) == [{:bound, :x, 0}]
+      assert Invariants.detect_struct_params(params, guards, TestStruct) == [{:bound, :x, 0}]
     end
 
     test "returns multiple entries for `def merge(%__MODULE__{} = a, %__MODULE__{} = b)`" do
       params = quote(do: [%__MODULE__{} = a, %__MODULE__{} = b])
 
-      assert Invariants.detect_struct_params(params, []) ==
+      assert Invariants.detect_struct_params(params, [], TestStruct) ==
                [{:bound, :a, 0}, {:bound, :b, 1}]
     end
 
     test "mixes bound and destructure entries in parameter order" do
       params = quote(do: [%__MODULE__{} = a, %__MODULE__{field: x}])
 
-      assert Invariants.detect_struct_params(params, []) ==
+      assert Invariants.detect_struct_params(params, [], TestStruct) ==
                [{:bound, :a, 0}, {:destructure, 1}]
     end
 
     test "returns [] for a bare-variable head with no relevant guard" do
       params = quote(do: [x, item])
-      assert Invariants.detect_struct_params(params, []) == []
+      assert Invariants.detect_struct_params(params, [], TestStruct) == []
     end
 
     test "returns [] when guard mentions an unrelated module" do
       params = quote(do: [x])
       guards = quote(do: [is_struct(x, OtherMod)])
-      assert Invariants.detect_struct_params(params, guards) == []
+      assert Invariants.detect_struct_params(params, guards, TestStruct) == []
     end
 
     test "returns [] for an unrelated struct pattern" do
       params = quote(do: [%OtherMod{} = x])
-      assert Invariants.detect_struct_params(params, []) == []
+      assert Invariants.detect_struct_params(params, [], TestStruct) == []
     end
 
     test "returns [] for empty params" do
-      assert Invariants.detect_struct_params([], []) == []
+      assert Invariants.detect_struct_params([], [], TestStruct) == []
     end
   end
 
@@ -222,6 +222,48 @@ defmodule Bond.Compiler.InvariantsTest do
       # into Bond.Runtime.Eval so Elixir's type checker can't flag the speculative struct
       # clauses as unreachable for functions returning other shapes.
       refute code =~ ~r"case var!\(result\)"
+    end
+  end
+
+  describe "detect_struct_params/3 struct naming (#93)" do
+    test "resolves a fully-qualified alias naming the struct module" do
+      params = quote(do: [%MyApp.Cart{} = cart])
+      assert Invariants.detect_struct_params(params, [], MyApp.Cart) == [{:bound, :cart, 0}]
+    end
+
+    test "resolves a bare alias when it *is* the module" do
+      params = quote(do: [%Cart{} = cart])
+      assert Invariants.detect_struct_params(params, [], Cart) == [{:bound, :cart, 0}]
+    end
+
+    test "does NOT resolve a bare alias that merely shares the module's last segment" do
+      # Elixir does not auto-alias a module's own last segment: inside MyApp.Cart the
+      # pattern %Cart{} names Elixir.Cart, a different struct. Binding `subject` to it
+      # would evaluate the invariant against the wrong value.
+      params = quote(do: [%Cart{} = cart])
+      assert Invariants.detect_struct_params(params, [], MyApp.Cart) == []
+    end
+
+    test "resolves an already-expanded module atom" do
+      params = [{:%, [], [MyApp.Cart, {:%{}, [], []}]}, {:item, [], nil}]
+      assert Invariants.detect_struct_params(params, [], MyApp.Cart) == [{:destructure, 0}]
+    end
+
+    test "resolves a qualified name in an is_struct/2 guard" do
+      params = quote(do: [cart])
+      guards = quote(do: [is_struct(cart, MyApp.Cart)])
+      assert Invariants.detect_struct_params(params, guards, MyApp.Cart) == [{:bound, :cart, 0}]
+    end
+
+    test "does not resolve an unrelated qualified name in an is_struct/2 guard" do
+      params = quote(do: [cart])
+      guards = quote(do: [is_struct(cart, Other.Cart)])
+      assert Invariants.detect_struct_params(params, guards, MyApp.Cart) == []
+    end
+
+    test "resolves a qualified destructure-only pattern" do
+      params = quote(do: [%MyApp.Cart{items: _items}])
+      assert Invariants.detect_struct_params(params, [], MyApp.Cart) == [{:destructure, 0}]
     end
   end
 end

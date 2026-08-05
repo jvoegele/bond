@@ -724,6 +724,12 @@ struct parameter in the function head and pre-checks against it:
     - `def foo(%__MODULE__{field: v}, ...)` — destructure-only. Bond
       rewrites the override clause to capture the struct under a
       generated name so the pre-check still fires.
+
+  The module's name works in place of `__MODULE__` in all three
+  (`%MyApp.Cart{} = cart`, `is_struct(cart, MyApp.Cart)`). A bare `%Cart{}`
+  inside `MyApp.Cart` does not, and shouldn't: Elixir does not alias a module's
+  own last segment, so that names a different module. See the
+  [Invariants](invariants.md#when-invariants-fire) guide.
 - **On exit**, against the return value if it's `%__MODULE__{}` or
   `{:ok, %__MODULE__{}}`. Other return shapes fall through without a
   check. If your function wraps the struct differently, add an explicit
