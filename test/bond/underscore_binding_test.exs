@@ -102,31 +102,29 @@ defmodule Bond.UnderscoreBindingTest do
 
   describe "compile-time warnings" do
     test "an underscore-bound contract argument produces no unused-variable warning" do
+      # BondTest.Diagnostics rather than a stderr capture: this module is async, and a
+      # global capture picks up whatever any concurrently-compiling test emits (#86).
       warning =
-        ExUnit.CaptureIO.capture_io(:stderr, fn ->
-          Code.compile_string("""
-          defmodule BondTest.NoUnusedWarning do
-            use Bond
-            @pre big: spec.id > 100
-            def get(%{id: id} = _spec), do: id
-          end
-          """)
-        end)
+        BondTest.Diagnostics.warnings("""
+        defmodule BondTest.NoUnusedWarning do
+          use Bond
+          @pre big: spec.id > 100
+          def get(%{id: id} = _spec), do: id
+        end
+        """)
 
       refute warning =~ "unused"
     end
 
     test "the un-prefixed form still warns, as plain Elixir would" do
       warning =
-        ExUnit.CaptureIO.capture_io(:stderr, fn ->
-          Code.compile_string("""
-          defmodule BondTest.StillWarns do
-            use Bond
-            @pre big: spec.id > 100
-            def get(%{id: id} = spec), do: id
-          end
-          """)
-        end)
+        BondTest.Diagnostics.warnings("""
+        defmodule BondTest.StillWarns do
+          use Bond
+          @pre big: spec.id > 100
+          def get(%{id: id} = spec), do: id
+        end
+        """)
 
       assert warning =~ ~s(variable "spec" is unused)
     end
