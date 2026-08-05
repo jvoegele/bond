@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-08-05
+
+An invariant-correctness release, and a documentation one. Three separate defects were all
+silently skipping invariant checks that Bond documented as running — one of them found while
+checking Bond's semantics against the source the method comes from. Reading Bertrand Meyer's
+*Object-Oriented Software Construction* chapter 11 in full also reversed two pieces of advice
+these guides had been giving, and turned a third into a compile-time warning.
+
+The documentation was restructured in the same cycle: the landing page had grown to 994 lines,
+of which 846 were reference, and is now 177 with the reference split into four topical guides.
+
 > **Upgrading:** invariant entry checks now fire in two cases where they previously,
 > silently, did not — when a function head names the struct without `__MODULE__`
 > ([#93](https://github.com/jvoegele/bond/issues/93)) and when the struct is nested inside a

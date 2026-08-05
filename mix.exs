@@ -1,7 +1,7 @@
 defmodule Bond.MixProject do
   use Mix.Project
 
-  @version "1.13.2"
+  @version "1.14.0"
   @source_url "https://github.com/jvoegele/bond"
 
   def project do
@@ -82,7 +82,19 @@ defmodule Bond.MixProject do
   defp package do
     [
       name: :bond,
-      files: ["lib", "mix.exs", "README.md", "LICENSE", "CHANGELOG.md", ".formatter.exs"],
+      # `guides` ships with the package: since the reference moved off the landing page
+      # (1.14.0), the README and moduledoc point at `guides/*.md` for most of the detail,
+      # and those links are dead in the tarball if the directory is left out. HexDocs is
+      # built from the working tree at publish time and was never affected.
+      files: [
+        "lib",
+        "guides",
+        "mix.exs",
+        "README.md",
+        "LICENSE",
+        "CHANGELOG.md",
+        ".formatter.exs"
+      ],
       maintainers: ["Jason Voegele"],
       licenses: ["Apache-2.0"],
       links: %{
