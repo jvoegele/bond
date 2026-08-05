@@ -444,6 +444,81 @@ The division of labour that falls out: guards and patterns say what the function
 relationships between arguments, and between arguments and the result, that a
 guard cannot express at all.
 
+## How demanding should my preconditions be?
+
+Once the Non-Redundancy Principle has told you that a condition belongs to
+exactly one party, you still have to choose which. Meyer names the two attitudes
+(*Object-Oriented Software Construction*, 2nd edition, §11.7, p. 354): the
+**demanding** style puts the condition in the precondition and expects callers
+to establish it; the **tolerant** style leaves it out and handles the case in
+the body.
+
+He is careful to mark this one as a judgement rather than a law — "to a certain
+extent this is a matter of personal choice (as opposed to the Non-Redundancy
+principle, which was absolute)" — while still making "a strong case […] for the
+demanding style, especially in the case of software meant to be reusable."
+
+The argument is about **context**. A general-purpose routine usually does not
+have enough of it to decide what an out-of-range call *means*. Meyer's example
+is popping an empty stack: only the caller knows whether that is a harmless
+no-op, a recoverable condition, or a bug. A stack module that picks one on the
+caller's behalf — his tolerant version prints an error message — has
+overstepped. The same goes for a square root of a negative number, where the
+tolerant body reduces to `if x < 0 then "handle the error, somehow"`. As he puts
+it, the operative word is *somehow*.
+
+### The Elixir translation is three ways, not two
+
+Elixir needs a distinction Eiffel doesn't, and getting it wrong would turn good
+advice into bad advice. There are three things you can do with an out-of-range
+input, not two:
+
+1. **Demand it.** `@pre non_empty: items != []`. Violating it is a bug in the
+   caller, and Bond says so.
+2. **Return it.** `{:error, :empty}`. The function reports the condition and the
+   *caller still decides* what it means.
+3. **Guess.** Log something, return `nil`, substitute a default, carry on.
+
+Only (3) is what Meyer attacks. Idiomatic Elixir's `{:ok, _} | {:error, _}` is
+**not** the tolerant style he warns about — it delegates the decision rather
+than making it, which is the same instinct the demanding style is protecting.
+So "prefer demanding" here means *prefer (1) or (2) over (3)*, and never
+"stop returning error tuples."
+
+Choose between (1) and (2) by asking what a violation *is*. If reaching this
+state means somebody upstream has a bug, it is a precondition. If a correct
+caller with valid data can legitimately land here — an empty result set, a
+missing key, a closed account — it is a normal outcome and belongs in the return
+value. Bond sharpens the question: a precondition can be purged and an
+`{:error, _}` cannot, so anything a running system must still handle when
+contracts are compiled out has to be (2).
+
+### Don't over-demand: the Reasonable Precondition principle
+
+The demanding style has an obvious failure mode — `require False` makes every
+routine trivially correct — so Meyer bounds it (§11.7, p. 356):
+
+> **Reasonable Precondition principle**
+>
+> Every routine precondition (in a "demanding" design approach) must satisfy the
+> following requirements:
+>
+>   * The precondition appears in the official documentation distributed to
+>     authors of client modules.
+>   * It is possible to justify the need for the precondition in terms of the
+>     specification only.
+
+Bond gives you the first for free: contracts are appended to the generated docs,
+so a precondition you write is a precondition your callers can read.
+
+The second is a test worth applying by hand, because it rules out the
+preconditions that exist for *your* convenience rather than from the problem.
+"There is no maximum of an empty collection" justifies `@pre non_empty: items != []`
+on `max/1` from the specification alone. "My implementation calls `Map.get/2`"
+does not justify `@pre is_map(opts)` — that is an implementation detail leaking
+into the caller's obligations, and the day you switch to a keyword list the
+caller's contract changes for no reason the caller can see.
+
 ## Can I write a contract for the failure path?
 
 Yes — if you model failure the way Elixir recommends, as a **value**. Bond
@@ -1061,6 +1136,20 @@ cannot be called. The obligation is published in terms the reader cannot look
 up, let alone satisfy. Keep the predicate public when the function it constrains
 is public; a `defp` predicate is fine on a `defp`'s own contract, where the only
 clients are in the same module.
+
+**Postconditions are exempt**, and Meyer says so directly: "There is no such rule
+for postconditions. It is not an error for some clauses of a postcondition clause
+to refer to secret features." A postcondition is the function's promise, not the
+caller's obligation, so it may reference private helpers freely — it is simply
+stating a property the caller cannot verify independently.
+
+Worth noting what Meyer does with this rule that Bond currently doesn't: in
+Eiffel it is a *language* rule, a compile-time error, on the grounds that "a
+methodological principle does not suffice: we need a language rule to be
+enforced by compilers, not left to the decision of developers." Bond accepts a
+private predicate silently. Unlike the guard case above, this one is statically
+decidable — Bond knows which functions are public — so it is a plausible future
+warning rather than a permanent matter of taste.
 
 On failure the error reports the **call**, not the expanded body:
 
