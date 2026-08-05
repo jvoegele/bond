@@ -622,7 +622,7 @@ defmodule Bond do
   defmacro check(assertion_or_list_of_assertions)
 
   defmacro check(keyword_list) when is_list(keyword_list) do
-    build_check(__CALLER__.module, fn mode ->
+    build_check(__CALLER__.module, Keyword.values(keyword_list), fn mode ->
       for {label, {_, meta, _} = expression} <- keyword_list do
         Bond.Compiler.check_assertion(expression, label, __CALLER__, meta, mode)
       end
@@ -630,7 +630,7 @@ defmodule Bond do
   end
 
   defmacro check({_, meta, _} = expression) do
-    build_check(__CALLER__.module, fn mode ->
+    build_check(__CALLER__.module, [expression], fn mode ->
       Bond.Compiler.check_assertion(expression, nil, __CALLER__, meta, mode)
     end)
   end
@@ -827,10 +827,16 @@ defmodule Bond do
   #   * `true` / `false` — call `build_inline_ast` with the compile-time-resolved mode to
   #     produce the call(s) to `Bond.Runtime.Eval.evaluate_check/2`. The runtime guard
   #     (a `:persistent_term` read defaulting to the compile-time mode) lives inside `Eval`.
-  defp build_check(module, build_inline_ast) do
+  defp build_check(module, expressions, build_inline_ast) do
     case checks_mode(module) do
-      :purge -> :ok
-      mode when mode in [true, false] -> build_inline_ast.(mode)
+      :purge ->
+        # The expressions are about to be discarded. Read any module attributes they
+        # mention so a constant used only by this check doesn't warn as unused (#79).
+        Bond.Compiler.PurgedAttributes.consume(module, expressions)
+        :ok
+
+      mode when mode in [true, false] ->
+        build_inline_ast.(mode)
     end
   end
 

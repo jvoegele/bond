@@ -50,6 +50,23 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **A module attribute read only by a contract no longer warns as unused in a purging
+  build** (#79). Purging discarded the contract, the attribute lost its last reader, and
+  Elixir warned "module attribute @limit was set but never used" — code that compiled
+  cleanly in dev, warning in exactly the build people gate on `--warnings-as-errors`, with
+  a message that named Elixir rather than Bond and so offered no route back to the cause.
+
+  Bond now reads those attributes during compilation instead. `Module.get_attribute/2`
+  counts as a use, so the warning goes away without a byte reaching the BEAM — cheaper and
+  safer than emitting `_ = @attr` into the module body. Applies to all four kinds: `@pre`,
+  `@post`, `@invariant`, and `check/1`, including attributes read inside a
+  `where`/`whenever` group. Attributes that are genuinely unused still warn.
+
+  Also closes the gap that hid it: the downstream-consumer CI job now compiles the
+  integration app a second time with every kind `:purge`d under `--warnings-as-errors`.
+  Bond's suite runs in `:test`, where nothing is purged, so this class of defect could not
+  be seen from inside it — the same blind spot as #76.
+
 - **Invariant entry checks are no longer skipped when the head names the struct without
   `__MODULE__`** (#93). `def total(%MyApp.Cart{} = cart)` and
   `def total(cart) when is_struct(cart, MyApp.Cart)` are identical in meaning to their

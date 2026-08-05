@@ -205,6 +205,15 @@ jobs:
       # The core of issue #2: prove the code Bond generates into a using module
       # is warning-free and Dialyzer-clean in a real consumer.
       - run: mix compile --warnings-as-errors
+      # The same consumer again with every contract kind `:purge`d (#79). Bond's own
+      # suite compiles in `:test`, where nothing is purged, so codegen that only
+      # misbehaves in a purging build is invisible to it — an attribute left without a
+      # reader, a variable left unused. This is the shape an adopter ships to
+      # production, and the one they gate on `--warnings-as-errors`.
+      #
+      # Compile only: with contracts purged the consumer's tests, which assert that
+      # violations raise, would rightly fail.
+      - run: MIX_ENV=purged mix compile --warnings-as-errors
       - run: mix test
       - run: mix dialyzer --format github
 

@@ -17,6 +17,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
   alias Bond.Compiler.Assertion
   alias Bond.Compiler.Availability
+  alias Bond.Compiler.PurgedAttributes
   alias Bond.Compiler.ClauseWrapper
   alias Bond.Compiler.Clauses
   alias Bond.Compiler.ContractDocs
@@ -390,6 +391,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
     maybe_warn_skipped_invariants(annotated_function, inv_mode, config)
     maybe_warn_unavailable_preconditions(annotated_function, pre_mode, config)
+    consume_purged_attributes(annotated_function, pre_mode, post_mode, inv_mode)
 
     if pre_mode != :purge or post_mode != :purge or inv_mode != :purge do
       # Whether Bond owns `@` — and so documentation — in this module. Supplied by
@@ -470,6 +472,28 @@ defmodule Bond.Compiler.AnnotatedFunction do
   # Uses an explicit nil check rather than `Enum.find_value/2` because the
   # override is a tri-state (nil | true | false) and `find_value` treats `false`
   # the same as nil — which would silently drop legitimate `false` overrides.
+  # A purged contract is discarded before its AST reaches the BEAM, taking with it the
+  # only read of any module attribute it mentioned (#79). Read those attributes here so
+  # the constant does not warn as unused in the purging build.
+  defp consume_purged_attributes(
+         %__MODULE__{module: module} = annotated_function,
+         pre_mode,
+         post_mode,
+         inv_mode
+       ) do
+    purged =
+      [
+        {pre_mode, annotated_function.preconditions},
+        {post_mode, annotated_function.postconditions},
+        {inv_mode, annotated_function.invariants}
+      ]
+      |> Enum.filter(fn {mode, _assertions} -> mode == :purge end)
+      |> Enum.flat_map(fn {_mode, assertions} -> assertions end)
+      |> Enum.map(& &1.expression)
+
+    PurgedAttributes.consume(module, purged)
+  end
+
   # Meyer's Precondition Availability rule (#92): a public function's precondition must
   # not be stated in terms its callers cannot reach. Only preconditions — postconditions
   # are exempt by the same source, being the function's promise rather than the caller's
