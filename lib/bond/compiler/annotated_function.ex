@@ -303,7 +303,12 @@ defmodule Bond.Compiler.AnnotatedFunction do
           # it rides along on the config map because that is what is already threaded from
           # `Bond.Compiler.__before_compile__/1` down into codegen.
           optional(:at_annotations) => boolean(),
-          optional(:warn_skipped_invariants) => boolean()
+          optional(:warn_skipped_invariants) => boolean(),
+          # The using module's alias table, as captured from `env.aliases` at
+          # `__before_compile__`. Rides along for the same reason `:at_annotations` does:
+          # invariant head detection needs it to resolve a struct named through an alias
+          # (#93), and this map is what is already threaded down into codegen.
+          optional(:aliases) => keyword()
         }
 
   @doc """
