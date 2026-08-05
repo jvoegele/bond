@@ -155,6 +155,12 @@ any `:overrides` entry that matches the module:
     invariant-declaring module never mentions the struct at all, so its
     invariants are skipped. See the FAQ entry "Why is Bond warning about
     skipped invariants?"
+  * `:warn_unavailable_preconditions` — boolean (default `true`). Controls the
+    compile-time warning Bond emits when a **public** function's precondition
+    calls a **private** function of the same module, which a caller cannot
+    evaluate — Meyer's Precondition Availability rule. Postconditions are
+    exempt. See the FAQ entry "How do I reuse a predicate across several
+    functions?"
   * `:behaviours` — a module or list of `Bond.Behaviour` modules whose callback
     contracts this module inherits and enforces. Also emits `@behaviour` for
     each. See "Contract inheritance" below.
@@ -167,6 +173,8 @@ any `:overrides` entry that matches the module:
     `false` suppresses the warning for that single function; `true` re-
     enables the warning for that single function even under a module-wide or
     global `false`.
+  * `@bond_warn_unavailable_preconditions` — the same tri-state, same scoping,
+    for the Precondition Availability warning.
 
 ## Contract inheritance
 
@@ -422,10 +430,12 @@ All under the `:bond` application:
   * `:invariants` — mode.
   * `:overrides` — list of `{module() | Regex.t(), keyword()}` tuples.
     The keyword list uses the same per-kind keys above (`:preconditions`,
-    `:postconditions`, `:checks`, `:invariants`, `:warn_skipped_invariants`).
+    `:postconditions`, `:checks`, `:invariants`, `:warn_skipped_invariants`,
+    `:warn_unavailable_preconditions`).
     First exact-match module wins over regex matches; regex matches are
     tried in list order.
   * `:warn_skipped_invariants` — boolean (default `true`).
+  * `:warn_unavailable_preconditions` — boolean (default `true`).
   * `:lint_assertions` — boolean (default `true`). Compile-time: emit warnings
     for statically vacuous assertions (see `Bond.Compiler.Linter`).
   * `:coverage` — boolean (default `false`). Compile-time: instrument every

@@ -172,6 +172,12 @@ defmodule Bond do
                                         :bond,
                                         :warn_skipped_invariants,
                                         true
+                                      ),
+                                    warn_unavailable_preconditions:
+                                      Application.compile_env(
+                                        :bond,
+                                        :warn_unavailable_preconditions,
+                                        true
                                       )
                                   )
       end

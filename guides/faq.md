@@ -1168,13 +1168,28 @@ to refer to secret features." A postcondition is the function's promise, not the
 caller's obligation, so it may reference private helpers freely — it is simply
 stating a property the caller cannot verify independently.
 
-Worth noting what Meyer does with this rule that Bond currently doesn't: in
-Eiffel it is a *language* rule, a compile-time error, on the grounds that "a
-methodological principle does not suffice: we need a language rule to be
-enforced by compilers, not left to the decision of developers." Bond accepts a
-private predicate silently. Unlike the guard case above, this one is statically
-decidable — Bond knows which functions are public — so it is a plausible future
-warning rather than a permanent matter of taste.
+Meyer makes this a *language* rule rather than advice — a compile-time error in
+Eiffel — on the grounds that "a methodological principle does not suffice: we
+need a language rule to be enforced by compilers, not left to the decision of
+developers." Unlike the guard case above, which needs to know what a guard
+admits, this one is statically decidable: Bond knows which functions are
+private. **So Bond warns:**
+
+```
+warning: the precondition of public function `send_welcome/2` in `Mailer` calls
+a private function (`valid_email?/1`). A precondition is an obligation on the
+caller, so a caller that cannot call `valid_email?/1` cannot check it before
+calling — and Bond renders the assertion into the generated docs, where
+`valid_email?/1` does not appear. Make the predicate public, or inline the
+condition. (Meyer's Precondition Availability rule, OOSC §11.7.)
+```
+
+A warning rather than an error, because an app-internal module whose callers
+are all in the same project suffers the documentation harm without the
+practical one. Suppress it at the narrowest scope that fits:
+`@bond_warn_unavailable_preconditions false` for one function,
+`use Bond, warn_unavailable_preconditions: false` for a module, or
+`config :bond, warn_unavailable_preconditions: false` globally.
 
 On failure the error reports the **call**, not the expanded body:
 

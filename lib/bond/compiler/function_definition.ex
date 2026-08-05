@@ -16,6 +16,7 @@ defmodule Bond.Compiler.FunctionDefinition do
             guards: nil,
             body: nil,
             warn_skipped_invariants_override: nil,
+            warn_unavailable_preconditions_override: nil,
             external_override?: false
 
   @type doc_attribute_value :: String.t() | Keyword.t()
@@ -38,6 +39,7 @@ defmodule Bond.Compiler.FunctionDefinition do
           guards: list(),
           body: list() | nil,
           warn_skipped_invariants_override: nil | boolean(),
+          warn_unavailable_preconditions_override: nil | boolean(),
           external_override?: boolean()
         }
 
@@ -77,6 +79,16 @@ defmodule Bond.Compiler.FunctionDefinition do
   def put_warn_skipped_invariants_override(%__MODULE__{} = fd, override)
       when override == nil or is_boolean(override) do
     %{fd | warn_skipped_invariants_override: override}
+  end
+
+  @doc """
+  Records the per-function `@bond_warn_unavailable_preconditions` tri-state (#92), the
+  same shape as `put_warn_skipped_invariants_override/2`.
+  """
+  @spec put_warn_unavailable_preconditions_override(t(), nil | boolean()) :: t()
+  def put_warn_unavailable_preconditions_override(%__MODULE__{} = fd, override)
+      when is_nil(override) or is_boolean(override) do
+    %{fd | warn_unavailable_preconditions_override: override}
   end
 
   @doc """

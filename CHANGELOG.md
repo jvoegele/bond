@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Bond warns when a public function's precondition calls a private function** of the
+  same module (#92). A precondition is an obligation on the *caller*, so one stated in
+  terms the caller cannot reach is not an agreement — Meyer makes it a language rule
+  rather than advice (*Object-Oriented Software Construction*, 2nd edition, §11.7,
+  p. 358).
+
+  Elixir makes the consequence visible: Bond renders the assertion into the generated
+  docs, so a `defp` predicate publishes a public function's obligation in terms of a
+  function excluded from those same docs and uncallable from outside.
+
+  Postconditions are exempt, on the same authority — "There is no such rule for
+  postconditions" — as are `@invariant`, `check/1`, and preconditions on `defp`.
+
+  A warning rather than an error, since an app-internal module suffers the documentation
+  harm without the practical one. Suppress at the narrowest scope that fits:
+  `@bond_warn_unavailable_preconditions false` (per function),
+  `use Bond, warn_unavailable_preconditions: false` (per module), or
+  `config :bond, warn_unavailable_preconditions: false` (globally).
+
 ### Changed
 
 - **Invariant entry checks now see through nested head patterns** (#84). A struct carried
