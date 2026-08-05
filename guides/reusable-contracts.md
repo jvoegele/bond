@@ -54,7 +54,7 @@ expression may reference only the declared arguments — plus `result` (and
 defcontract transfer(from, to, amount) do
   @pre enough: amount <= from.balance
   @pre distinct: from.id != to.id
-  @post conserved: result.from.balance + result.to.balance == old(from.balance) + old(to.balance)
+  @post conserved: result.from.balance + result.to.balance == from.balance + to.balance
 end
 ```
 

@@ -3,7 +3,8 @@
 This guide walks you through adding Bond to a project, writing your first
 contract, and the most common patterns you'll encounter.
 
-For full reference material see the `Bond` module docs.
+For the full reference, see the [Writing Contracts](writing-contracts.md)
+guide and the guides it links to.
 
 ## Installation
 
@@ -21,82 +22,108 @@ Then run `mix deps.get`.
 
 ## Your first contract
 
-`use Bond` in any module to enable `@pre`, `@post`, `@invariant`, and
-`check/1`. Add a
-precondition before a function definition:
-
-```elixir
-defmodule Calculator do
-  use Bond
-
-  @pre is_number(x)
-  def square(x), do: x * x
-end
-```
-
-`Calculator.square(2)` returns `4` as expected. `Calculator.square("two")`
-raises `Bond.PreconditionError` with a message that points at the failing
-assertion:
-
-```text
-** (Bond.PreconditionError) precondition failed for call to Calculator.square/1
-|   at: lib/calculator.ex:4
-|   label: nil
-|   assertion: is_number(x)
-|   binding: [x: "two"]
-```
-
-## Adding a postcondition
-
-Postconditions are evaluated after the function body. They have access to
-the function's parameters plus a `result` variable bound to the return
-value:
+`use Bond` in any module to enable `@pre`, `@post`, `@invariant`, and `check/1`.
+A `@pre` declares a **precondition** — something the caller must satisfy for the
+call to be valid:
 
 ```elixir
 defmodule Account do
   use Bond
 
-  defstruct [:balance]
+  defstruct [:owner, :balance]
 
-  @pre amount > 0
-  @post non_negative: result.balance >= 0
+  @pre positive_amount: amount > 0
   def withdraw(%Account{} = account, amount) do
     %{account | balance: account.balance - amount}
   end
 end
 ```
 
-`Account.withdraw(%Account{balance: 100}, 30)` returns an account with a balance
-of `70`. `Account.withdraw(%Account{balance: 20}, 50)` raises
-`Bond.PostconditionError` — the function returned a negative balance, which the
-postcondition forbids.
+`Account.withdraw(%Account{owner: "ana", balance: 100}, 30)` returns an account
+with a balance of `70`. A negative amount raises instead, and the message names
+the clause that failed and shows everything that was in scope when it did:
 
-Note what the postcondition can say that a guard cannot: it constrains the
-*return value*. Guards only see the arguments, and by the time the balance has
-gone negative the arguments are long past.
+```text
+** (Bond.PreconditionError) precondition failed for call to Account.withdraw/2
+|   at: lib/account.ex:6
+|   label: :positive_amount
+|   assertion: amount > 0
+|   binding: [account: %Account{owner: "ana", balance: 100}, amount: -30]
+```
+
+## Adding a postcondition
+
+A `@post` declares a **postcondition** — what the function guarantees in
+return, provided the precondition held. Postconditions are evaluated after the
+body, and see the function's parameters plus a `result` variable bound to the
+return value:
+
+```elixir
+@pre positive_amount: amount > 0
+@post non_negative: result.balance >= 0
+def withdraw(%Account{} = account, amount) do
+  %{account | balance: account.balance - amount}
+end
+```
+
+Nothing in this function prevents an overdraft, and nothing in its signature
+would warn you. The postcondition does:
+
+```text
+** (Bond.PostconditionError) postcondition failed in Account.withdraw/2
+|   at: lib/account.ex:7
+|   label: :non_negative
+|   assertion: result.balance >= 0
+|   binding: [
+  account: %Account{owner: "ana", balance: 20},
+  amount: 50,
+  result: %Account{owner: "ana", balance: -30}
+]
+```
+
+Note what the postcondition says that a guard cannot: it constrains the *return
+value*. Guards only see the arguments, and by the time the balance has gone
+negative the arguments are long past.
+
+The two kinds also assign blame differently, which is most of what you are
+deciding when you write one down. A failed precondition says the **caller**
+asked for something it wasn't entitled to; a failed postcondition says the
+**function** broke its own promise. Overdrafts can be framed either way, and
+the next section takes the other option.
 
 ## Labelled assertions
 
-A single `@pre` or `@post` may contain multiple labelled assertions as a
-keyword list. Labels appear in error messages so it's easy to identify
-which assertion failed:
+A single `@pre` or `@post` may hold several labelled assertions as a keyword
+list. The label appears in the error message, so a failure names the clause
+rather than the whole annotation:
 
 ```elixir
-defmodule Math do
-  use Bond
-
-  @pre numeric_x: is_number(x), non_negative_x: x >= 0
-  @post float_result: is_float(result),
-        non_negative_result: result >= 0.0
-  def sqrt(x), do: :math.sqrt(x)
+@pre positive_amount: amount > 0,
+     sufficient_funds: amount <= account.balance
+def withdraw(%Account{} = account, amount) do
+  %{account | balance: account.balance - amount}
 end
 ```
+
+```text
+** (Bond.PreconditionError) precondition failed for call to Account.withdraw/2
+|   at: lib/account.ex:6
+|   label: :sufficient_funds
+|   assertion: amount <= account.balance
+|   binding: [account: %Account{owner: "ana", balance: 20}, amount: 50]
+```
+
+This is the same overdraft as the previous section, caught one step earlier and
+blamed on the caller instead of the function. Note what it did to the
+postcondition: with `sufficient_funds` in force, `non_negative` can no longer
+fail, and an assertion that can never fail is worth deleting rather than
+keeping — see [Writing sound assertions](writing-sound-assertions.md).
 
 Labels can be atoms (when they're valid Elixir identifiers) or strings (for
 phrases with spaces or punctuation):
 
 ```elixir
-@post "result is integer or zero": is_integer(result) or result == 0
+@post "balance is a whole number of cents": is_integer(result.balance)
 ```
 
 ## Predicates and operators
@@ -108,9 +135,13 @@ expressions. Two operators are especially useful in contracts:
 - `<~` — pattern match. `(pattern <~ expression)` is `match?(pattern, expression)`.
 
 ```elixir
-@post "sqrt of 0 is 0": (x == 0) ~> (result === 0.0)
+@post no_fee_below_limit: (amount < 100) ~> (result.fee == 0)
 @post {:ok, _} <~ result
 ```
+
+Implication is what lets one contract cover several shapes of input without
+asserting anything about the ones it doesn't apply to: `no_fee_below_limit`
+says nothing at all when `amount` is 100 or more.
 
 See `Bond.Predicates` for the complete list.
 
@@ -126,13 +157,22 @@ defmodule Stats do
 
   @pre all_positive: forall(x <- samples, x > 0)
   def geometric_mean(samples) do
-    nth_root(Enum.product(samples), length(samples))
+    :math.pow(Enum.product(samples), 1 / length(samples))
   end
+end
+
+defmodule Roster do
+  use Bond
 
   @pre has_admin: exists(u <- users, u.role == :admin)
-  def authorize(users), do: # ...
+  def authorize(users), do: Enum.map(users, &grant/1)
 end
 ```
+
+Both preconditions state something a type cannot: `geometric_mean/1` is
+undefined for a negative sample (the product's root is complex), and a roster
+with nobody able to authorize is a roster that will deadlock the moment someone
+needs approval.
 
 You could already write these with `Enum.all?/2` and `Enum.any?/2`, but
 when one fails Bond can only tell you the *whole* expression was false.
@@ -149,8 +189,11 @@ when one fails Bond can only tell you the *whole* expression was false.
 `exists` instead reports that no element satisfied the predicate:
 
 ```
+** (Bond.PreconditionError) precondition failed for call to Roster.authorize/1
+|   label: :has_admin
 |   assertion: exists(u <- users, u.role == :admin)
 |   counterexample: no element of `users` satisfies `u.role == :admin` (3 elements)
+|   binding: [users: [%{role: :user}, %{role: :guest}, %{role: :user}]]
 ```
 
 Both forms:
@@ -211,7 +254,7 @@ in mind:
   `Enum.all?/2` would. This is exactly what Bond's runtime gate is for —
   disable the kind in production (`config :bond, postconditions: false`, or
   `Bond.Config` at runtime; see
-  [Disabling contracts in production](#disabling-contracts-in-production))
+  [Deciding what runs in production](#deciding-what-runs-in-production))
   so the traversal never runs there.
 
 - **Assertions must be side-effect-free — and enumerating a lazy stream is
@@ -319,9 +362,8 @@ public function's head (`%__MODULE__{} = name` pattern,
 and rebinds `subject` to it — you write the invariant once and Bond
 applies it everywhere.
 
-See the [`@invariant`](Bond.html#module-invariant-for-struct-modules)
-section of the moduledoc for head-shape detection, multi-struct
-heads, and per-module configuration.
+See the [Invariants](invariants.md) guide for head-shape detection,
+multi-struct heads, and per-module configuration.
 
 ## Invariants for process state
 
@@ -354,9 +396,9 @@ Because the checks run inside the serialized server process, they are race-free 
 even a temporal property like "the counter never decreases". A `:dec` cast that
 drops `count` below the previous value raises `Bond.InvariantError`. See
 `Bond.Server` and the
-[Contracts in a Concurrent World](contracts-and-concurrency.html) guide.
+[Contracts in a Concurrent World](contracts-and-concurrency.md) guide.
 
-## Disabling contracts in production
+## Deciding what runs in production
 
 Bond's four application-config keys — `:preconditions`, `:postconditions`,
 `:invariants`, `:checks` — each accept `true`, `false`, or `:purge`:
@@ -370,6 +412,11 @@ config :bond,
   checks: :purge
 ```
 
+That is one choice of several. Keeping preconditions on — the cheapest kind,
+and the only one that catches a *caller's* bug — while purging the rest is a
+common middle ground; see
+[Choosing what runs in production](configuration.md#choosing-what-runs-in-production).
+
 - **`true` (default)** — compiled in, runtime-togglable, evaluated by default.
 - **`false`** — compiled in, runtime-togglable, *not* evaluated by default.
 - **`:purge`** — not compiled at all. Zero overhead. No contract docs.
@@ -382,8 +429,7 @@ effect — the runtime state is cached; use `Bond.Config`.) `:purge` is the
 only setting with no runtime presence (the code isn't there).
 
 For finer control, the `:overrides` config lets you set per-module rules.
-See the `Bond` moduledoc's "Conditional compilation" and "Per-module
-overrides" sections for the full story.
+See [Configuring Contracts](configuration.md) for the full story.
 
 ## Testing contract violations
 
@@ -391,17 +437,25 @@ For testing that a contract IS raised (or that a specific contract isn't),
 `Bond.Test` provides ExUnit helpers:
 
 ```elixir
-defmodule MyAppTest do
+defmodule MyApp.AccountTest do
   use ExUnit.Case
   use Bond.Test
 
-  alias MyApp.Math
+  alias MyApp.Account
 
-  test "sqrt rejects negative input" do
-    assert_precondition_violation(Math.sqrt(-1), label: :non_negative_x)
+  test "withdrawing more than the balance is rejected" do
+    account = %Account{owner: "ana", balance: 20}
+
+    assert_precondition_violation(Account.withdraw(account, 50),
+      label: :sufficient_funds
+    )
   end
 end
 ```
+
+Passing `label:` matters more than it looks: without it the test passes as long
+as *some* precondition fired, which would still be green if `positive_amount`
+started rejecting the call for an unrelated reason.
 
 `Bond.Test` has one such macro per contract kind (preconditions, postconditions,
 `check`s, struct invariants, and `Bond.Server` state/transition invariants), and you
@@ -412,9 +466,9 @@ where contracts act as the oracle for random inputs — see the
 
 ## Next steps
 
-- The `Bond` moduledoc has the full reference, including the
-  [`@invariant`](Bond.html#module-invariant-for-struct-modules) section
-  for module-wide constraints on every instance of a struct.
+- The [Writing Contracts](writing-contracts.md) guide is the full reference for
+  the annotations and the assertion language, and [Invariants](invariants.md)
+  covers module-wide constraints on every instance of a struct.
 - The [Testing Contracts](testing-contracts.md) guide covers the whole
   testing surface — `Bond.Test`'s example-based assertions and
   `Bond.PropertyTest`'s `contract_holds/2`, `probe_contract/2`, and

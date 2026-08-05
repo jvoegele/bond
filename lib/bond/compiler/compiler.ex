@@ -166,7 +166,7 @@ defmodule Bond.Compiler do
 
       config :bond,
         overrides: [
-          {MyApp.HotPath, preconditions: :purge, postconditions: :purge},
+          {MyApp.HotPath, preconditions: :purge, postconditions: :purge, invariants: :purge},
           {~r/Workers\\./, postconditions: false}
         ]
   """

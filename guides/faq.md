@@ -18,29 +18,39 @@ contracts catch bugs sooner with less work.
 ## Will contracts slow down my production code?
 
 Not if you `:purge` them. Bond supports
-[compile-time conditional compilation](Bond.html#module-conditional-compilation):
+[compile-time conditional compilation](configuration.md):
 
 ```elixir
 # config/prod.exs — strip contracts entirely from this build
 config :bond,
   preconditions: :purge,
   postconditions: :purge,
+  invariants: :purge,
   checks: :purge
 ```
 
-When both `:preconditions` and `:postconditions` are `:purge`d for a
-function, Bond emits no override at all and the function runs with zero
-per-call overhead. The compiled BEAM contains no contract evaluation code
-for that function.
+When every contract kind on a function is `:purge`d, Bond emits no override
+at all and the function runs with zero per-call overhead. The compiled BEAM
+contains no contract evaluation code for that function.
 
-A typical pattern: contracts on in dev/test, `:purge`d in prod.
+Purge from the top down: the contract-checking chain requires that if you
+`:purge` a kind, every kind above it is `:purge`d too, so
+`preconditions: :purge` without `invariants: :purge` is a compile error. See
+[Why can't I have postconditions on while preconditions are off?](#why-can-t-i-have-postconditions-on-while-preconditions-are-off)
+below.
+
+Purging everything is one posture, not the only one. Keeping preconditions —
+the cheapest kind, and the only one that catches a caller's bug — while purging
+the rest is a common middle ground, and `false` keeps checks compiled in but
+inert so a remote console can switch them on mid-incident. See
+[Choosing what runs in production](configuration.md#choosing-what-runs-in-production).
 
 For concrete numbers — how many nanoseconds each contract kind adds per
 call, and how much compile time Bond costs per module — see the
 [Overhead](overhead.md) guide. Headline figures from the reference
-environment: a `:purge`d contract is free; an enabled `@pre` adds ~130
-ns/call; an enabled `@invariant` (entry + exit) adds ~440 ns/call; Bond
-compile-time overhead is ~10 ms per module that uses contracts.
+environment: a `:purge`d contract is free; an enabled `@pre` adds ~75
+ns/call; an enabled `@invariant` (entry + exit) adds ~215 ns/call; Bond
+compile-time overhead is ~30 ms per module that uses contracts.
 
 ## Can I toggle contracts at runtime without recompiling?
 
@@ -78,7 +88,7 @@ In the source:
 
 ```elixir
 defmodule MyApp.HotPath do
-  use Bond, preconditions: :purge, postconditions: :purge
+  use Bond, preconditions: :purge, postconditions: :purge, invariants: :purge
 end
 ```
 
@@ -87,7 +97,7 @@ Or in config (handy when you don't want to touch the source):
 ```elixir
 config :bond,
   overrides: [
-    {MyApp.HotPath, preconditions: :purge, postconditions: :purge},
+    {MyApp.HotPath, preconditions: :purge, postconditions: :purge, invariants: :purge},
     {~r/Workers\./, postconditions: false}
   ]
 ```
@@ -341,39 +351,177 @@ balance minus the argument." Use both.
 
 ## Should I remove guards and pattern matches when I add contracts?
 
-**No.** Contracts are an additive layer over ordinary defensive Elixir, not
-a replacement for it. Guards (`when is_binary(x)`) and structural patterns
-(`%DateTime{utc_offset: 0} = dt`) should stay exactly where they were.
+It depends on what the guard is doing — and the question is worth taking
+seriously, because Design by Contract has a rule about it. Bertrand Meyer calls
+it the **Non-Redundancy Principle** (*Object-Oriented Software Construction*,
+2nd edition, §11.6, p. 343):
 
-Two reasons, and the second surprises people:
+> Under no circumstances shall the body of a routine ever test for the routine's
+> precondition.
 
-1. **Contracts can be switched off.** They can be disabled at runtime with
-   `Bond.Config`, or compiled out entirely with `:purge`. A guard you deleted
-   in favour of a `@pre` is gone in every build where contracts are off, and
-   the function silently accepts input it was written to reject.
+Either the condition is in the `require` clause, or it is in an `if` in the
+body — never both. Meyer presents this as the opposite of defensive programming:
+a condition checked in two places belongs to nobody, and the duplicate code is
+extra surface for bugs rather than extra safety.
 
-2. **The guard runs first.** Bond reproduces your `when` guards on the
-   wrapper clauses so multi-clause dispatch keeps working, which means an
-   argument that fails the guard raises `FunctionClauseError` before any
-   precondition is evaluated. A `@pre` that merely restates a guard is
-   therefore unreachable as a `Bond.PreconditionError` — the guard is the
-   real enforcer, and the `@pre` documents it.
+An Elixir guard is not quite Eiffel's `if`, though, which is what makes the
+answer three-way:
 
-| Layer | Role | Active when |
+| What the guard is doing | Example | Keep it? |
 |---|---|---|
-| Guard / structural pattern | Correctness enforcement | Always |
-| `@pre` / `@post` | Documentation, diagnostics, property-test oracle | Contracts enabled |
+| **Selecting a clause** | `def parse(x) when is_binary(x)`, beside a `when is_list(x)` clause | **Yes.** It's dispatch, not a check — delete it and different code runs. |
+| **Standing in for a type** | `when is_binary(email)` | **Yes.** This is Elixir's `email: STRING`. Don't restate it as a `@pre`. |
+| **Stating a domain rule** | `when amount <= account.balance` | **Pick one.** This is the case the principle governs. |
 
-This has a direct consequence for tests. Use
-`Bond.Test.assert_precondition_violation/2` for preconditions with *no*
-corresponding guard — semantic constraints that only a contract can express,
-like a cross-field relationship. For a precondition backed by a guard, assert
+Only the third is redundancy in Meyer's sense. The first two live in the
+signature rather than the body: Eiffel's answer to "is this a string?" is the
+declared type, and nothing in Design by Contract asks you to drop that.
+
+For the third, choose by **whose fault a violation is**. If calling with an
+amount over the balance is the caller's mistake, that is a precondition — write
+`@pre sufficient_funds: amount <= account.balance` and drop the guard. If the
+function is meant to cope with it, it isn't a precondition at all: handle it in
+the body and return `{:error, :insufficient_funds}`.
+
+### Why not keep both, just in case?
+
+Because a `@pre` that restates a guard can never fire. Bond reproduces your
+`when` guards on the wrapper clauses so multi-clause dispatch keeps working, so
+an argument that fails the guard raises `FunctionClauseError` *before* any
+precondition is evaluated. The `@pre` is unreachable as a
+`Bond.PreconditionError` — an assertion you will never see fail, which is
+exactly what [Writing sound assertions](writing-sound-assertions.md) is about.
+Bond's assertion linter cannot catch this one (it only warns where it can
+*prove* an assertion constant), so it stays advice rather than a warning.
+
+Note the boundary: this is about a `@pre` the guard *already rejects everything
+of*. A `@pre` that is **stronger** than the guard can fail and is worth keeping —
+`@pre even_amount: rem(amount, 2) == 0` on a function guarded by
+`when is_integer(amount)` fires on `3`. "There is a guard" is not the test;
+"the guard already rejects everything this rejects" is.
+
+### Then how do I get the requirement into the docs?
+
+With a `@spec`, for anything a type can say. This is the one real cost of
+dropping a guard-restating `@pre`: guards are invisible in generated
+documentation, so deleting the contract does lose something. But a `@spec`
+recovers it and more — ExDoc renders it directly under the signature, *above*
+Bond's generated contract sections, and Dialyzer checks it, which a `@pre` never
+does:
+
+```elixir
+@spec send_welcome(String.t(), String.t()) :: :ok
+def send_welcome(to, name) when is_binary(to) and is_binary(name), do: ...
+```
+
+That is Design by Contract's own division rather than a workaround. Eiffel puts
+types in the declared parameter types and reserves `require` for what types
+cannot express; `@spec` and `@pre` split the same way. See
+[What does Bond do that typespecs don't?](#what-does-bond-do-that-typespecs-don-t)
+
+### But contracts can be purged — isn't the guard my safety net?
+
+This is the strongest argument for keeping both, and Meyer's answer is that it
+points at a misclassification rather than a need for redundancy. If a condition
+has to hold in a build with contracts compiled out, it was never a precondition:
+
+  * **Data from outside the system** — a request body, a config file, a CSV
+    row — has no contract to violate, because there is no caller of yours to
+    blame. Validate it at the boundary with ordinary code, and let the functions
+    behind that boundary take preconditions about data already known to be good.
+  * **A condition you don't trust callers to meet** is a statement that the
+    function is tolerant rather than demanding. Say so in the body, and return a
+    value.
+  * **A condition you do trust callers to meet** is a precondition, and purging
+    it in production is the trade you chose when you purged — the same trade as
+    switching off any other assertion.
+
+### Consequence for tests
+
+Use `Bond.Test.assert_precondition_violation/2` for preconditions with *no*
+corresponding guard — semantic constraints only a contract can express, like a
+cross-field relationship. Where a guard is doing the work, assert
 `FunctionClauseError` instead, because that is what fires and what should fire.
 
-The division of labour that works well: let guards and patterns say what the
-function *accepts*, and let contracts say what it *promises* — the
+The division of labour that falls out: guards and patterns say what the function
+*accepts* and which clause handles it; contracts say what it *promises* — the
 relationships between arguments, and between arguments and the result, that a
 guard cannot express at all.
+
+## How demanding should my preconditions be?
+
+Once the Non-Redundancy Principle has told you that a condition belongs to
+exactly one party, you still have to choose which. Meyer names the two attitudes
+(*Object-Oriented Software Construction*, 2nd edition, §11.7, p. 354): the
+**demanding** style puts the condition in the precondition and expects callers
+to establish it; the **tolerant** style leaves it out and handles the case in
+the body.
+
+He is careful to mark this one as a judgement rather than a law — "to a certain
+extent this is a matter of personal choice (as opposed to the Non-Redundancy
+principle, which was absolute)" — while still making "a strong case […] for the
+demanding style, especially in the case of software meant to be reusable."
+
+The argument is about **context**. A general-purpose routine usually does not
+have enough of it to decide what an out-of-range call *means*. Meyer's example
+is popping an empty stack: only the caller knows whether that is a harmless
+no-op, a recoverable condition, or a bug. A stack module that picks one on the
+caller's behalf — his tolerant version prints an error message — has
+overstepped. The same goes for a square root of a negative number, where the
+tolerant body reduces to `if x < 0 then "handle the error, somehow"`. As he puts
+it, the operative word is *somehow*.
+
+### The Elixir translation is three ways, not two
+
+Elixir needs a distinction Eiffel doesn't, and getting it wrong would turn good
+advice into bad advice. There are three things you can do with an out-of-range
+input, not two:
+
+1. **Demand it.** `@pre non_empty: items != []`. Violating it is a bug in the
+   caller, and Bond says so.
+2. **Return it.** `{:error, :empty}`. The function reports the condition and the
+   *caller still decides* what it means.
+3. **Guess.** Log something, return `nil`, substitute a default, carry on.
+
+Only (3) is what Meyer attacks. Idiomatic Elixir's `{:ok, _} | {:error, _}` is
+**not** the tolerant style he warns about — it delegates the decision rather
+than making it, which is the same instinct the demanding style is protecting.
+So "prefer demanding" here means *prefer (1) or (2) over (3)*, and never
+"stop returning error tuples."
+
+Choose between (1) and (2) by asking what a violation *is*. If reaching this
+state means somebody upstream has a bug, it is a precondition. If a correct
+caller with valid data can legitimately land here — an empty result set, a
+missing key, a closed account — it is a normal outcome and belongs in the return
+value. Bond sharpens the question: a precondition can be purged and an
+`{:error, _}` cannot, so anything a running system must still handle when
+contracts are compiled out has to be (2).
+
+### Don't over-demand: the Reasonable Precondition principle
+
+The demanding style has an obvious failure mode — `require False` makes every
+routine trivially correct — so Meyer bounds it (§11.7, p. 356):
+
+> **Reasonable Precondition principle**
+>
+> Every routine precondition (in a "demanding" design approach) must satisfy the
+> following requirements:
+>
+>   * The precondition appears in the official documentation distributed to
+>     authors of client modules.
+>   * It is possible to justify the need for the precondition in terms of the
+>     specification only.
+
+Bond gives you the first for free: contracts are appended to the generated docs,
+so a precondition you write is a precondition your callers can read.
+
+The second is a test worth applying by hand, because it rules out the
+preconditions that exist for *your* convenience rather than from the problem.
+"There is no maximum of an empty collection" justifies `@pre non_empty: items != []`
+on `max/1` from the specification alone. "My implementation calls `Map.get/2`"
+does not justify `@pre is_map(opts)` — that is an implementation detail leaking
+into the caller's obligations, and the day you switch to a keyword list the
+caller's contract changes for no reason the caller can see.
 
 ## Can I write a contract for the failure path?
 
@@ -433,6 +581,49 @@ The one case this genuinely leaves uncovered is a function that mutates
 where "if this raised, nothing was written" is a real property. That is
 normally a transaction's job rather than a contract's.
 
+## Should I rescue a `Bond.PreconditionError`?
+
+Not to decide what your program does next. Bond's error structs are ordinary
+exceptions and nothing stops you catching them, but a contract violation is a
+different kind of event from a failure your code is meant to handle. Meyer puts
+it as a rule: a run-time assertion violation is the *manifestation of a bug* —
+a precondition violation is a bug in the caller, a postcondition violation a bug
+in the function. Neither is a business outcome, and turning one into a return
+value converts a bug report into a feature.
+
+Bond gives this the sharpest possible edge, because a `rescue` that branches on
+a contract violation **behaves differently in a purged build**:
+
+```elixir
+def safe_charge(amount) do
+  charge(amount)
+rescue
+  Bond.PreconditionError -> {:error, :invalid_amount}
+end
+```
+
+With contracts enabled, `safe_charge(-5)` returns `{:error, :invalid_amount}`.
+Compile the same source with `preconditions: :purge` and it returns
+`{:ok, -5}` — the precondition never fires, the `rescue` never runs, and the
+negative amount sails through. The error branch didn't get slower; it stopped
+existing. This is the same hazard
+[Writing sound assertions](writing-sound-assertions.md) describes for partial
+assertions: a contract should never be the reason two builds of the same source
+disagree about what a function returns.
+
+If `amount > 0` is a condition your program must handle rather than a promise
+callers must keep, it is not a precondition. Check it with ordinary control flow
+and return `{:error, :invalid_amount}` yourself — see
+[Can I write a contract for the failure path?](#can-i-write-a-contract-for-the-failure-path)
+above.
+
+Catching Bond errors to *report* them is a different matter and perfectly
+reasonable: a `Plug.ErrorHandler`, a `Logger` in a supervision tree, an error
+tracker's exception hook. Those observe the bug and let it stay a bug. For
+counting and alerting without any `rescue` at all, the
+[`[:bond, :assertion, :failure]` telemetry event](telemetry.md) fires on every
+violation, before the exception is raised.
+
 ## Are contracts evaluated on the recursion path?
 
 No — Bond implements Bertrand Meyer's
@@ -447,13 +638,23 @@ function's preconditions and postconditions are *not* evaluated. Without
 this rule, mutually recursive contracts would loop forever. With it,
 contracts are safe to use even when they call into the rest of your API.
 
+Termination is the obvious reason but not Meyer's main one. His argument is that
+evaluating a predicate's contracts while it is checking yours would "treat as peers the
+routines of our computation and their assertions' functions", when assertions are meant
+to sit on a higher plane than the code they police — their correctness has to be settled
+in advance, not audited mid-flight. His analogy: you run the background check on the
+security guard before their shift, not while they are screening visitors. The practical
+consequence is in
+[How do I reuse a predicate across several functions?](#how-do-i-reuse-a-predicate-across-several-functions)
+— a predicate you use in contracts must stand on its own.
+
 ## Can I use `check/1` to assert input validity?
 
 No — `check/1` is for **sanity checks during development**, not input
-validation. A `check` can be compiled out entirely via
-`config :bond, :checks, false`, and the wrapped expression is then not
-evaluated at all. If your code's correctness depends on something being
-checked, use ordinary control flow:
+validation. A `check` can be switched off with `config :bond, checks: false`
+(or removed from the build entirely with `checks: :purge`), and the wrapped
+expression is then not evaluated at all. If your code's correctness depends
+on something being checked, use ordinary control flow:
 
 ```elixir
 # DON'T: relies on check for correctness
@@ -546,9 +747,7 @@ apply. Bond emits a compile-time warning when it can see that coming —
 see the next entry.
 
 Violations raise `Bond.InvariantError` and emit `[:bond, :assertion, :failure]`
-telemetry with `:kind => :invariant`. See the
-[Invariants](Bond.html#module-invariant-for-struct-modules) section in the
-moduledoc.
+telemetry with `:kind => :invariant`. See the [Invariants](invariants.md) guide.
 
 ## Why is Bond warning about skipped invariants?
 
@@ -915,20 +1114,77 @@ defmodule Mailer do
   def unsubscribe(to), do: ...
 
   # The reusable predicate — declared once, called from any contract.
+  # Public on purpose: see below.
   def valid_email?(address) do
     is_binary(address) and String.contains?(address, "@")
   end
 end
 ```
 
-The predicate can be a private `defp`; it still resolves inside contracts
-because Bond's checks run in the same module. On failure the error reports
-the **call**, not the expanded body:
+Note that `valid_email?/1` is a `def`, not a `defp`, and that is deliberate.
+Bond will happily resolve a private predicate — the checks run in the same
+module — but a public function's precondition should not depend on one. Meyer
+states the rule directly (*Object-Oriented Software Construction*, 2nd edition,
+§11.7, p. 358):
+
+> **Precondition Availability rule**
+>
+> Every feature appearing in the precondition of a routine must be available to
+> every client to which the routine is available.
+
+A precondition is an obligation on the *caller*. A caller that cannot evaluate
+it cannot discharge it, so what you have is no longer an agreement — it is a
+demand the other party has no way to check.
+
+In Elixir the consequence is visible in your published documentation. Bond
+renders the assertion source into the docs for `send_welcome/2`, so a `defp`
+predicate produces this:
+
+```
+Preconditions
+  valid_recipient: valid_email?(to)
+```
+
+`valid_email?/1` is private, so it is excluded from the generated docs and
+cannot be called. The obligation is published in terms the reader cannot look
+up, let alone satisfy. Keep the predicate public when the function it constrains
+is public; a `defp` predicate is fine on a `defp`'s own contract, where the only
+clients are in the same module.
+
+**Postconditions are exempt**, and Meyer says so directly: "There is no such rule
+for postconditions. It is not an error for some clauses of a postcondition clause
+to refer to secret features." A postcondition is the function's promise, not the
+caller's obligation, so it may reference private helpers freely — it is simply
+stating a property the caller cannot verify independently.
+
+Worth noting what Meyer does with this rule that Bond currently doesn't: in
+Eiffel it is a *language* rule, a compile-time error, on the grounds that "a
+methodological principle does not suffice: we need a language rule to be
+enforced by compilers, not left to the decision of developers." Bond accepts a
+private predicate silently. Unlike the guard case above, this one is statically
+decidable — Bond knows which functions are public — so it is a plausible future
+warning rather than a permanent matter of taste.
+
+On failure the error reports the **call**, not the expanded body:
 
 ```
 label: :valid_recipient
 assertion: valid_email?(to)
 ```
+
+> #### A predicate used in a contract has its own contracts suppressed {: .warning}
+>
+> Contracts on `valid_email?/1` itself will **not** be evaluated when it is called from
+> inside another contract — that is the
+> [Assertion Evaluation rule](#are-contracts-evaluated-on-the-recursion-path) at work,
+> and it applies to your predicate too. A `@pre` on `valid_email?/1` fires for direct
+> calls and is silently inert in the place you most wanted it.
+>
+> So the reusable predicate has to carry its own weight: keep it simple enough to be
+> obviously correct, and test it directly rather than relying on contracts to police it.
+> Meyer sets the same bar — functions used in assertions "must be simple and of
+> unimpeachable correctness", because by the time one runs, it is too late to ask whether
+> it is trustworthy.
 
 That named form is exactly what you want when the predicate is gnarly (a
 real email regex reads worse than `valid_email?`). When you'd rather see

@@ -60,8 +60,8 @@ defmodule Bond do
 
   ## Options
 
-  Each of the following options is one of `true`, `false`, or `:purge`. See the "Conditional
-  compilation" section in the moduledoc for what each value means. Options passed to
+  Each of the following options is one of `true`, `false`, or `:purge`. See the
+  [Configuring Contracts](configuration.md) guide for what each value means. Options passed to
   `use Bond` override both the global `:bond` config and any `:overrides` entry that matches
   this module.
 
@@ -74,8 +74,11 @@ defmodule Bond do
   of the global config.
 
       defmodule MyApp.HotPath do
-        use Bond, preconditions: :purge, postconditions: :purge
+        use Bond, preconditions: :purge, postconditions: :purge, invariants: :purge
       end
+
+  Purge from the top down: the contract-checking chain requires that a `:purge`d kind has every
+  kind above it `:purge`d too, so `preconditions: :purge` on its own is a compile error.
 
   ### `:at_annotations`
 
@@ -208,7 +211,8 @@ defmodule Bond do
   @doc """
   Override `Kernel.@/1` to support `@pre` and `@post` annotations.
 
-  See the `Bond` module docs for the syntax of `@pre` and `@post` annotations.
+  See the [Writing Contracts](writing-contracts.md) guide for the syntax of `@pre`
+  and `@post` annotations.
   """
   defmacro @pre_or_post
 

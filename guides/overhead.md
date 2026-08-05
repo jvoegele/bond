@@ -23,21 +23,21 @@ The short version, for the impatient:
     leave them off by default in production, flip on for incident
     debugging."
 
-Compile-time overhead is roughly **10 ms per module** that uses Bond
-with a few contracts. For a 200-module app, that's about 2 seconds added
+Compile-time overhead is roughly **30 ms per module** that uses Bond
+with a few contracts. For a 200-module app, that's about 6 seconds added
 to a clean `mix compile`. Incremental compiles only re-run on changed
 files, so the cost is amortized after the first build.
 
 ## Reference environment
 
-All numbers below are from a single host, measured 2026-05-29:
+All numbers below are from a single host, measured 2026-08-04:
 
   * **CPU:** Apple M3 Max (16 cores)
   * **RAM:** 64 GB
-  * **OS:** macOS 26.5 (build 25F71)
-  * **Erlang/OTP:** 27.2 (erts-15.2, JIT)
-  * **Elixir:** 1.19.5
-  * **Bond:** 0.18.0 + the post-1.0-prep `main` branch
+  * **OS:** macOS 26.5
+  * **Erlang/OTP:** 29 (erts-17.0.1, JIT)
+  * **Elixir:** 1.20.0
+  * **Bond:** 1.13.2
 
 Don't take these as a promise across hardware. A Linux x86_64 server,
 a Raspberry Pi, or a CI runner will produce different numbers. The
@@ -66,23 +66,26 @@ both kinds, so it cancels out of the differential reported here.
 
 | Kind | Total | Per module |
 | --- | ---: | ---: |
-| Baseline (no Bond) | 587 ms | 2.9 ms/module |
-| With Bond (every module + 6 contracts) | 2567 ms | 12.8 ms/module |
-| **Overhead added by Bond** | **1980 ms** | **9.9 ms/module** |
+| Baseline (no Bond) | 423 ms | 2.1 ms/module |
+| With Bond (every module + 6 contracts) | 6498 ms | 32.5 ms/module |
+| **Overhead added by Bond** | **6074 ms** | **30 ms/module** |
 
-Ratio: ~4.4× baseline.
+Ratio: ~15× baseline.
 
 For a typical application:
 
-  * **100 modules using Bond:** ~1 s of additional `mix compile` time on
+  * **100 modules using Bond:** ~3 s of additional `mix compile` time on
     a clean build.
-  * **500 modules:** ~5 s.
-  * **1000+ modules:** ~10 s — still small enough to be invisible
-    against typical CI build times (deps, asset compilation, test
-    runs), but noticeable in a "watch for changes and rebuild" loop. If
-    you hit this scale, the `bench/compile_overhead.exs` recipe makes
-    it easy to measure your specific shape and decide whether
-    `:purge`ing in dev is worth it.
+  * **500 modules:** ~15 s.
+  * **1000+ modules:** ~30 s — still amortized away by incremental
+    compilation after the first build, but long enough to be felt in a
+    "watch for changes and rebuild" loop, and worth measuring against
+    your own codebase with `bench/compile_overhead.exs` before deciding
+    whether `:purge`ing in dev is worth it.
+
+Compile-time cost is the dimension where Bond has grown, not shrunk: the
+same benchmark against 1.0.0-rc.1 measured ~10 ms/module (~4.4× baseline).
+Runtime overhead moved the other way over the same period.
 
 Bond starts a `:gen_statem` per compiling module (stopped in
 `__after_compile__`), so the per-module overhead is roughly constant
@@ -116,8 +119,8 @@ to the default `true` value, and then evaluates the contract expression.
 
 | Function shape | ns/call |
 | --- | ---: |
-| plain function `def f(x), do: x` | 18.7 |
-| struct function `def f(%__MODULE__{} = s), do: s` | 14.2 |
+| plain function `def f(x), do: x` | 10.7 |
+| struct function `def f(%__MODULE__{} = s), do: s` | 11.8 |
 
 ### `@pre` only — `@pre is_number(x)` on a plain function
 
@@ -125,33 +128,34 @@ Only the precondition wrapper is emitted; all other kinds `:purge`d.
 
 | Mode | ns/call | Δ over baseline |
 | --- | ---: | ---: |
-| `:purge` | 15.5 | ~0 (essentially baseline) |
-| `false` (runtime-disabled) | 91.8 | +73 ns |
-| `true` (enabled) | 149.7 | +131 ns |
+| `:purge` | 10.1 | ~0 (essentially baseline) |
+| `false` (runtime-disabled) | 24.8 | +14 ns |
+| `true` (enabled) | 83.9 | +73 ns |
 
 ### `@post` over `@pre` (marginal cost of adding `@post`)
 
 The chain `preconditions ≤ postconditions` means measuring `@post` in
 isolation isn't possible. This row reports cost when `@pre` is already
 enabled, with `@post` varying. Subtract the `@pre` `true` row above
-(149.7 ns) to get the marginal cost of `@post`.
+(83.9 ns) to get the marginal cost of `@post`.
 
 | Mode | ns/call | Marginal Δ over `@pre` true |
 | --- | ---: | ---: |
-| `:purge` | 172.5 | +23 ns |
-| `false` (runtime-disabled) | 219.3 | +70 ns |
-| `true` (enabled) | 298.0 | +148 ns |
-
-(`@post` `:purge` is slightly higher than `@pre` true because of
-measurement noise in the same range; treat them as equivalent.)
+| `:purge` | 85.1 | +1 ns |
+| `false` (runtime-disabled) | 98.2 | +14 ns |
+| `true` (enabled) | 178.8 | +95 ns |
 
 ### `@invariant` only — `@invariant subject.value > 0` on a struct method
 
+The fixture declares no `@pre`/`@post`, so although the chain requires the
+lower kinds to be compiled in, there is nothing for them to check and the
+numbers isolate the invariant.
+
 | Mode | ns/call | Δ over baseline (struct) |
 | --- | ---: | ---: |
-| `:purge` | 14.3 | ~0 (essentially baseline) |
-| `false` (runtime-disabled) | 290.8 | +277 ns |
-| `true` (enabled) | 452.9 | +439 ns |
+| `:purge` | 12.5 | ~0 (essentially baseline) |
+| `false` (runtime-disabled) | 38.3 | +27 ns |
+| `true` (enabled) | 226.7 | +215 ns |
 
 `@invariant` is more expensive than `@pre` or `@post` because it fires
 twice (on entry, on exit) and does a struct-shape check on the return
@@ -161,15 +165,34 @@ value to decide whether to fire the post-check.
 
 | Mode | ns/call | Δ over baseline |
 | --- | ---: | ---: |
-| `:purge` | 10.9 | ~0 (essentially baseline) |
-| `true` (enabled) | 138.2 | +120 ns |
-| `false` (runtime-disabled) | 147.1 | +129 ns |
+| `:purge` | 10.2 | ~0 (essentially baseline) |
+| `false` (runtime-disabled) | 20.2 | +10 ns |
+| `true` (enabled) | 251.0 | +240 ns |
 
-`check/1` cost is similar to `@pre` at the call site, since both
-evaluate a single predicate. `false` is slightly *more* expensive than
-`true` for `check/1` because the early-exit path still has to read the
-runtime config; the `true` path also reads the config but then bypasses
-some chain-context overhead.
+An enabled `check/1` is the most expensive single assertion in the table —
+noticeably dearer than an enabled `@pre` evaluating the same predicate. A
+`@pre` is hoisted into a lifted `defp` that the wrapper calls once per call
+with an already-assembled argument list; a `check/1` sits in the middle of
+your function body, where the assertion has to be evaluated against the
+full local scope at that point. Disabled (`false`), it collapses to the
+cheapest row in the table: the gate reads one `:persistent_term` entry and
+skips everything.
+
+### Wide signature — `@pre` + `@post` with `old/1` on an arity-6 function
+
+The one row that exercises the generated code at realistic width.
+
+| Mode | ns/call |
+| --- | ---: |
+| plain `f/6`, no Bond | 10.8 |
+| `:purge` | 8.5 |
+| `true` (enabled) | 179.7 |
+
+An enabled `@pre` + `@post` with an `old/1` capture over six parameters
+costs about the same as the same pair over one parameter (178.8 ns above).
+The failure `binding()` snapshot is captured lazily and only materialised
+when an assertion actually fails, so per-call cost tracks the number of
+assertions, not the width of the signature.
 
 ### What this means
 
@@ -177,7 +200,7 @@ Some rules of thumb that fall out of the numbers:
 
   * **For "normal" code at millisecond-or-greater latencies, contract
     overhead is invisible.** A typical HTTP request taking 5 ms
-    (5,000,000 ns) wouldn't notice a 200 ns contract check on the
+    (5,000,000 ns) wouldn't notice a 100 ns contract check on the
     request handler.
   * **For tight loops processing >10M items/sec**, contract overhead
     *will* show up. Either `:purge` contracts on the hot path or
@@ -188,7 +211,7 @@ Some rules of thumb that fall out of the numbers:
     when you need to debug a specific incident.
   * **`:purge` is the right default for hot-path modules in
     production.** Per-module overrides give you per-module control —
-    see the `Bond` moduledoc on `:overrides`.
+    see [Per-module overrides](configuration.md#per-module-overrides).
 
 ## Re-running on your hardware
 

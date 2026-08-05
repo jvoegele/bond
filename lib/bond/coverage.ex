@@ -14,7 +14,7 @@ defmodule Bond.Coverage do
   > A correct assertion over correct code, exercised by a passing suite, *also* never fails —
   > that is what a green suite means. So `⚠ never failed` is a **prompt**, not a verdict: either
   > write a test that makes the assertion fail (proving it *can* — see the
-  > [Writing Sound Assertions](writing-sound-assertions.html) guide), or delete it. Coverage is an
+  > [Writing Sound Assertions](writing-sound-assertions.md) guide), or delete it. Coverage is an
   > opt-in diagnostic you run deliberately, never an always-on warning.
 
   ## Enabling

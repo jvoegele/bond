@@ -15,10 +15,10 @@ without a deprecation cycle.
 
 In practical terms, the public surface is everything reachable through:
 
-  * the eight modules published to hexdocs (verified by `mix docs`);
+  * the modules published to hexdocs (verified by `mix docs`);
   * the `use Bond` macro and the attribute syntax it intercepts;
   * the `[:bond, :assertion, :failure]` telemetry event;
-  * the four catchable error structs (`Bond.PreconditionError` et al.);
+  * the catchable error structs (`Bond.PreconditionError` et al.);
   * the `:bond` application-config keys, including `:overrides`;
   * the `@bond_warn_skipped_invariants` per-function module attribute.
 

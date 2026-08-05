@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- **The reference moved off the landing page into four topical guides.** The `Bond` moduledoc was
+  doing three jobs — GitHub front page, hexdocs landing page (`main: "Bond"`), and module
+  reference — and the reference had won: 994 lines, of which 846 were reference. It is now 177.
+
+  New guides, all previously homeless material with no other home in the docs:
+
+  | guide | from |
+  |---|---|
+  | Writing Contracts | Usage, assertion syntax, `old`, `check/1`, `where`/`whenever`, documenting contracts |
+  | Invariants | `@invariant` for structs, and the `Bond.Server` bridge |
+  | Configuring Contracts | the contract-checking chain, runtime toggling, per-module overrides |
+  | Telemetry | the `[:bond, :assertion, :failure]` event |
+
+  Four further sections — contract inheritance for behaviours and protocols, testing, stability —
+  were lossy summaries of guides that already existed at three to ten times the length. They are
+  replaced by a "Where to go from here" map that lists every guide with a line on what it answers.
+
+  The landing page is now pitch, installation, and that map. Cross-references were rewritten (the
+  `#module-*` anchors that pointed into the moduledoc now point at the guide that owns the
+  section), and the sidebar reorders to follow the questions a reader actually asks: learn it,
+  write it, write it well, the larger features, then the operational concerns.
+
+### Changed
+
 - **The README now opens with a contract that a guard could not express**
   ([#82](https://github.com/jvoegele/bond/issues/82)). It previously led with
   `@pre positive_amount: amount > 0` and `@pre numeric_x: is_number(x)` — contracts the FAQ
@@ -26,9 +50,31 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   state in the binding. Both examples and both diagnostics were run and copied from real output
   rather than composed.
 
-  Also added: a "When not to reach for Bond" section (guard-enforced constraints, hot paths,
-  type-shaped constraints), and half a sentence on the `Math.sqrt` example noting that its
-  type-check preconditions document the guard rather than replace it.
+  The opening also now names the concepts the annotations abbreviate — a reader met `@pre` and
+  `@post`, and then a `Bond.PreconditionError`, without ever being given the words *precondition*
+  and *postcondition*. And half a sentence on the `Math.sqrt` example notes that its type-check
+  preconditions document the guard rather than replace it.
+
+  The pitch was then rewritten again, because it argued the wrong thing. It argued
+  *expressiveness* — contracts can say what guards cannot — to which an Elixir developer's fair
+  reply is "I would write that check in the function, or in a test." Worse, the opening example
+  undercut itself: its precondition `amount <= account.balance` is exactly guard-expressible
+  (`when amount <= account.balance` compiles), and its postcondition restated the function body, so
+  the first thing a skeptic saw was the function written twice at runtime cost.
+
+  It now argues *leverage* — one statement enforced in places you did not write it — with a worked
+  example of each: an invariant checked at every entrance and exit of a module, a contract on a
+  behaviour callback enforced in every implementation (and attributed to the behaviour on failure),
+  and the same contracts reused as the oracle for property-based testing. The opening example is a
+  ledger transfer whose postcondition states conservation of money, which is a law the body must
+  obey rather than a restatement of it, and which a later-added transfer fee breaks.
+
+  A "When not to reach for Bond" section was added and then removed before release. Of its three
+  points, two were strengths written as concessions — the guards-versus-contracts division, which
+  the pitch already states positively, and the runtime cost, which is really the story that
+  contracts can be compiled out entirely. The third, typespecs for type-shaped constraints, is
+  already answered in the FAQ. In its place is "You choose what they cost", which makes the
+  purge story a claim rather than an apology.
 
 - **The README is ordered for a reader rather than by feature.** It is three documents at once —
   the GitHub front page, the hexdocs landing page (`main: "Bond"`), and the `Bond` module

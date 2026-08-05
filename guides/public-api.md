@@ -1,4 +1,4 @@
-# Public API surface (1.2)
+# Public API surface
 
 This page enumerates every callable, attribute, and configuration value Bond
 considers part of its **public surface** under the [stability
@@ -71,8 +71,9 @@ x > 0`) likewise raises a `CompileError` with a specific diagnostic.
     `@transition_invariant`, and inherited contracts (`Bond.Behaviour` callbacks
     and `Bond.Protocol` functions). The keyword fixes the arrow (`where` ⇒ `=`,
     `whenever` ⇒ `<-`); a mismatched pair, a non-binding argument, or an empty
-    body each raise a `CompileError`. See the `Bond` moduledoc for semantics and
-    rendering.
+    body each raise a `CompileError`. See
+    [Destructuring bindings](writing-contracts.md#destructuring-bindings-where-and-whenever)
+    for semantics and rendering.
   * **All-inside form** — `where(pattern = source, <assertions>)`, with the
     assertions inside the call. Used by the fixed-arity call macros:
     `Bond.pre`/`Bond.post`/`Bond.invariant` (`at_annotations: false`) and
@@ -118,8 +119,9 @@ through the `Bond.` prefix.
 ## Macros and operators (after `use Bond`)
 
   * `check/1` — runtime assertion of an expression or a keyword list of
-    labelled expressions. Behaviour under the four `:checks` modes
-    (`true | false | :purge`) is documented in the main `Bond` moduledoc.
+    labelled expressions. Behaviour under the three `:checks` modes
+    (`true | false | :purge`) is documented in
+    [Configuring Contracts](configuration.md).
   * `old/1` — captures a value at function-entry for use in a `@post`
     expression. Only valid inside `@post`.
   * `subject` — implicit binding inside `@invariant` expressions, bound to
@@ -340,8 +342,8 @@ surfacing assertions that ran but were never observed to fail. Public functions:
 Bond emits exactly one telemetry event:
 
   * **Event name:** `[:bond, :assertion, :failure]`.
-  * **Measurements:** `%{}` (no numeric measurements; emitted purely for
-    observation).
+  * **Measurements:** `:system_time` (`System.system_time/0`) and
+    `:monotonic_time` (`System.monotonic_time/0`), both captured at the failure.
   * **Metadata:** map with keys `:kind` (`:precondition` | `:postcondition` |
     `:invariant` | `:state_invariant` | `:transition_invariant` | `:check`),
     `:label`, `:module`, `:function` (`{name, arity}`
@@ -358,8 +360,10 @@ telemetry handlers see every assertion failure even when an upstream
 
 ## Error structs
 
-All four are raised by Bond, all four are catchable, all four share the same
-shape (defined by the internal `Bond.AssertionError` `__using__` macro):
+All five are raised by Bond, all five are catchable, all five share the same
+shape (defined by the internal `Bond.AssertionError` `__using__` macro). Being
+catchable does not make them control flow — see
+[Should I rescue a `Bond.PreconditionError`?](faq.md#should-i-rescue-a-bond-preconditionerror)
 
   * `Bond.PreconditionError`
   * `Bond.PostconditionError`
@@ -385,15 +389,16 @@ Public fields on every error struct:
   * `:line` — `integer()`.
   * `:module` — `module()`.
   * `:function` — `{name :: atom(), arity :: non_neg_integer()}` tuple.
-  * `:binding` — `keyword()` of in-scope variables at the assertion site.
-  * `:exception` — `Exception.t() | nil`. Set only when the assertion *expression*
-    raised rather than returning truthy/falsy, in which case the raised error is a
-    `Bond.AssertionEvaluationError` and this is the original exception (with
-    `:original_stacktrace`). `nil` for an ordinary violation, which is what
-    distinguishes the two in a handler. Bond's
+  * `:binding` — `keyword()` of in-scope variables at the assertion site. Bond's
     own generated variables are filtered out, so the keys are names you wrote,
     with one exception: an argument whose clauses disagreed on a name has no name
     to show, and appears under a 1-based positional label (`arg_1`, `arg_2`, …).
+  * `:exception` — `Exception.t() | nil`. Set only when the assertion *expression*
+    raised rather than returning truthy/falsy, in which case the raised error is a
+    `Bond.AssertionEvaluationError` and this is the original exception. `nil` for an
+    ordinary violation, which is what distinguishes the two in a handler.
+  * `:original_stacktrace` — `Exception.stacktrace() | nil`. The stacktrace of
+    `:exception`, when set.
   * `:source_behaviour` — `module() | nil`. The behaviour an inherited contract
     came from (`Bond.Behaviour`), or `nil`.
   * `:source_protocol` — `module() | nil`. The protocol a contract was declared
