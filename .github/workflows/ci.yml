@@ -151,11 +151,18 @@ jobs:
       # reasoned about from a local run — change it only from an observed CI
       # figure.
       #
-      # 14.0 against an observed 9.3x: ~50% headroom for run-to-run noise, while
-      # still catching a doubling. A tripwire for a step change, not a target.
+      # Observed on this runner: 9.3x and 11.3x on consecutive runs of the same
+      # commit — ~20% run-to-run variance, which is what the bound has to absorb.
+      # 18.0 leaves ~60% headroom over the higher figure.
+      #
+      # That is loose, and deliberately: it does not need to be tight to do its
+      # job. The regression that prompted this (#96) tripled the figure; a repeat
+      # of that class would take ~11x to ~30x and trip any bound under 30. Set it
+      # to catch a step change without flaking on noise, and re-read it from a CI
+      # run — never a local one — if it ever needs to move.
       - name: Compile-overhead benchmark
         env:
-          BOND_MAX_COMPILE_RATIO: "14.0"
+          BOND_MAX_COMPILE_RATIO: "18.0"
         run: mix run bench/compile_overhead.exs
 
   downstream:
