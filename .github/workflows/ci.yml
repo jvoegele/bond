@@ -138,14 +138,24 @@ jobs:
       # it until #96 — where a change that tripled it reached main while its
       # runtime counterpart was carefully benchmarked. This is the guard.
       #
-      # The bound is a *ratio* (Bond-compile time / no-Bond compile time), not
-      # absolute milliseconds: both halves scale with the runner, so the ratio
-      # survives a slow or busy machine that would make a millisecond bound
-      # either useless or flaky. It is deliberately loose — this is a
-      # tripwire for a step change, not a performance target.
+      # The bound is a *ratio* (Bond-compile time / no-Bond compile time) rather
+      # than absolute milliseconds, which are meaningless across machines: this
+      # runner takes ~1730 ms for the no-Bond batch where a dev laptop takes
+      # ~377 ms.
+      #
+      # The ratio is NOT portable either, though — it is calibrated to this
+      # runner and nothing else. The same commit measures 9.3x here and ~16.6x
+      # on an M3 Max, because the two halves do not scale together: Bond's share
+      # is macro expansion in Elixir, the baseline's is BEAM compilation, and the
+      # runner's slower cores penalise the latter more. So this number cannot be
+      # reasoned about from a local run — change it only from an observed CI
+      # figure.
+      #
+      # 14.0 against an observed 9.3x: ~50% headroom for run-to-run noise, while
+      # still catching a doubling. A tripwire for a step change, not a target.
       - name: Compile-overhead benchmark
         env:
-          BOND_MAX_COMPILE_RATIO: "30.0"
+          BOND_MAX_COMPILE_RATIO: "14.0"
         run: mix run bench/compile_overhead.exs
 
   downstream:
