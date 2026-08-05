@@ -303,7 +303,12 @@ defmodule Bond.Compiler.AnnotatedFunction do
           # it rides along on the config map because that is what is already threaded from
           # `Bond.Compiler.__before_compile__/1` down into codegen.
           optional(:at_annotations) => boolean(),
-          optional(:warn_skipped_invariants) => boolean()
+          optional(:warn_skipped_invariants) => boolean(),
+          # The using module's alias table, as captured from `env.aliases` at
+          # `__before_compile__`. Rides along for the same reason `:at_annotations` does:
+          # invariant head detection needs it to resolve a struct named through an alias
+          # (#93), and this map is what is already threaded down into codegen.
+          optional(:aliases) => keyword()
         }
 
   @doc """
@@ -384,7 +389,14 @@ defmodule Bond.Compiler.AnnotatedFunction do
       # for callers that build a config map directly.
       owns_docs? = Map.get(config, :at_annotations, true)
 
-      build_contract_override(annotated_function, pre_mode, post_mode, inv_mode, owns_docs?)
+      build_contract_override(
+        annotated_function,
+        pre_mode,
+        post_mode,
+        inv_mode,
+        owns_docs?,
+        Map.get(config, :aliases, [])
+      )
     end
   end
 
@@ -425,7 +437,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
     if warn? and
          not Invariants.any_clause_checks_invariants?(
            annotated_function.clauses,
-           struct_module
+           struct_module,
+           Map.get(config, :aliases, [])
          ) and
          not Invariants.any_clause_mentions_struct?(
            annotated_function.clauses,
@@ -489,7 +502,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
          pre_mode,
          post_mode,
          inv_mode,
-         owns_docs?
+         owns_docs?,
+         aliases
        ) do
     first_clause = List.first(annotated_function.clauses)
     env = first_clause.env
@@ -517,6 +531,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
       arity: arity,
       kind: kind,
       struct_module: struct_module,
+      aliases: aliases,
       pre_mode: pre_mode,
       post_mode: post_mode,
       inv_mode: inv_mode,

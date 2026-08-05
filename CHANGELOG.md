@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Invariant entry checks are no longer skipped when the head names the struct without
+  `__MODULE__`** (#93). `def total(%MyApp.Cart{} = cart)` and
+  `def total(cart) when is_struct(cart, MyApp.Cart)` are identical in meaning to their
+  `__MODULE__` spellings, but only the latter emitted an entry check — the other silently
+  emitted none.
+
+  It was silent in both directions: `:warn_skipped_invariants` stayed quiet too, because
+  its heuristic resolved names that head detection did not, so it concluded the function
+  was covered. A module written entirely in the qualified style got exit checks only —
+  invariants caught a bad struct the module *produced*, never one it was *handed*.
+
+  Bond now resolves the name against the module's own alias table (from `env.aliases` at
+  `__before_compile__`), so it agrees with Elixir about what a name means. The
+  `alias __MODULE__` idiom works: with that alias in scope, `%Cart{} = cart` is detected.
+  Without it, a bare `%Cart{}` inside `MyApp.Cart` refers to `Elixir.Cart` — a different
+  module — and is correctly *not* treated as the struct, as is an alias pointing at some
+  other module.
+
+  No configuration change and nothing to migrate: modules already using `__MODULE__`
+  behave exactly as before. Modules using the qualified form gain the entry checks they
+  should always have had, which may surface pre-existing invariant violations on input
+  that was previously unchecked.
+
 ### Changed
 
 - **The reference moved off the landing page into four topical guides.** The `Bond` moduledoc was

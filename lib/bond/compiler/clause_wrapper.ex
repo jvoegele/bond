@@ -42,6 +42,7 @@ defmodule Bond.Compiler.ClauseWrapper do
           required(:arity) => non_neg_integer(),
           required(:kind) => :def | :defp,
           required(:struct_module) => module(),
+          required(:aliases) => keyword(),
           required(:pre_mode) => Bond.Compiler.AnnotatedFunction.mode(),
           required(:post_mode) => Bond.Compiler.AnnotatedFunction.mode(),
           required(:inv_mode) => Bond.Compiler.AnnotatedFunction.mode(),
@@ -100,7 +101,12 @@ defmodule Bond.Compiler.ClauseWrapper do
       if context.inv_mode == :purge do
         []
       else
-        Invariants.detect_struct_params(head_params, clause.guards || [])
+        Invariants.detect_struct_params(
+          head_params,
+          clause.guards || [],
+          context.struct_module,
+          Map.get(context, :aliases, [])
+        )
       end
 
     pre_invariant_stmts =

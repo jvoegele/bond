@@ -57,18 +57,26 @@ defmodule Bond.Compiler.Invariants do
   Multiple struct parameters in the same head (e.g. `def merge(%__MODULE__{} = a,
   %__MODULE__{} = b)`) all appear in the result.
 
-  Fully-qualified module patterns (`%MyMod{}`) and aliased forms are not recognised —
-  invariants are scoped to the struct's own defining module, so `__MODULE__` is the
-  idiomatic form.
+  The struct may be named as `__MODULE__`, spelled out (`%MyApp.Cart{}`), or reached
+  through an alias in scope (`alias __MODULE__` then `%Cart{}`). `same_module?/3`
+  resolves all three exactly, using the module's own alias table; see its comment for why
+  emission cannot use the looser `module_reference?/2` that the warning heuristic relies
+  on.
+
+  Before #93 only the literal `__MODULE__` form was recognised, so every other spelling
+  silently lost its entry check *and* escaped the `:warn_skipped_invariants` warning —
+  the warning's heuristic resolved names this function did not, so it concluded the
+  function was fine.
   """
-  @spec detect_struct_params([Macro.t()], [Macro.t()]) :: [struct_param()]
-  def detect_struct_params(params, guards) when is_list(params) and is_list(guards) do
-    guard_vars = collect_guard_struct_vars(guards)
+  @spec detect_struct_params([Macro.t()], [Macro.t()], module(), keyword()) :: [struct_param()]
+  def detect_struct_params(params, guards, struct_module, aliases \\ [])
+      when is_list(params) and is_list(guards) do
+    guard_vars = collect_guard_struct_vars(guards, struct_module, aliases)
 
     params
     |> Enum.with_index()
     |> Enum.flat_map(fn {param, idx} ->
-      case classify_param(param, guard_vars) do
+      case classify_param(param, guard_vars, struct_module, aliases) do
         {:bound, name} -> [{:bound, name, idx}]
         :destructure -> [{:destructure, idx}]
         :none -> []
@@ -115,11 +123,13 @@ defmodule Bond.Compiler.Invariants do
   return shape can't be determined statically. `any_clause_mentions_struct?/2` is
   the wider net that keeps that conservatism from producing false warnings.
   """
-  @spec any_clause_checks_invariants?([term()], module()) :: boolean()
-  def any_clause_checks_invariants?(clauses, struct_module) when is_list(clauses) do
+  @spec any_clause_checks_invariants?([term()], module(), keyword()) :: boolean()
+  def any_clause_checks_invariants?(clauses, struct_module, aliases \\ [])
+      when is_list(clauses) do
     Enum.any?(clauses, fn clause ->
-      detect_struct_params(clause.params || [], clause.guards || []) != [] or
-        body_returns_struct?(clause.body, struct_module)
+      detect_struct_params(clause.params || [], clause.guards || [], struct_module, aliases) !=
+        [] or
+        body_returns_struct?(clause.body, struct_module, aliases)
     end)
   end
 
@@ -200,6 +210,45 @@ defmodule Bond.Compiler.Invariants do
   defp module_reference?(module, struct_module) when is_atom(module), do: module == struct_module
   defp module_reference?(_name, _struct_module), do: false
 
+  # Strict counterpart to `module_reference?/2`, for deciding whether to *emit* an
+  # invariant check rather than whether to stay quiet about one (#93).
+  #
+  # `module_reference?/2` matches an alias on its trailing segments, which is right for
+  # the `:warn_skipped_invariants` heuristic — over-matching there only suppresses a
+  # warning. Emission cannot afford it: Elixir does not auto-alias a module's own last
+  # segment, so inside `MyApp.Cart` the pattern `%Cart{}` refers to `Elixir.Cart`, a
+  # different struct. Binding `subject` to it would evaluate the invariant against the
+  # wrong value.
+  #
+  # So this resolves exactly, against the module's real alias table (threaded down from
+  # `env.aliases` at `__before_compile__`): `__MODULE__`, a name that the alias table or
+  # plain concatenation maps to the struct module, or an already resolved atom. An alias
+  # pointing at some *other* module correctly does not match.
+  defp same_module?({:__MODULE__, _, _}, _struct_module, _aliases), do: true
+
+  defp same_module?({:__aliases__, _, [head | rest] = segments}, struct_module, aliases)
+       when is_atom(head) do
+    Enum.all?(segments, &is_atom/1) and resolve_alias(head, rest, aliases) == struct_module
+  end
+
+  defp same_module?(module, struct_module, _aliases) when is_atom(module),
+    do: module == struct_module
+
+  defp same_module?(_name, _struct_module, _aliases), do: false
+
+  # Resolves an `__aliases__` head against the module's alias table, the way Elixir
+  # itself would. `alias __MODULE__` in `MyApp.Cart` puts `{Cart, MyApp.Cart}` in the
+  # table, so `%Cart{}` resolves to `MyApp.Cart`; with no such alias it resolves to
+  # `Elixir.Cart`, which is a different module and correctly does not match.
+  defp resolve_alias(head, rest, aliases) do
+    base = Module.concat([head])
+
+    case List.keyfind(aliases || [], base, 0) do
+      {^base, target} -> Module.concat([target | rest])
+      _ -> Module.concat([head | rest])
+    end
+  end
+
   # Detects whether a function clause's body statically returns the struct (so
   # the runtime post-invariant check will fire). Returns true for:
   #
@@ -207,30 +256,29 @@ defmodule Bond.Compiler.Invariants do
   #   - wrapped: `{:ok, %__MODULE__{...}}`
   #   - block-bodied versions of either (last expression of a `:__block__`)
   #
-  # `struct_module` is passed through for future extension (e.g. detecting
-  # `%MyMod{...}` aliases), but is currently unused — Bond's idiomatic form
-  # for invariant-declaring modules is `%__MODULE__{...}` (see
-  # `detect_struct_params/2`'s @doc).
-  defp body_returns_struct?([{:do, expr} | _], struct_module) do
-    expression_returns_struct?(expr, struct_module)
+  # The struct may be named as `__MODULE__` or by the module's own name;
+  # `module_reference?/2` decides, matching head detection (#93).
+  defp body_returns_struct?([{:do, expr} | _], struct_module, aliases) do
+    expression_returns_struct?(expr, struct_module, aliases)
   end
 
-  defp body_returns_struct?(_body, _struct_module), do: false
+  defp body_returns_struct?(_body, _struct_module, _aliases), do: false
 
-  defp expression_returns_struct?({:__block__, _, statements}, struct_module) do
+  defp expression_returns_struct?({:__block__, _, statements}, struct_module, aliases) do
     case List.last(statements) do
       nil -> false
-      last -> expression_returns_struct?(last, struct_module)
+      last -> expression_returns_struct?(last, struct_module, aliases)
     end
   end
 
-  defp expression_returns_struct?({:%, _, [{:__MODULE__, _, _}, _]}, _struct_module), do: true
+  defp expression_returns_struct?({:%, _, [name, _]}, struct_module, aliases),
+    do: same_module?(name, struct_module, aliases)
 
-  defp expression_returns_struct?({:ok, inner}, struct_module) do
-    expression_returns_struct?(inner, struct_module)
+  defp expression_returns_struct?({:ok, inner}, struct_module, aliases) do
+    expression_returns_struct?(inner, struct_module, aliases)
   end
 
-  defp expression_returns_struct?(_expr, _struct_module), do: false
+  defp expression_returns_struct?(_expr, _struct_module, _aliases), do: false
 
   @doc """
   Emits one pre-invariant statement per detected struct parameter, in left-to-right
@@ -363,7 +411,7 @@ defmodule Bond.Compiler.Invariants do
     end
   end
 
-  defp classify_param(param, guard_vars) do
+  defp classify_param(param, guard_vars, struct_module, aliases) do
     case param do
       # A match (`=`) with a top-level variable on one side and a struct match
       # (possibly nested) on the other. Binds the variable to the struct.
@@ -377,43 +425,54 @@ defmodule Bond.Compiler.Invariants do
       # canonical name the wrapper body references, while the inner one has been
       # underscore-prefixed as intentionally-unused.
       {:=, _, [{var, _, ctx}, rhs]} when is_atom(var) and is_atom(ctx) ->
-        if struct_pattern?(rhs), do: {:bound, var}, else: :none
+        if struct_pattern?(rhs, struct_module, aliases), do: {:bound, var}, else: :none
 
       {:=, _, [lhs, {var, _, ctx}]} when is_atom(var) and is_atom(ctx) ->
-        if struct_pattern?(lhs), do: {:bound, var}, else: :none
+        if struct_pattern?(lhs, struct_module, aliases), do: {:bound, var}, else: :none
 
       {var, _, ctx} when is_atom(var) and is_atom(ctx) ->
         if MapSet.member?(guard_vars, var), do: {:bound, var}, else: :none
 
-      {:%, _, [{:__MODULE__, _, _}, _]} ->
-        :destructure
+      {:%, _, [name, _]} ->
+        if same_module?(name, struct_module, aliases), do: :destructure, else: :none
 
       _ ->
         :none
     end
   end
 
-  # Does this pattern match a `%__MODULE__{}` struct, directly or along a chain
-  # of `=` matches? `%__MODULE__{}`, `%__MODULE__{} = x`, and
-  # `a = (%__MODULE__{} = b)` all qualify; an unrelated `%OtherMod{}` does not.
-  defp struct_pattern?({:%, _, [{:__MODULE__, _, _}, _]}), do: true
-  defp struct_pattern?({:=, _, [lhs, rhs]}), do: struct_pattern?(lhs) or struct_pattern?(rhs)
-  defp struct_pattern?(_), do: false
+  # Does this pattern match the module's own struct, directly or along a chain of
+  # `=` matches? `%__MODULE__{}`, `%__MODULE__{} = x`, and `a = (%__MODULE__{} = b)`
+  # all qualify, as do the same shapes written with the module's own name
+  # (`%Cart{}`, `%MyApp.Cart{}`, or a locally-aliased `%Cart{}`) — `module_reference?/2`
+  # decides, so head detection and the `:warn_skipped_invariants` heuristic agree on
+  # what counts as "this module's struct" (#93). An unrelated `%OtherMod{}` does not.
+  defp struct_pattern?({:%, _, [name, _]}, struct_module, aliases),
+    do: same_module?(name, struct_module, aliases)
 
-  defp collect_guard_struct_vars(guards) do
+  defp struct_pattern?({:=, _, [lhs, rhs]}, struct_module, aliases),
+    do:
+      struct_pattern?(lhs, struct_module, aliases) or
+        struct_pattern?(rhs, struct_module, aliases)
+
+  defp struct_pattern?(_, _struct_module, _aliases), do: false
+
+  defp collect_guard_struct_vars(guards, struct_module, aliases) do
     guards
-    |> Enum.flat_map(&walk_guard_for_is_struct/1)
+    |> Enum.flat_map(&walk_guard_for_is_struct(&1, struct_module, aliases))
     |> MapSet.new()
   end
 
-  defp walk_guard_for_is_struct({:is_struct, _, [{var, _, ctx}, {:__MODULE__, _, _}]})
+  defp walk_guard_for_is_struct({:is_struct, _, [{var, _, ctx}, name]}, struct_module, aliases)
        when is_atom(var) and is_atom(ctx) do
-    [var]
+    if same_module?(name, struct_module, aliases), do: [var], else: []
   end
 
-  defp walk_guard_for_is_struct({op, _, [left, right]}) when op in [:and, :or] do
-    walk_guard_for_is_struct(left) ++ walk_guard_for_is_struct(right)
+  defp walk_guard_for_is_struct({op, _, [left, right]}, struct_module, aliases)
+       when op in [:and, :or] do
+    walk_guard_for_is_struct(left, struct_module, aliases) ++
+      walk_guard_for_is_struct(right, struct_module, aliases)
   end
 
-  defp walk_guard_for_is_struct(_), do: []
+  defp walk_guard_for_is_struct(_, _struct_module, _aliases), do: []
 end

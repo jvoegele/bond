@@ -74,6 +74,15 @@ parameter in any of these head shapes:
 | `def foo(x, ...)` (no pattern, no guard) | no | skipped silently |
 | `defp ...` (any shape) | no | skipped — private functions exempt by Eiffel convention |
 
+You may name the struct however you like, in every position above. `%MyApp.Cart{} = cart`,
+`is_struct(cart, MyApp.Cart)`, and — if you use the `alias __MODULE__` idiom — the short
+`%Cart{} = cart` are all detected exactly as the `__MODULE__` forms are. Bond resolves the
+name against the module's own alias table, so it agrees with what Elixir itself resolves.
+
+The corollary is that a name is only detected when it really does mean this module. A bare
+`%Cart{}` inside `MyApp.Cart` with **no** alias in scope refers to `Elixir.Cart`, a
+different module, and Bond treats it as one — as does Elixir.
+
 The post-check on exit matches both `%__MODULE__{}` and `{:ok,
 %__MODULE__{}}` return shapes. Other shapes (`{:error, _}`, bare
 integers, etc.) fall through with no check. If your function returns the
