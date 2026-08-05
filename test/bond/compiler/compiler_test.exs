@@ -22,7 +22,8 @@ defmodule Bond.CompilerTest do
                postconditions: true,
                checks: true,
                invariants: true,
-               warn_skipped_invariants: true
+               warn_skipped_invariants: true,
+               warn_unavailable_preconditions: true
              }
     end
 
@@ -44,7 +45,8 @@ defmodule Bond.CompilerTest do
                postconditions: true,
                checks: true,
                invariants: :purge,
-               warn_skipped_invariants: true
+               warn_skipped_invariants: true,
+               warn_unavailable_preconditions: true
              }
     end
 
@@ -126,7 +128,8 @@ defmodule Bond.CompilerTest do
                postconditions: :purge,
                checks: :purge,
                invariants: :purge,
-               warn_skipped_invariants: true
+               warn_skipped_invariants: true,
+               warn_unavailable_preconditions: true
              }
     end
 

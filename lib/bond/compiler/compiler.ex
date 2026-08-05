@@ -179,7 +179,8 @@ defmodule Bond.Compiler do
       postconditions: Keyword.fetch!(global, :postconditions),
       checks: Keyword.fetch!(global, :checks),
       invariants: Keyword.get(global, :invariants, true),
-      warn_skipped_invariants: Keyword.get(global, :warn_skipped_invariants, true)
+      warn_skipped_invariants: Keyword.get(global, :warn_skipped_invariants, true),
+      warn_unavailable_preconditions: Keyword.get(global, :warn_unavailable_preconditions, true)
     }
 
     resolved =
@@ -270,7 +271,10 @@ defmodule Bond.Compiler do
   defp apply_settings(config, settings) do
     config
     |> apply_kind_settings(settings)
-    |> apply_boolean_settings(settings, [:warn_skipped_invariants])
+    |> apply_boolean_settings(settings, [
+      :warn_skipped_invariants,
+      :warn_unavailable_preconditions
+    ])
   end
 
   defp apply_kind_settings(config, settings) do
@@ -322,6 +326,13 @@ defmodule Bond.Compiler do
     if warn_override != nil,
       do: Module.delete_attribute(env.module, :bond_warn_skipped_invariants)
 
+    # Same tri-state, for the Precondition Availability warning (#92).
+    availability_override =
+      Module.get_attribute(env.module, :bond_warn_unavailable_preconditions)
+
+    if availability_override != nil,
+      do: Module.delete_attribute(env.module, :bond_warn_unavailable_preconditions)
+
     # When another library makes a function `defoverridable` and then redefines it to wrap it
     # (Norm's `@contract`, anything built on the `decorator` library, etc.), the redefining
     # clause fires `@on_definition` while the function is still marked overridable. Genuine
@@ -334,6 +345,7 @@ defmodule Bond.Compiler do
       env
       |> FunctionDefinition.new(kind, fun, params, guards, body)
       |> FunctionDefinition.put_warn_skipped_invariants_override(warn_override)
+      |> FunctionDefinition.put_warn_unavailable_preconditions_override(availability_override)
       |> FunctionDefinition.put_external_override(external_override?)
 
     FSM.function_def(fsm(env), function_def)
@@ -366,6 +378,12 @@ defmodule Bond.Compiler do
     # compiled under. Only the `{alias, target}` pairs are carried — a whole `Macro.Env`
     # would not survive the escaping that some downstream paths do.
     config = Map.put(config, :aliases, env.aliases)
+
+    # The module's private functions, for the Precondition Availability check (#92).
+    # Read here because `Module.definitions_in/2` needs the module still open, and once
+    # rather than per function.
+    config =
+      Map.put(config, :private_defs, MapSet.new(Module.definitions_in(env.module, :defp)))
 
     invariants = FSM.invariants(fsm(env))
     inherited = FSM.inherited_contracts(fsm(env))

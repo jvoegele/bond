@@ -96,9 +96,9 @@ library or your own modules:
 ```
 
 A precondition on a **public** function should call only what its callers can
-call. Bond will resolve a `defp` predicate, but a caller cannot evaluate an
-obligation stated in terms it has no access to — Meyer's Precondition
-Availability rule. See
+call: a caller cannot evaluate an obligation stated in terms it has no access
+to. Bond warns when a public function's precondition calls a `defp` — Meyer's
+Precondition Availability rule. See
 [How do I reuse a predicate across several functions?](faq.md#how-do-i-reuse-a-predicate-across-several-functions).
 Postconditions are unaffected: they are the *function's* promise, so they may
 freely reference private helpers.

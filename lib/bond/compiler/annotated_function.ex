@@ -16,6 +16,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
   """
 
   alias Bond.Compiler.Assertion
+  alias Bond.Compiler.Availability
   alias Bond.Compiler.ClauseWrapper
   alias Bond.Compiler.Clauses
   alias Bond.Compiler.ContractDocs
@@ -304,6 +305,12 @@ defmodule Bond.Compiler.AnnotatedFunction do
           # `Bond.Compiler.__before_compile__/1` down into codegen.
           optional(:at_annotations) => boolean(),
           optional(:warn_skipped_invariants) => boolean(),
+          optional(:warn_unavailable_preconditions) => boolean(),
+          # The using module's private functions, from `Module.definitions_in/2` at
+          # `__before_compile__`. Rides along like `:aliases` and `:at_annotations`,
+          # because this map is what is already threaded down into codegen; used by the
+          # Precondition Availability check (#92).
+          optional(:private_defs) => MapSet.t(),
           # The using module's alias table, as captured from `env.aliases` at
           # `__before_compile__`. Rides along for the same reason `:at_annotations` does:
           # invariant head detection needs it to resolve a struct named through an alias
@@ -382,6 +389,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
       )
 
     maybe_warn_skipped_invariants(annotated_function, inv_mode, config)
+    maybe_warn_unavailable_preconditions(annotated_function, pre_mode, config)
 
     if pre_mode != :purge or post_mode != :purge or inv_mode != :purge do
       # Whether Bond owns `@` — and so documentation — in this module. Supplied by
@@ -462,6 +470,57 @@ defmodule Bond.Compiler.AnnotatedFunction do
   # Uses an explicit nil check rather than `Enum.find_value/2` because the
   # override is a tri-state (nil | true | false) and `find_value` treats `false`
   # the same as nil — which would silently drop legitimate `false` overrides.
+  # Meyer's Precondition Availability rule (#92): a public function's precondition must
+  # not be stated in terms its callers cannot reach. Only preconditions — postconditions
+  # are exempt by the same source, being the function's promise rather than the caller's
+  # obligation — and only on `def`, since a `defp`'s only clients are in this module.
+  #
+  # Skipped when preconditions are purged: there is no contract for a caller to satisfy.
+  defp maybe_warn_unavailable_preconditions(
+         %__MODULE__{kind: :def, preconditions: [_ | _]} = annotated_function,
+         pre_mode,
+         config
+       )
+       when pre_mode != :purge do
+    private_defs = Map.get(config, :private_defs, MapSet.new())
+
+    if resolve_warn_unavailable_preconditions(annotated_function.clauses, config) and
+         MapSet.size(private_defs) > 0 do
+      calls =
+        annotated_function.preconditions
+        |> Enum.flat_map(&Availability.private_calls(&1, private_defs))
+        |> Enum.uniq()
+
+      if calls != [] do
+        first_clause = List.first(annotated_function.clauses)
+
+        IO.warn(
+          Availability.warning_message(
+            annotated_function.module,
+            annotated_function.fun,
+            annotated_function.arity,
+            calls
+          ),
+          first_clause.env
+        )
+      end
+    end
+  end
+
+  defp maybe_warn_unavailable_preconditions(_annotated_function, _pre_mode, _config), do: :ok
+
+  defp resolve_warn_unavailable_preconditions(clauses, config) do
+    per_function_override =
+      clauses
+      |> Enum.map(& &1.warn_unavailable_preconditions_override)
+      |> Enum.find(&(&1 != nil))
+
+    case per_function_override do
+      nil -> Map.get(config, :warn_unavailable_preconditions, true)
+      bool when is_boolean(bool) -> bool
+    end
+  end
+
   defp resolve_warn_skipped_invariants(clauses, config) do
     per_function_override =
       clauses
