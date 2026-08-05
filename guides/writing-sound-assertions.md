@@ -102,6 +102,57 @@ watching the assertion fail once (see the tip above). The same caution applies t
 comparing a value against a literal of the wrong type (`status == 200` when `status` is
 `:ok`).
 
+## A `@pre` the guard already enforces can never fail
+
+Bond reproduces your `when` guards on the wrapper clauses so multi-clause dispatch keeps
+working. An argument that fails the guard therefore raises `FunctionClauseError` *before*
+any precondition is evaluated:
+
+```elixir
+@pre valid_recipient: is_binary(to)                    # ❌ unreachable
+def send_welcome(to, name) when is_binary(to), do: ...
+```
+
+`send_welcome(nil, "ana")` raises `FunctionClauseError`, never
+`Bond.PreconditionError`. The assertion isn't wrong — it's unreachable, which is the same
+problem as a constant assertion arriving by a different route.
+
+The test is the one this guide keeps returning to: **can this assertion fail?** If the
+guards already reject everything it rejects, it can't, and it is worth deleting rather
+than keeping. A `@pre` that is *stronger* than the guards is a different matter entirely —
+it can fail, so it earns its place:
+
+```elixir
+@pre even_amount: rem(amount, 2) == 0                  # ✅ reachable
+def credit(balance, amount) when is_integer(amount), do: ...
+```
+
+The guard admits `3`; the precondition rejects it. "There is a guard" is not by itself a
+reason to drop a precondition — "the guard already rejects everything this rejects" is.
+
+### But the contract documents the function and the guard doesn't
+
+True, and it is the strongest argument for keeping both — but it points at `@spec` rather
+than at a redundant precondition. ExDoc renders the signature, any `@spec` above it, and
+Bond's generated contract sections; the `when` guard appears in none of them. So for a
+*type*, a `@spec` puts the fact in the documentation **more** prominently than a `@pre`
+would, has Dialyzer check it, and costs nothing at runtime:
+
+```elixir
+@spec send_welcome(String.t(), String.t()) :: :ok
+def send_welcome(to, name) when is_binary(to) and is_binary(name), do: ...
+```
+
+This is Design by Contract's own division, not a workaround: Eiffel states types in the
+declared parameter types and keeps `require` for what types cannot say. Reach for `@pre`
+when the requirement is one no type can state — a relationship between two arguments, a
+domain rule, a condition on a field's value. Those are the ones that can fail, and they
+document themselves in the process.
+
+See [Should I remove guards when I add contracts?](faq.md#should-i-remove-guards-and-pattern-matches-when-i-add-contracts)
+for the full argument, including Meyer's Non-Redundancy Principle and what to do about a
+condition you want enforced even in a purged build.
+
 ## The assertion linter catches the obvious cases
 
 Bond runs a small **compile-time linter** over every assertion and emits a warning for the
@@ -117,8 +168,9 @@ you the moment you compile:
 It is deliberately narrow: it only warns when it can *prove* the assertion is constant, because
 a noisy contract linter gets turned off wholesale. In particular it **cannot** catch the
 type-disjoint comparison above (`key not in remaining_keys`) — knowing `remaining_keys` holds
-maps requires type inference Bond does not do without Dialyzer. That class stays your
-responsibility, which is why the "prove it can fail once" habit still matters. (Watching an
+maps requires type inference Bond does not do without Dialyzer. Nor can it catch a precondition
+made unreachable by a guard, which needs the same reasoning about what the guard admits. Those
+classes stay your responsibility, which is why the "prove it can fail once" habit still matters. (Watching an
 assertion that never fails is also the job of contract-coverage tooling — the dynamic complement
 to this static check.)
 

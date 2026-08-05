@@ -390,6 +390,31 @@ exactly what [Writing sound assertions](writing-sound-assertions.md) is about.
 Bond's assertion linter cannot catch this one (it only warns where it can
 *prove* an assertion constant), so it stays advice rather than a warning.
 
+Note the boundary: this is about a `@pre` the guard *already rejects everything
+of*. A `@pre` that is **stronger** than the guard can fail and is worth keeping —
+`@pre even_amount: rem(amount, 2) == 0` on a function guarded by
+`when is_integer(amount)` fires on `3`. "There is a guard" is not the test;
+"the guard already rejects everything this rejects" is.
+
+### Then how do I get the requirement into the docs?
+
+With a `@spec`, for anything a type can say. This is the one real cost of
+dropping a guard-restating `@pre`: guards are invisible in generated
+documentation, so deleting the contract does lose something. But a `@spec`
+recovers it and more — ExDoc renders it directly under the signature, *above*
+Bond's generated contract sections, and Dialyzer checks it, which a `@pre` never
+does:
+
+```elixir
+@spec send_welcome(String.t(), String.t()) :: :ok
+def send_welcome(to, name) when is_binary(to) and is_binary(name), do: ...
+```
+
+That is Design by Contract's own division rather than a workaround. Eiffel puts
+types in the declared parameter types and reserves `require` for what types
+cannot express; `@spec` and `@pre` split the same way. See
+[What does Bond do that typespecs don't?](#what-does-bond-do-that-typespecs-don-t)
+
 ### But contracts can be purged — isn't the guard my safety net?
 
 This is the strongest argument for keeping both, and Meyer's answer is that it
