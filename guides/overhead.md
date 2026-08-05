@@ -83,12 +83,22 @@ For a typical application:
     your own codebase with `bench/compile_overhead.exs` before deciding
     whether `:purge`ing in dev is worth it.
 
-This figure is higher than it should be, and the cause is known. Every
-released version from 1.2.0 through 1.13.2 measures 9–11 ms per module on
-this same machine; the jump to ~31 ms came from a single unreleased change
-that wraps each assertion in a `try/rescue`, and is tracked as
-[#96](https://github.com/jvoegele/bond/issues/96). Runtime overhead moved
-the other way over the same period.
+That figure is roughly three times what it was through 1.13.2, and the
+increase is deliberate. Bond wraps each emitted assertion in a `try/rescue`
+so that an assertion which *raises* — rather than returning true or false —
+is reported as a `Bond.AssertionEvaluationError` naming the contract, instead
+of a bare `FunctionClauseError` from inside your predicate with nothing to
+connect it to Bond. See
+[Assertions must be total](writing-sound-assertions.md#assertions-must-be-total-not-merely-side-effect-free).
+
+The cost is the `try` block's presence in the generated code, about 3 ms per
+assertion per module; it is paid on clean builds and amortised by incremental
+compilation. Measured alternatives that avoid it — emitting no `try`, or
+moving it into Bond's runtime behind a closure — both cost two to three times
+more *per call*, so the trade also happens to favour this shape at runtime.
+The measurements are in
+[#96](https://github.com/jvoegele/bond/issues/96), and CI now guards the
+figure against drifting further.
 
 Bond starts a `:gen_statem` per compiling module (stopped in
 `__after_compile__`), so the per-module overhead is roughly constant
