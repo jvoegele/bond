@@ -124,6 +124,47 @@ jobs:
       - run: mix deps.get
       - run: mix dialyzer --format github
 
+  compile_overhead:
+    name: Compile-time overhead guard
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27.2"
+          elixir-version: "1.19.5"
+      - run: mix deps.get
+      # Bond adds compile time to every module that uses it, and nothing measured
+      # it until #96 — where a change that tripled it reached main while its
+      # runtime counterpart was carefully benchmarked. This is the guard.
+      #
+      # The bound is a *ratio* (Bond-compile time / no-Bond compile time) rather
+      # than absolute milliseconds, which are meaningless across machines: this
+      # runner takes ~1730 ms for the no-Bond batch where a dev laptop takes
+      # ~377 ms.
+      #
+      # The ratio is NOT portable either, though — it is calibrated to this
+      # runner and nothing else. The same commit measures 9.3x here and ~16.6x
+      # on an M3 Max, because the two halves do not scale together: Bond's share
+      # is macro expansion in Elixir, the baseline's is BEAM compilation, and the
+      # runner's slower cores penalise the latter more. So this number cannot be
+      # reasoned about from a local run — change it only from an observed CI
+      # figure.
+      #
+      # Observed on this runner: 9.3x and 11.3x on consecutive runs of the same
+      # commit — ~20% run-to-run variance, which is what the bound has to absorb.
+      # 18.0 leaves ~60% headroom over the higher figure.
+      #
+      # That is loose, and deliberately: it does not need to be tight to do its
+      # job. The regression that prompted this (#96) tripled the figure; a repeat
+      # of that class would take ~11x to ~30x and trip any bound under 30. Set it
+      # to catch a step change without flaking on noise, and re-read it from a CI
+      # run — never a local one — if it ever needs to move.
+      - name: Compile-overhead benchmark
+        env:
+          BOND_MAX_COMPILE_RATIO: "18.0"
+        run: mix run bench/compile_overhead.exs
+
   downstream:
     name: Downstream consumer (warnings-as-errors + Dialyzer)
     runs-on: ubuntu-22.04
