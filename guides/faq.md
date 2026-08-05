@@ -502,6 +502,49 @@ The one case this genuinely leaves uncovered is a function that mutates
 where "if this raised, nothing was written" is a real property. That is
 normally a transaction's job rather than a contract's.
 
+## Should I rescue a `Bond.PreconditionError`?
+
+Not to decide what your program does next. Bond's error structs are ordinary
+exceptions and nothing stops you catching them, but a contract violation is a
+different kind of event from a failure your code is meant to handle. Meyer puts
+it as a rule: a run-time assertion violation is the *manifestation of a bug* —
+a precondition violation is a bug in the caller, a postcondition violation a bug
+in the function. Neither is a business outcome, and turning one into a return
+value converts a bug report into a feature.
+
+Bond gives this the sharpest possible edge, because a `rescue` that branches on
+a contract violation **behaves differently in a purged build**:
+
+```elixir
+def safe_charge(amount) do
+  charge(amount)
+rescue
+  Bond.PreconditionError -> {:error, :invalid_amount}
+end
+```
+
+With contracts enabled, `safe_charge(-5)` returns `{:error, :invalid_amount}`.
+Compile the same source with `preconditions: :purge` and it returns
+`{:ok, -5}` — the precondition never fires, the `rescue` never runs, and the
+negative amount sails through. The error branch didn't get slower; it stopped
+existing. This is the same hazard
+[Writing sound assertions](writing-sound-assertions.md) describes for partial
+assertions: a contract should never be the reason two builds of the same source
+disagree about what a function returns.
+
+If `amount > 0` is a condition your program must handle rather than a promise
+callers must keep, it is not a precondition. Check it with ordinary control flow
+and return `{:error, :invalid_amount}` yourself — see
+[Can I write a contract for the failure path?](#can-i-write-a-contract-for-the-failure-path)
+above.
+
+Catching Bond errors to *report* them is a different matter and perfectly
+reasonable: a `Plug.ErrorHandler`, a `Logger` in a supervision tree, an error
+tracker's exception hook. Those observe the bug and let it stay a bug. For
+counting and alerting without any `rescue` at all, the
+[`[:bond, :assertion, :failure]` telemetry event](telemetry.md) fires on every
+violation, before the exception is raised.
+
 ## Are contracts evaluated on the recursion path?
 
 No — Bond implements Bertrand Meyer's
@@ -982,15 +1025,44 @@ defmodule Mailer do
   def unsubscribe(to), do: ...
 
   # The reusable predicate — declared once, called from any contract.
+  # Public on purpose: see below.
   def valid_email?(address) do
     is_binary(address) and String.contains?(address, "@")
   end
 end
 ```
 
-The predicate can be a private `defp`; it still resolves inside contracts
-because Bond's checks run in the same module. On failure the error reports
-the **call**, not the expanded body:
+Note that `valid_email?/1` is a `def`, not a `defp`, and that is deliberate.
+Bond will happily resolve a private predicate — the checks run in the same
+module — but a public function's precondition should not depend on one. Meyer
+states the rule directly (*Object-Oriented Software Construction*, 2nd edition,
+§11.7, p. 358):
+
+> **Precondition Availability rule**
+>
+> Every feature appearing in the precondition of a routine must be available to
+> every client to which the routine is available.
+
+A precondition is an obligation on the *caller*. A caller that cannot evaluate
+it cannot discharge it, so what you have is no longer an agreement — it is a
+demand the other party has no way to check.
+
+In Elixir the consequence is visible in your published documentation. Bond
+renders the assertion source into the docs for `send_welcome/2`, so a `defp`
+predicate produces this:
+
+```
+Preconditions
+  valid_recipient: valid_email?(to)
+```
+
+`valid_email?/1` is private, so it is excluded from the generated docs and
+cannot be called. The obligation is published in terms the reader cannot look
+up, let alone satisfy. Keep the predicate public when the function it constrains
+is public; a `defp` predicate is fine on a `defp`'s own contract, where the only
+clients are in the same module.
+
+On failure the error reports the **call**, not the expanded body:
 
 ```
 label: :valid_recipient

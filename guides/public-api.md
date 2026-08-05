@@ -361,7 +361,9 @@ telemetry handlers see every assertion failure even when an upstream
 ## Error structs
 
 All five are raised by Bond, all five are catchable, all five share the same
-shape (defined by the internal `Bond.AssertionError` `__using__` macro):
+shape (defined by the internal `Bond.AssertionError` `__using__` macro). Being
+catchable does not make them control flow — see
+[Should I rescue a `Bond.PreconditionError`?](faq.md#should-i-rescue-a-bond-preconditionerror)
 
   * `Bond.PreconditionError`
   * `Bond.PostconditionError`

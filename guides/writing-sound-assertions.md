@@ -102,6 +102,33 @@ watching the assertion fail once (see the tip above). The same caution applies t
 comparing a value against a literal of the wrong type (`status == 200` when `status` is
 `:ok`).
 
+## A `@post` that restates the body can only fail if the runtime is broken
+
+A postcondition earns its keep by saying something the body does not already say. One that
+transcribes the implementation asserts that the code does what the code does:
+
+```elixir
+@post computed: result == a + b        # ❌ fails only if `+` is broken
+def add(a, b), do: a + b
+```
+
+The test is whether a *plausible* rewrite of the body could violate it. Nothing you could
+sensibly change about `add/2` breaks that assertion without breaking the assertion in the
+same edit, because the two are the same expression.
+
+State the property the implementation must obey instead, and the contract survives a
+rewrite — which is exactly when you want it:
+
+```elixir
+@post conserved: result.from.balance + result.to.balance ==
+                   from.balance + to.balance
+def transfer(from, to, amount), do: ...
+```
+
+That one has no opinion about how the transfer is implemented, and it fails the day someone
+adds a fee and takes it out of one side only. A good postcondition is a law the body must
+respect, not a second copy of it.
+
 ## A `@pre` the guard already enforces can never fail
 
 Bond reproduces your `when` guards on the wrapper clauses so multi-clause dispatch keeps
