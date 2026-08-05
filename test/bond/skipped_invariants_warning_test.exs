@@ -483,6 +483,114 @@ defmodule Bond.SkippedInvariantsWarningTest do
 
   # Compiles `source` under Code.with_diagnostics/1, collecting any compile-
   # time diagnostics emitted (warnings or errors). Wraps the compile in a
+  # #80's second defect: the warning was reported as emitted twice for one function.
+  # It has never been reproducible — there is one call site, and it has been a single
+  # one since the warning was introduced (b115d33). These pin the invariant that
+  # matters regardless: one warning per *uncovered function*, never per clause, per
+  # definition, or per compiler hook — across the module shapes where a doubling
+  # could plausibly hide.
+  describe "emission count across module shapes (#80)" do
+    defp skipped_warnings(source) do
+      source
+      |> capture_diagnostics()
+      |> Enum.filter(&(&1.message =~ "invariant-declaring module"))
+    end
+
+    defp warned_functions(source) do
+      source
+      |> skipped_warnings()
+      |> Enum.map(&(Regex.run(~r/public function `([^`]+)`/, &1.message) |> List.last()))
+      |> Enum.sort()
+    end
+
+    test "once for a function with a default argument" do
+      assert warned_functions("""
+             defmodule BondTest.EmitScratch.DefaultArg do
+               use Bond
+               defstruct [:v]
+               @invariant positive: subject.v > 0
+               def unrelated(x, y \\\\ 1), do: x * y
+             end
+             """) == ["unrelated/2"]
+    end
+
+    test "once for a bodyless head plus its clause" do
+      assert warned_functions("""
+             defmodule BondTest.EmitScratch.BodylessHead do
+               use Bond
+               defstruct [:v]
+               @invariant positive: subject.v > 0
+               def unrelated(x)
+               def unrelated(x), do: x * 2
+             end
+             """) == ["unrelated/1"]
+    end
+
+    test "once per function, not once per module, for several uncovered functions" do
+      assert warned_functions("""
+             defmodule BondTest.EmitScratch.ThreeFunctions do
+               use Bond
+               defstruct [:v]
+               @invariant positive: subject.v > 0
+               def a(x), do: x
+               def b(x), do: x
+               def c(x), do: x
+             end
+             """) == ["a/1", "b/1", "c/1"]
+    end
+
+    test "once per arity when a name is defined at two arities" do
+      assert warned_functions("""
+             defmodule BondTest.EmitScratch.TwoArities do
+               use Bond
+               defstruct [:v]
+               @invariant positive: subject.v > 0
+               def f(x), do: x
+               def f(x, y), do: x + y
+             end
+             """) == ["f/1", "f/2"]
+    end
+
+    test "once when another library has made the function defoverridable" do
+      Code.compile_string("""
+      defmodule BondTest.EmitScratch.Decorator do
+        defmacro __using__(_), do: quote(do: @before_compile(BondTest.EmitScratch.Decorator))
+
+        defmacro __before_compile__(_env) do
+          quote do
+            defoverridable unrelated: 1
+            def unrelated(x), do: super(x)
+          end
+        end
+      end
+      """)
+
+      assert warned_functions("""
+             defmodule BondTest.EmitScratch.Wrapped do
+               use BondTest.EmitScratch.Decorator
+               use Bond
+               defstruct [:v]
+               @invariant positive: subject.v > 0
+               def unrelated(x), do: x * 2
+             end
+             """) == ["unrelated/1"]
+    end
+
+    test "once per uncovered callback in a Bond.Server module" do
+      assert warned_functions("""
+             defmodule BondTest.EmitScratch.Server do
+               use GenServer
+               use Bond.Server
+               defstruct [:v]
+               @invariant positive: subject.v > 0
+               @state_invariant nonneg: state.count >= 0
+               def init(n), do: {:ok, %{count: n}}
+               def unrelated(x), do: x * 2
+             end
+             """) == ["init/1", "unrelated/1"]
+    end
+  end
+
   # try/rescue so an error-emitting source doesn't abort the test before the
   # diagnostics can be inspected.
   defp capture_diagnostics(source) do
