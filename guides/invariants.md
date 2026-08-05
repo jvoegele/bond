@@ -22,7 +22,7 @@ API is expected to.
 defmodule BoundedStack do
   use Bond
 
-  defstruct [:items, :capacity]
+  defstruct items: [], capacity: 0
 
   @invariant non_negative_capacity: subject.capacity >= 0,
              size_within_capacity: length(subject.items) <= subject.capacity
@@ -36,6 +36,20 @@ defmodule BoundedStack do
   end
 end
 ```
+
+> #### Give `defstruct` defaults that satisfy the invariant {: .tip}
+>
+> Note `defstruct items: [], capacity: 0` rather than `defstruct [:items, :capacity]`.
+> Nothing stops a caller writing a bare `%BoundedStack{}`, and with `nil` defaults the
+> first invariant to touch it evaluates `length(nil)` — which raises
+> `Bond.AssertionEvaluationError`, because the assertion could not be evaluated at all
+> (see [Writing sound assertions](writing-sound-assertions.md)).
+>
+> This is Meyer's base case made concrete. His correctness rule requires that a class's
+> default field values satisfy the invariant when there is no explicit creation procedure
+> (*Object-Oriented Software Construction*, 2nd edition, §11.9). Elixir always has that
+> case, because `%Mod{}` is always available — so your `defstruct` defaults are part of
+> the contract whether you meant them to be or not.
 
 ### The `subject` binding
 
@@ -69,6 +83,22 @@ Multiple struct parameters in the same head (e.g. `def
 merge(%__MODULE__{} = a, %__MODULE__{} = b)`) are all checked in
 left-to-right order; `subject` rebinds to each in turn.
 
+> #### Why check on entry at all? {: .info}
+>
+> If every function that produces a struct checks it on the way out, entry checks look
+> redundant — and in a language with immutable data they very nearly are. Eiffel needs
+> them for a reason Elixir does not have: aliasing. Meyer calls it the *Indirect Invariant
+> Effect* (§11.14) — object `a`'s invariant can be broken by an operation on object `b`
+> that happens to hold a reference into `a`, so a state that was valid when a call
+> returned may not be valid when the next call starts. Elixir values cannot change behind
+> your back, so that failure mode is gone.
+>
+> The entry check earns its place here for a different reason: Elixir gives no module a
+> monopoly on constructing its struct. `%BoundedStack{items: [1, 2, 3], capacity: 1}` is
+> valid syntax for anyone, anywhere, and it never passes through `new/1`. The entry check
+> is what notices. (Mutable process state brings the aliasing problem back, which is what
+> [Contracts in a Concurrent World](contracts-and-concurrency.md) is about.)
+
 ### Violation behaviour
 
 A violated invariant raises `Bond.InvariantError` with the same metadata
@@ -76,6 +106,40 @@ shape as `Bond.PreconditionError` / `Bond.PostconditionError`, and fires
 the same telemetry event (`[:bond, :assertion, :failure]` with
 `:kind => :invariant`). Test with
 `Bond.Test.assert_invariant_violation/2`.
+
+### Breaking the invariant on purpose, mid-operation
+
+An invariant is not required to hold *during* an operation. Meyer is explicit that a
+routine may work toward its postcondition, destroy the invariant along the way, and
+restore it before returning — the invariant characterises the states in which an object
+is observable from outside, not every instant of its life (§11.8).
+
+Bond's version of "observable from outside" is the boundary of a **public** function. So
+a helper that legitimately receives a transiently-invalid struct must be **private**:
+
+```elixir
+# ❌ raises Bond.InvariantError on entry to trim/1, even though push/2
+#    would have restored the invariant before returning
+def push(%__MODULE__{} = stack, item) do
+  %{stack | items: [item | stack.items]} |> trim()
+end
+
+def trim(%__MODULE__{} = stack), do: %{stack | items: Enum.take(stack.items, stack.capacity)}
+```
+
+```elixir
+# ✅ defp is exempt, so the intermediate state is nobody else's business
+def push(%__MODULE__{} = stack, item) do
+  %{stack | items: [item | stack.items]} |> trim()
+end
+
+defp trim(%__MODULE__{} = stack), do: %{stack | items: Enum.take(stack.items, stack.capacity)}
+```
+
+This is why private functions are exempt rather than merely unchecked: Eiffel draws the
+same line ("a secret feature is not affected by the invariant"). If a helper needs to see
+a half-built struct, that is a statement about who owns the intermediate state, and `defp`
+is how you say it.
 
 ### What's not supported
 

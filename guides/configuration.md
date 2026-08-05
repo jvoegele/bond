@@ -54,9 +54,18 @@ output might really be the caller's fault, not the callee's. Same for
   one-time-per-process `Logger.warning` the first time this happens for
   a given (higher, lower) pair, so the diagnostic is visible.
 
-`:checks` is *independent* of the chain. A `check/1` is an internal
-assertion about your computation, not a contract with a caller, so it
-remains meaningful regardless of any other kind's settings.
+The chain is inherited from Eiffel, where assertion monitoring is a single ordered scale
+— `no`, `require`, `ensure`, `invariant`, … — in which each level implies the ones before
+it, for exactly this reason: "it does not make sense to monitor postconditions unless you
+also monitor preconditions, since a routine is required to ensure its postcondition only
+if it was called with its precondition satisfied" (*Object-Oriented Software
+Construction*, 2nd edition, §11.13).
+
+`:checks` is *independent* of the chain, and this is a deliberate departure — Eiffel puts
+`check` at the top of the same scale. A `check/1` is an internal assertion about your own
+computation, not a contract with a caller, so nothing about its meaning depends on
+whether a precondition was verified first. Keeping it separate lets you strip contracts
+from a build while leaving internal assertions in, or the reverse.
 
 ```elixir
 # Valid: progressively purge from the top.
@@ -136,6 +145,32 @@ Precedence (most specific wins):
 2. `:overrides` entry whose key is an exact module atom.
 3. `:overrides` entry whose key is a regex (first match in list order wins).
 4. Global `:bond` config (lowest).
+
+## Keeping preconditions on in production
+
+The usual arrangement — everything on in dev and test, everything purged in prod — is not
+the only sensible one, and Bond's docs shouldn't imply it is. Because the chain only
+requires that a purged kind has every kind *above* it purged, the lowest kind can stay:
+
+```elixir
+# config/prod.exs — keep the cheapest, most diagnostic layer
+config :bond,
+  preconditions: true,
+  postconditions: :purge,
+  invariants: :purge,
+  checks: :purge
+```
+
+Preconditions are the layer with the best cost-to-value ratio in production. They are the
+cheapest to evaluate (see [Overhead](overhead.md) — roughly a third the cost of an
+invariant, which fires twice per call and shape-tests the return value), and they are the
+only kind that catches a **caller's** bug, which is precisely the failure you cannot
+reproduce from the callee's logs. A precondition violation in production tells you who
+called you wrongly, with the binding attached.
+
+This is closer to Eiffel's own default posture than to all-or-nothing: Meyer's worked
+configuration enables `require` across the whole system and raises the level only for
+selected classes.
 
 A module can also opt out (or in) directly at the `use` site:
 

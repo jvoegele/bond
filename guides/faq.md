@@ -634,6 +634,16 @@ function's preconditions and postconditions are *not* evaluated. Without
 this rule, mutually recursive contracts would loop forever. With it,
 contracts are safe to use even when they call into the rest of your API.
 
+Termination is the obvious reason but not Meyer's main one. His argument is that
+evaluating a predicate's contracts while it is checking yours would "treat as peers the
+routines of our computation and their assertions' functions", when assertions are meant
+to sit on a higher plane than the code they police — their correctness has to be settled
+in advance, not audited mid-flight. His analogy: you run the background check on the
+security guard before their shift, not while they are screening visitors. The practical
+consequence is in
+[How do I reuse a predicate across several functions?](#how-do-i-reuse-a-predicate-across-several-functions)
+— a predicate you use in contracts must stand on its own.
+
 ## Can I use `check/1` to assert input validity?
 
 No — `check/1` is for **sanity checks during development**, not input
@@ -1157,6 +1167,20 @@ On failure the error reports the **call**, not the expanded body:
 label: :valid_recipient
 assertion: valid_email?(to)
 ```
+
+> #### A predicate used in a contract has its own contracts suppressed {: .warning}
+>
+> Contracts on `valid_email?/1` itself will **not** be evaluated when it is called from
+> inside another contract — that is the
+> [Assertion Evaluation rule](#are-contracts-evaluated-on-the-recursion-path) at work,
+> and it applies to your predicate too. A `@pre` on `valid_email?/1` fires for direct
+> calls and is silently inert in the place you most wanted it.
+>
+> So the reusable predicate has to carry its own weight: keep it simple enough to be
+> obviously correct, and test it directly rather than relying on contracts to police it.
+> Meyer sets the same bar — functions used in assertions "must be simple and of
+> unimpeachable correctness", because by the time one runs, it is too late to ask whether
+> it is trustworthy.
 
 That named form is exactly what you want when the predicate is gnarly (a
 real email regex reads worse than `valid_email?`). When you'd rather see

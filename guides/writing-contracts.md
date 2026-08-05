@@ -211,6 +211,32 @@ end
 On success `check` returns the assertion's value (or list of values for
 the keyword-list form). On failure it raises `Bond.CheckError`.
 
+### Recording *why* a call is legitimate
+
+`check`'s best use is narrower and more valuable than "a sanity assertion". Meyer calls
+it the most useful application of the construct (§11.11): put a `check` immediately before
+a call whose precondition you are convinced you have established, when the reason is not
+obvious from the surrounding code.
+
+```elixir
+def summarise(readings) do
+  cleaned = Enum.reject(readings, &is_nil/1)
+
+  # Because `readings` had at least one non-nil entry — guaranteed by the @pre
+  # on this function — rejecting nils cannot empty the list.
+  check non_empty: cleaned != []
+
+  Stats.mean(cleaned)          # @pre non_empty: samples != []
+end
+```
+
+Without the `check`, a later reader sees an unguarded call to a function with a
+precondition and cannot tell whether the absence of a guard was reasoning or oversight.
+The `check` says it was reasoning, names the assumption, and fails loudly in dev if the
+reasoning was wrong. Meyer's convention of writing the justification as a comment beside
+it is worth copying: the assertion records *what* you assumed, the comment records *why*
+you were entitled to.
+
 > #### When to use `check` {: .warning}
 >
 > Don't use `check` for input validation, validating data from external
