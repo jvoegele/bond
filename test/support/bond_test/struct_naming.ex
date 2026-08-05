@@ -4,10 +4,11 @@ defmodule BondTest.StructNaming do
   under every spelling that resolves to this module — `__MODULE__` and the fully
   qualified name — in pattern, guard, and destructure position.
 
-  Note what is *not* here: a bare `%StructNaming{}`. Elixir does not auto-alias a
-  module's own last segment, so inside `BondTest.StructNaming` that names
-  `Elixir.StructNaming` — a different module — and must not be treated as this one.
-  `BondTest.StructNaming.Single` covers the case where the bare name *is* the module.
+  Note what is *not* here: a bare `%StructNaming{}` with no alias in scope. Elixir does
+  not auto-alias a module's own last segment, so inside `BondTest.StructNaming` that
+  names `Elixir.StructNaming` — a different module — and must not be treated as this
+  one. `Single` covers the case where the bare name *is* the module, and `SelfAliased`
+  the case where an explicit `alias` makes the short name mean this module after all.
 
   Bodies return `:ok` rather than doing work, so a `Bond.InvariantError` from any of
   these can only have come from the entry check.
@@ -56,6 +57,44 @@ defmodule BondTest.StructNaming do
     @bond_warn_skipped_invariants false
     def touch(%BondTest.StructNaming.Other{} = _other), do: :ok
   end
+end
+
+defmodule BondTest.StructNaming.SelfAliased do
+  @moduledoc """
+  The `alias __MODULE__` idiom: the short name genuinely resolves to this module, so
+  heads written with it must be detected. Bond reads the module's alias table from the
+  `Macro.Env` at `__before_compile__` to resolve this exactly.
+  """
+
+  use Bond
+
+  alias __MODULE__, as: Cart
+
+  defstruct items: [], capacity: 0
+
+  @invariant within: length(subject.items) <= subject.capacity
+
+  def via_self_alias(%Cart{} = _s), do: :ok
+  def via_self_alias_guard(s) when is_struct(s, Cart), do: :ok
+end
+
+defmodule BondTest.StructNaming.ForeignAlias do
+  @moduledoc """
+  The mirror case: an alias in scope that points at a *different* module. A head using
+  it must NOT be treated as this module's struct — binding `subject` to a foreign struct
+  would evaluate the invariant against a value that has none of its fields.
+  """
+
+  use Bond
+
+  alias BondTest.StructNaming.Other, as: Cart
+
+  defstruct items: [], capacity: 0
+
+  @invariant within: length(subject.items) <= subject.capacity
+
+  @bond_warn_skipped_invariants false
+  def touch(%Cart{} = _foreign), do: :ok
 end
 
 defmodule Single do

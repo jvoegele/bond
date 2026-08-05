@@ -20,11 +20,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   was covered. A module written entirely in the qualified style got exit checks only —
   invariants caught a bad struct the module *produced*, never one it was *handed*.
 
-  Both paths now resolve the module the same way. Note the one spelling that is
-  deliberately still not detected: a bare `%Cart{}` inside `MyApp.Cart`. Elixir does not
-  alias a module's own last segment, so that pattern names `Elixir.Cart` — a different
-  module — and treating it as the struct would bind `subject` to the wrong value. In a
-  single-segment `defmodule Cart` the bare name *is* the module, and is detected.
+  Bond now resolves the name against the module's own alias table (from `env.aliases` at
+  `__before_compile__`), so it agrees with Elixir about what a name means. The
+  `alias __MODULE__` idiom works: with that alias in scope, `%Cart{} = cart` is detected.
+  Without it, a bare `%Cart{}` inside `MyApp.Cart` refers to `Elixir.Cart` — a different
+  module — and is correctly *not* treated as the struct, as is an alias pointing at some
+  other module.
 
   No configuration change and nothing to migrate: modules already using `__MODULE__`
   behave exactly as before. Modules using the qualified form gain the entry checks they

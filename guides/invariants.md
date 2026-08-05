@@ -74,16 +74,14 @@ parameter in any of these head shapes:
 | `def foo(x, ...)` (no pattern, no guard) | no | skipped silently |
 | `defp ...` (any shape) | no | skipped — private functions exempt by Eiffel convention |
 
-You may write the module's name instead of `__MODULE__` throughout — `%MyApp.Cart{} = cart`
-and `is_struct(cart, MyApp.Cart)` are detected exactly as the `__MODULE__` forms are, in
-every position above.
+You may name the struct however you like, in every position above. `%MyApp.Cart{} = cart`,
+`is_struct(cart, MyApp.Cart)`, and — if you use the `alias __MODULE__` idiom — the short
+`%Cart{} = cart` are all detected exactly as the `__MODULE__` forms are. Bond resolves the
+name against the module's own alias table, so it agrees with what Elixir itself resolves.
 
-One spelling does *not* work, because it does not mean what it looks like: a bare
-`%Cart{}` inside `MyApp.Cart`. Elixir does not alias a module's own last segment, so that
-pattern names `Elixir.Cart` — a different module — and Bond treats it as one. (In a
-single-segment `defmodule Cart`, `%Cart{}` *is* the module, and is detected.) If you have
-aliased your own struct locally, write `__MODULE__` or the qualified name in heads that
-invariants should guard.
+The corollary is that a name is only detected when it really does mean this module. A bare
+`%Cart{}` inside `MyApp.Cart` with **no** alias in scope refers to `Elixir.Cart`, a
+different module, and Bond treats it as one — as does Elixir.
 
 The post-check on exit matches both `%__MODULE__{}` and `{:ok,
 %__MODULE__{}}` return shapes. Other shapes (`{:error, _}`, bare

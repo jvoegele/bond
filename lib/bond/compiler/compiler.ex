@@ -359,6 +359,14 @@ defmodule Bond.Compiler do
         Module.get_attribute(env.module, :__bond_at_annotations__) != false
       )
 
+    # The module's alias table, so invariant head detection can resolve a struct named
+    # through an alias (`alias __MODULE__` then `%Cart{} = cart`) exactly as Elixir does,
+    # rather than guessing from the name's trailing segments (#93). `__before_compile__`
+    # runs with the module still open, so `env.aliases` is the table those heads were
+    # compiled under. Only the `{alias, target}` pairs are carried — a whole `Macro.Env`
+    # would not survive the escaping that some downstream paths do.
+    config = Map.put(config, :aliases, env.aliases)
+
     invariants = FSM.invariants(fsm(env))
     inherited = FSM.inherited_contracts(fsm(env))
 
