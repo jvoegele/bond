@@ -53,7 +53,45 @@ defmodule CompileBench do
     IO.puts("\nOverhead:")
     IO.puts("  Total:      #{format(overhead)} ms over #{@n_modules} modules")
     IO.puts("  Per module: #{format(overhead / @n_modules)} ms")
-    IO.puts("  Ratio:      #{Float.round(bond_median / baseline_median, 2)}× baseline")
+
+    ratio = Float.round(bond_median / baseline_median, 2)
+    IO.puts("  Ratio:      #{ratio}× baseline")
+
+    enforce_max_ratio(ratio)
+  end
+
+  # Optional regression guard, used by CI (#96). Ratio rather than absolute
+  # milliseconds because both halves scale with the runner's speed, so the ratio
+  # survives a slow or noisy machine that would make a millisecond bound useless.
+  #
+  # Nothing ran this benchmark before, which is how a 3x compile-time change
+  # reached main unnoticed while its runtime counterpart was measured.
+  defp enforce_max_ratio(ratio) do
+    case System.get_env("BOND_MAX_COMPILE_RATIO") do
+      nil ->
+        :ok
+
+      bound ->
+        max = String.to_float(bound)
+
+        if ratio > max do
+          IO.puts("""
+
+          FAILED: compile-time overhead ratio #{ratio}x exceeds the bound of #{max}x.
+
+          Bond adds compile time to every module that uses it. A jump here usually
+          means newly emitted code per assertion or per function — a `try` block,
+          another closure, a larger escaped term. See #96 for the cost of each.
+
+          If the increase is intended and justified, raise BOND_MAX_COMPILE_RATIO in
+          .github/workflows/ci.yml and say why in the commit message.
+          """)
+
+          System.halt(1)
+        else
+          IO.puts("  Guard:      within the #{max}x bound")
+        end
+    end
   end
 
   # Generates N module source strings with namespaced names so each repeat

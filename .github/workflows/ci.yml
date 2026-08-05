@@ -124,6 +124,30 @@ jobs:
       - run: mix deps.get
       - run: mix dialyzer --format github
 
+  compile_overhead:
+    name: Compile-time overhead guard
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27.2"
+          elixir-version: "1.19.5"
+      - run: mix deps.get
+      # Bond adds compile time to every module that uses it, and nothing measured
+      # it until #96 — where a change that tripled it reached main while its
+      # runtime counterpart was carefully benchmarked. This is the guard.
+      #
+      # The bound is a *ratio* (Bond-compile time / no-Bond compile time), not
+      # absolute milliseconds: both halves scale with the runner, so the ratio
+      # survives a slow or busy machine that would make a millisecond bound
+      # either useless or flaky. It is deliberately loose — this is a
+      # tripwire for a step change, not a performance target.
+      - name: Compile-overhead benchmark
+        env:
+          BOND_MAX_COMPILE_RATIO: "30.0"
+        run: mix run bench/compile_overhead.exs
+
   downstream:
     name: Downstream consumer (warnings-as-errors + Dialyzer)
     runs-on: ubuntu-22.04
