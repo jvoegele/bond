@@ -125,16 +125,14 @@ defmodule Bond.DocPassthroughTest do
   describe "compile-time warnings" do
     test "overriding the user's doc does not warn about redefining @doc" do
       warning =
-        capture_io(:stderr, fn ->
-          Code.compile_string("""
-          defmodule BondTest.NoRedefineWarning do
-            use Bond
-            @doc "prose"
-            @pre pos: x > 0
-            def f(x), do: x
-          end
-          """)
-        end)
+        BondTest.Diagnostics.warnings("""
+        defmodule BondTest.NoRedefineWarning do
+          use Bond
+          @doc "prose"
+          @pre pos: x > 0
+          def f(x), do: x
+        end
+        """)
 
       refute warning =~ "redefining @doc"
     end
