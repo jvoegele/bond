@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+> **Upgrading:** invariant entry checks now fire in two cases where they previously,
+> silently, did not — when a function head names the struct without `__MODULE__`
+> ([#93](https://github.com/jvoegele/bond/issues/93)) and when the struct is nested inside a
+> tuple, map, or list ([#84](https://github.com/jvoegele/bond/issues/84)). Both are fixes, but
+> a module written in either style will start raising `Bond.InvariantError` on input that
+> previously passed unchecked. That input was always violating the invariant; nothing was
+> looking.
+
 ### Added
 
 - **Bond warns when a public function's precondition calls a private function** of the
@@ -28,6 +36,50 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   `use Bond, warn_unavailable_preconditions: false` (per module), or
   `config :bond, warn_unavailable_preconditions: false` (globally).
 
+- **`Bond.AssertionEvaluationError`**, raised when an assertion *expression* itself raises rather
+  than returning truthy or falsy ([#77](https://github.com/jvoegele/bond/issues/77)). Previously
+  the caller got the bare exception from inside the predicate, with nothing naming Bond:
+
+  ```elixir
+  @pre valid: String.contains?(email, "@")
+  def normalize(email), do: String.downcase(email)
+
+  normalize(nil)
+  ** (FunctionClauseError) no function clause matching in String.contains?/2   # before
+  ```
+
+  ```
+  ** (Bond.AssertionEvaluationError) precondition could not be evaluated for call to
+     MyApp.normalize/1                                                          # after
+  |   label: :valid
+  |   assertion: String.contains?(email, "@")
+  |   binding: [email: nil]
+  |   raised: ** (FunctionClauseError) no function clause matching in String.contains?/2
+  ```
+
+  This mattered more than a cosmetic message: everywhere else in Bond, turning contracts *on* can
+  only add a `Bond.*Error` where the code would otherwise have proceeded. A partial assertion was
+  the exception — it could turn a call that would have worked, or returned a clean `{:error, _}`,
+  into an unrelated crash, and `:purge` made the crash disappear again. That is a behavioural
+  difference between the contracted and purged builds that contracts are supposed not to
+  introduce.
+
+  A raise is deliberately **not** treated as a violation. An assertion that raises has not been
+  shown to hold or to fail, so folding it into `Bond.PreconditionError` would let a broken
+  predicate masquerade as a contract failure and mask the bug. The original exception and its
+  stacktrace are carried on `:exception` and `:original_stacktrace`.
+
+  Telemetry keeps the existing `[:bond, :assertion, :failure]` event and keeps `:kind` as the
+  contract kind, so handlers filtering on `:kind` or aggregating on `:assertion_id` are unaffected.
+  The new `:exception` metadata key is what distinguishes an unevaluable assertion from a
+  violation, and is absent for the latter.
+
+  Measured against `bench/runtime_check_overhead.exs`: no regression on any fixture.
+
+- A "Assertions must be total, not merely side-effect-free" section in the
+  [Writing sound assertions](guides/writing-sound-assertions.md) guide, covering the common partial
+  predicates and the fix (lead with a type check).
+
 ### Changed
 
 - **Invariant entry checks now see through nested head patterns** (#84). A struct carried
@@ -47,50 +99,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   This is a behaviour change: a call passing an already-invalid struct nested in a tuple,
   map, or list now raises `Bond.InvariantError` on entry where it previously ran the body
   and raised only if the struct came back out.
-
-### Fixed
-
-- **A module attribute read only by a contract no longer warns as unused in a purging
-  build** (#79). Purging discarded the contract, the attribute lost its last reader, and
-  Elixir warned "module attribute @limit was set but never used" — code that compiled
-  cleanly in dev, warning in exactly the build people gate on `--warnings-as-errors`, with
-  a message that named Elixir rather than Bond and so offered no route back to the cause.
-
-  Bond now reads those attributes during compilation instead. `Module.get_attribute/2`
-  counts as a use, so the warning goes away without a byte reaching the BEAM — cheaper and
-  safer than emitting `_ = @attr` into the module body. Applies to all four kinds: `@pre`,
-  `@post`, `@invariant`, and `check/1`, including attributes read inside a
-  `where`/`whenever` group. Attributes that are genuinely unused still warn.
-
-  Also closes the gap that hid it: the downstream-consumer CI job now compiles the
-  integration app a second time with every kind `:purge`d under `--warnings-as-errors`.
-  Bond's suite runs in `:test`, where nothing is purged, so this class of defect could not
-  be seen from inside it — the same blind spot as #76.
-
-- **Invariant entry checks are no longer skipped when the head names the struct without
-  `__MODULE__`** (#93). `def total(%MyApp.Cart{} = cart)` and
-  `def total(cart) when is_struct(cart, MyApp.Cart)` are identical in meaning to their
-  `__MODULE__` spellings, but only the latter emitted an entry check — the other silently
-  emitted none.
-
-  It was silent in both directions: `:warn_skipped_invariants` stayed quiet too, because
-  its heuristic resolved names that head detection did not, so it concluded the function
-  was covered. A module written entirely in the qualified style got exit checks only —
-  invariants caught a bad struct the module *produced*, never one it was *handed*.
-
-  Bond now resolves the name against the module's own alias table (from `env.aliases` at
-  `__before_compile__`), so it agrees with Elixir about what a name means. The
-  `alias __MODULE__` idiom works: with that alias in scope, `%Cart{} = cart` is detected.
-  Without it, a bare `%Cart{}` inside `MyApp.Cart` refers to `Elixir.Cart` — a different
-  module — and is correctly *not* treated as the struct, as is an alias pointing at some
-  other module.
-
-  No configuration change and nothing to migrate: modules already using `__MODULE__`
-  behave exactly as before. Modules using the qualified form gain the entry checks they
-  should always have had, which may surface pre-existing invariant violations on input
-  that was previously unchecked.
-
-### Changed
 
 - **The reference moved off the landing page into four topical guides.** The `Bond` moduledoc was
   doing three jobs — GitHub front page, hexdocs landing page (`main: "Bond"`), and module
@@ -113,8 +121,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   `#module-*` anchors that pointed into the moduledoc now point at the guide that owns the
   section), and the sidebar reorders to follow the questions a reader actually asks: learn it,
   write it, write it well, the larger features, then the operational concerns.
-
-### Changed
 
 - **The README now opens with a contract that a guard could not express**
   ([#82](https://github.com/jvoegele/bond/issues/82)). It previously led with
@@ -179,53 +185,75 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   the Getting Started guide was aligned with the README's, so the two front-door documents share
   one running example instead of contradicting each other.
 
-### Added
+### Fixed
 
-- **`Bond.AssertionEvaluationError`**, raised when an assertion *expression* itself raises rather
-  than returning truthy or falsy ([#77](https://github.com/jvoegele/bond/issues/77)). Previously
-  the caller got the bare exception from inside the predicate, with nothing naming Bond:
+- **Invariant entry checks are no longer skipped when the head names the struct without
+  `__MODULE__`** (#93). `def total(%MyApp.Cart{} = cart)` and
+  `def total(cart) when is_struct(cart, MyApp.Cart)` are identical in meaning to their
+  `__MODULE__` spellings, but only the latter emitted an entry check — the other silently
+  emitted none.
+
+  It was silent in both directions: `:warn_skipped_invariants` stayed quiet too, because
+  its heuristic resolved names that head detection did not, so it concluded the function
+  was covered. A module written entirely in the qualified style got exit checks only —
+  invariants caught a bad struct the module *produced*, never one it was *handed*.
+
+  Bond now resolves the name against the module's own alias table (from `env.aliases` at
+  `__before_compile__`), so it agrees with Elixir about what a name means. The
+  `alias __MODULE__` idiom works: with that alias in scope, `%Cart{} = cart` is detected.
+  Without it, a bare `%Cart{}` inside `MyApp.Cart` refers to `Elixir.Cart` — a different
+  module — and is correctly *not* treated as the struct, as is an alias pointing at some
+  other module.
+
+  No configuration change and nothing to migrate: modules already using `__MODULE__`
+  behave exactly as before. Modules using the qualified form gain the entry checks they
+  should always have had, which may surface pre-existing invariant violations on input
+  that was previously unchecked.
+
+- **A module attribute read only by a contract no longer warns as unused in a purging
+  build** (#79). Purging discarded the contract, the attribute lost its last reader, and
+  Elixir warned "module attribute @limit was set but never used" — code that compiled
+  cleanly in dev, warning in exactly the build people gate on `--warnings-as-errors`, with
+  a message that named Elixir rather than Bond and so offered no route back to the cause.
+
+  Bond now reads those attributes during compilation instead. `Module.get_attribute/2`
+  counts as a use, so the warning goes away without a byte reaching the BEAM — cheaper and
+  safer than emitting `_ = @attr` into the module body. Applies to all four kinds: `@pre`,
+  `@post`, `@invariant`, and `check/1`, including attributes read inside a
+  `where`/`whenever` group. Attributes that are genuinely unused still warn.
+
+  Also closes the gap that hid it: the downstream-consumer CI job now compiles the
+  integration app a second time with every kind `:purge`d under `--warnings-as-errors`.
+  Bond's suite runs in `:test`, where nothing is purged, so this class of defect could not
+  be seen from inside it — the same blind spot as #76.
+
+- **`warn_skipped_invariants` no longer fires on functions whose invariants demonstrably run**
+  ([#80](https://github.com/jvoegele/bond/issues/80)). The warning decided whether invariants were
+  skipped from a static heuristic: a struct pattern among the *top-level* head parameters, or a
+  return of a *literal* `%__MODULE__{...}` / `{:ok, %__MODULE__{...}}`. But the post-invariant
+  check is emitted unconditionally and matches the return value's shape at **runtime**, so a
+  function that produces the struct is covered however it was built. The two were not the same
+  question, and the gap was wide — measured against a six-case matrix, the warning fired on four
+  functions, three of which raised `Bond.InvariantError` exactly as intended:
 
   ```elixir
-  @pre valid: String.contains?(email, "@")
-  def normalize(email), do: String.downcase(email)
-
-  normalize(nil)
-  ** (FunctionClauseError) no function clause matching in String.contains?/2   # before
+  def unwrap({:wrapped, %__MODULE__{} = s}), do: s   # struct nested in a pattern
+  def new(v), do: struct(__MODULE__, v: v)           # dynamic constructor
+  def new(v), do: case v do _ -> %__MODULE__{v: v} end
   ```
 
-  ```
-  ** (Bond.AssertionEvaluationError) precondition could not be evaluated for call to
-     MyApp.normalize/1                                                          # after
-  |   label: :valid
-  |   assertion: String.contains?(email, "@")
-  |   binding: [email: nil]
-  |   raised: ** (FunctionClauseError) no function clause matching in String.contains?/2
-  ```
+  The warning now fires only when a clause never mentions the struct at all — no `%Struct{}`
+  pattern or literal anywhere in the head, guards, or body, and no `struct/2`/`struct!/2` call
+  naming the module. Erring toward silence is the right bias for a warning whose failure mode is
+  teaching people to suppress it wholesale, which takes the true positives with it.
 
-  This mattered more than a cosmetic message: everywhere else in Bond, turning contracts *on* can
-  only add a `Bond.*Error` where the code would otherwise have proceeded. A partial assertion was
-  the exception — it could turn a call that would have worked, or returned a clean `{:error, _}`,
-  into an unrelated crash, and `:purge` made the crash disappear again. That is a behavioural
-  difference between the contracted and purged builds that contracts are supposed not to
-  introduce.
+  The message no longer claims total non-coverage either. It now names which check is skipped
+  (entry) and which still applies (exit), so the remaining undecidable cases — a function that
+  returns a struct fetched from elsewhere — read as the caution they are rather than a false
+  statement of fact.
 
-  A raise is deliberately **not** treated as a violation. An assertion that raises has not been
-  shown to hold or to fail, so folding it into `Bond.PreconditionError` would let a broken
-  predicate masquerade as a contract failure and mask the bug. The original exception and its
-  stacktrace are carried on `:exception` and `:original_stacktrace`.
-
-  Telemetry keeps the existing `[:bond, :assertion, :failure]` event and keeps `:kind` as the
-  contract kind, so handlers filtering on `:kind` or aggregating on `:assertion_id` are unaffected.
-  The new `:exception` metadata key is what distinguishes an unevaluable assertion from a
-  violation, and is absent for the latter.
-
-  Measured against `bench/runtime_check_overhead.exs`: no regression on any fixture.
-
-- A "Assertions must be total, not merely side-effect-free" section in the
-  [Writing sound assertions](guides/writing-sound-assertions.md) guide, covering the common partial
-  predicates and the fix (lead with a type check).
-
-### Fixed
+  Any `@bond_warn_skipped_invariants false` added to work around the old behavior is now
+  unnecessary, and harmless to leave in place.
 
 - **Bond's own generated variable names no longer appear in the `binding:` of a violation**
   ([#78](https://github.com/jvoegele/bond/issues/78)). The binding snapshot is one of the best
@@ -303,34 +331,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   name for that clause. Guards continue to test the inner value, and contracts continue to see the
   positional argument, which is their documented meaning and what the sibling clause already gave
   them.
-
-- **`warn_skipped_invariants` no longer fires on functions whose invariants demonstrably run**
-  ([#80](https://github.com/jvoegele/bond/issues/80)). The warning decided whether invariants were
-  skipped from a static heuristic: a struct pattern among the *top-level* head parameters, or a
-  return of a *literal* `%__MODULE__{...}` / `{:ok, %__MODULE__{...}}`. But the post-invariant
-  check is emitted unconditionally and matches the return value's shape at **runtime**, so a
-  function that produces the struct is covered however it was built. The two were not the same
-  question, and the gap was wide — measured against a six-case matrix, the warning fired on four
-  functions, three of which raised `Bond.InvariantError` exactly as intended:
-
-  ```elixir
-  def unwrap({:wrapped, %__MODULE__{} = s}), do: s   # struct nested in a pattern
-  def new(v), do: struct(__MODULE__, v: v)           # dynamic constructor
-  def new(v), do: case v do _ -> %__MODULE__{v: v} end
-  ```
-
-  The warning now fires only when a clause never mentions the struct at all — no `%Struct{}`
-  pattern or literal anywhere in the head, guards, or body, and no `struct/2`/`struct!/2` call
-  naming the module. Erring toward silence is the right bias for a warning whose failure mode is
-  teaching people to suppress it wholesale, which takes the true positives with it.
-
-  The message no longer claims total non-coverage either. It now names which check is skipped
-  (entry) and which still applies (exit), so the remaining undecidable cases — a function that
-  returns a struct fetched from elsewhere — read as the caution they are rather than a false
-  statement of fact.
-
-  Any `@bond_warn_skipped_invariants false` added to work around the old behavior is now
-  unnecessary, and harmless to leave in place.
 
 - **Installing Bond without `stream_data` no longer emits 15 compile warnings**
   ([#76](https://github.com/jvoegele/bond/issues/76)). `stream_data` is an optional dependency,
