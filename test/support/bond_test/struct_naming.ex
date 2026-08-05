@@ -112,3 +112,33 @@ defmodule Single do
   def via_bare_name(%Single{} = _s), do: :ok
   def via_bare_name_guard(s) when is_struct(s, Single), do: :ok
 end
+
+defmodule BondTest.NestedStructHeads do
+  @moduledoc """
+  Fixture for #84: the struct carried inside a tuple, map, or list pattern in the head.
+
+  Every function here *discards* the struct rather than returning it, so the exit check
+  cannot mask a missing entry check — a `Bond.InvariantError` can only have come from
+  the entry check.
+  """
+
+  use Bond
+
+  defstruct v: 1
+
+  @invariant positive: subject.v > 0
+
+  def from_tuple({:wrapped, %__MODULE__{} = s}), do: {:ok, s.v}
+  def from_map(%{payload: %__MODULE__{} = s}), do: {:ok, s.v}
+  def from_list([%__MODULE__{} = s | _rest]), do: {:ok, s.v}
+  def from_nested({:outer, {:inner, %__MODULE__{} = s}}), do: {:ok, s.v}
+  def reversed({:wrapped, s = %__MODULE__{}}), do: {:ok, s.v}
+
+  # Two structs nested in one head: both are checked, left to right.
+  def pair({%__MODULE__{} = a, %__MODULE__{} = b}), do: {:ok, a.v, b.v}
+
+  # Destructure-only at depth binds nothing to check against — documented as not
+  # detected, and the reason the guide tells you to add `= name`.
+  @bond_warn_skipped_invariants false
+  def destructure_only({:wrapped, %__MODULE__{v: v}}), do: {:ok, v}
+end

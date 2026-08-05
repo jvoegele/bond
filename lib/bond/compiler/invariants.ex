@@ -77,12 +77,65 @@ defmodule Bond.Compiler.Invariants do
     |> Enum.with_index()
     |> Enum.flat_map(fn {param, idx} ->
       case classify_param(param, guard_vars, struct_module, aliases) do
-        {:bound, name} -> [{:bound, name, idx}]
-        :destructure -> [{:destructure, idx}]
-        :none -> []
+        {:bound, name} ->
+          [{:bound, name, idx}]
+
+        :destructure ->
+          [{:destructure, idx}]
+
+        :none ->
+          # The parameter is not itself the struct, but may carry one inside a tuple,
+          # map, or list pattern (#84). Any name the head binds to the struct at depth
+          # is checked, in left-to-right traversal order.
+          for var <- nested_struct_vars(param, struct_module, aliases), do: {:bound, var, idx}
       end
     end)
   end
+
+  @doc """
+  Collects every name a head pattern binds to this module's struct *below* the top level,
+  in left-to-right order (#84).
+
+  `def log({:wrapped, %__MODULE__{} = s})` binds `s` to the struct one level down. The
+  entry check can use it directly — the wrapper reproduces the user's pattern, so `s` is
+  in scope — but only if `s` survives `Clauses.rewrite_clause_params/3`, which
+  underscore-prefixes head names the wrapper body does not reference. `ClauseWrapper`
+  calls this *before* the rewrite so these names can join the exclusion set, the same way
+  guard-referenced names do.
+
+  Only bound structs are returned. A destructure-only nested pattern
+  (`{:wrapped, %__MODULE__{v: v}}`) binds nothing to check against and is not reported —
+  see the guide's head-shape table.
+  """
+  @spec nested_struct_vars(Macro.t(), module(), keyword()) :: [atom()]
+  def nested_struct_vars(param, struct_module, aliases \\ []) do
+    {_ast, bindings} =
+      Macro.prewalk(param, [], fn
+        {:=, _, [{var, _, ctx}, rhs]} = node, acc when is_atom(var) and is_atom(ctx) ->
+          if struct_pattern?(rhs, struct_module, aliases),
+            do: {node, [var | acc]},
+            else: {node, acc}
+
+        {:=, _, [lhs, {var, _, ctx}]} = node, acc when is_atom(var) and is_atom(ctx) ->
+          if struct_pattern?(lhs, struct_module, aliases),
+            do: {node, [var | acc]},
+            else: {node, acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    # Everything on the parameter's own top-level `=` chain belongs to the top-level
+    # path, which already owns it — including the inner name of the
+    # `canonical = (%__MODULE__{} = user_var)` shape that `rewrite_clause_params/3`
+    # produces, whose inner name is deliberately underscore-prefixed as unused. Only
+    # bindings reached through a container (tuple, map, list) are nested.
+    (bindings -- top_chain_vars(param)) |> Enum.reverse() |> Enum.uniq()
+  end
+
+  defp top_chain_vars({:=, _, [lhs, rhs]}), do: top_chain_vars(lhs) ++ top_chain_vars(rhs)
+  defp top_chain_vars({var, _, ctx}) when is_atom(var) and is_atom(ctx), do: [var]
+  defp top_chain_vars(_ast), do: []
 
   @doc """
   Resolves the per-function invariant mode given the per-module config value and the
