@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   surface. The existing guides teach and justify; this one answers "what do I type" for a reader
   who has already read them.
 
+- **The public API surface page was missing entries that are, in fact, public.** All are
+  documented and stable elsewhere; only [Public API surface](guides/public-api.md) — the page that
+  defines what the stability guarantees cover — failed to list them:
+
+  - `forall/2` and `exists/2`, the quantifiers. Public `@doc`'d macros in `Bond.Predicates` since
+    1.4.0, imported by `use Bond`, and used throughout the guides.
+  - Three telemetry metadata keys. `:assertion_id` has been emitted since the event was
+    introduced — `Bond.Runtime.Eval` passes the whole assertion map as metadata — and the
+    [Telemetry](guides/telemetry.md) guide already documented it as stable across firings and safe
+    as an aggregation key. `:exception` and `:original_stacktrace` arrived with
+    `Bond.AssertionEvaluationError` in 1.14.0 and were described in that release's notes, but never
+    reached this page; they are present only when an assertion could not be evaluated, and their
+    absence is how a handler tells that case from an ordinary violation.
+
+  No behaviour change: nothing gained or lost coverage, and the omissions were clerical rather
+  than a deliberate exclusion.
+
 ## [1.14.0] - 2026-08-05
 
 An invariant-correctness release, and a documentation one. Three separate defects were all

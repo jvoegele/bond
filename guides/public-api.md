@@ -132,6 +132,16 @@ through the `Bond.` prefix.
   * `|||/2`, `xor/2`, `implies?/2` — boolean operators imported from
     `Bond.Predicates`. See "Bond.Predicates" below for direct calls outside
     a Bond module.
+  * `forall/2`, `exists/2` — quantifiers imported from `Bond.Predicates`,
+    each taking one `pattern <- enumerable` generator and one predicate
+    expression: `forall(x <- items, x > 0)`. Both return a plain `boolean()`,
+    so they compose with `and`/`or`/`not`/`~>`, and both are valid in `@pre`,
+    `@post`, `@invariant`, `@state_invariant`, `@transition_invariant`, and
+    `check/1`. The **fact** that a failure carries element-level detail (the
+    failing element and its index for `forall`; the absence of a witness for
+    `exists`) is part of the public surface; the rendered `counterexample:`
+    wording is not. A multi-generator or filter form raises a `CompileError`.
+    See [Quantified assertions](getting-started.md#quantified-assertions).
 
 ## `use Bond` options
 
@@ -356,11 +366,24 @@ Bond emits exactly one telemetry event:
     `:invariant` | `:state_invariant` | `:transition_invariant` | `:check`),
     `:label`, `:module`, `:function` (`{name, arity}`
     tuple), `:expression` (string source), `:file`, `:line`, `:binding`
-    (keyword list of variables in scope at the assertion site). For inherited
+    (keyword list of variables in scope at the assertion site), and
+    `:assertion_id`. For inherited
     contracts the metadata also carries `:source_behaviour` (the originating
     `Bond.Behaviour`) or `:source_protocol` and `:impl` (the originating
     `Bond.Protocol` and the resolved implementation module); for an applied named
     contract it carries `:source_contract` (the originating `{module, name}`).
+
+`:assertion_id` identifies the assertion and is stable across firings of that
+same assertion, which makes it safe as an aggregation key in a counter or
+alerting pipeline. Its stability as a key is guaranteed; the term's internal
+structure is not — treat it as opaque and don't parse it.
+
+When the event reports an assertion that could not be *evaluated* (see
+`Bond.AssertionEvaluationError` under "Error structs"), the metadata also
+carries `:exception` (the original exception raised by the assertion
+expression) and `:original_stacktrace`. Both are **absent** for an ordinary
+violation, which is how a handler distinguishes the two; `:kind` remains the
+contract kind in both cases.
 
 The event is published *before* the corresponding error struct is raised, so
 telemetry handlers see every assertion failure even when an upstream
