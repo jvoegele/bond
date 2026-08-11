@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Documentation
+
+- **A [cheatsheet](guides/cheatsheet.cheatmd)**, listed after Getting Started. Every form Bond
+  provides on one scannable page — the annotation and qualified-call syntaxes, operators and
+  quantifiers, `where`/`whenever`, both flavours of invariant, named contracts, inheritance and
+  refinement, the configuration kinds and modes, the test-side macros, and the error/telemetry
+  surface. The existing guides teach and justify; this one answers "what do I type" for a reader
+  who has already read them.
+
 ## [1.14.0] - 2026-08-05
 
 An invariant-correctness release, and a documentation one. Three separate defects were all

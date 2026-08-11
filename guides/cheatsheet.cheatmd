@@ -1,0 +1,703 @@
+# Bond Cheatsheet
+
+Every form Bond gives you, on one page. The guides explain *why* — this is
+*what to type*.
+
+For the reasoning behind each section: [Writing
+Contracts](writing-contracts.md) and [Writing sound
+assertions](writing-sound-assertions.md) for assertions themselves,
+[Invariants](invariants.md) and [Contracts in a Concurrent
+World](contracts-and-concurrency.md) for the two flavours of invariant,
+[Reusable Contracts](reusable-contracts.md) and [Contract
+Inheritance](contract-inheritance.md) for sharing them, [Configuring
+Contracts](configuration.md) and [Overhead](overhead.md) for what runs in
+production, and [Testing Contracts](testing-contracts.md) for the test-side
+tooling. [Public API](public-api.md) is the authority on what is covered by the
+stability guarantees.
+
+## Setup
+{: .col-2}
+
+### Install
+
+```elixir
+def deps do
+  [{:bond, "~> 1.14"}]
+end
+```
+
+`use Bond` enables `@pre`, `@post`, `@invariant`, `check/1`, `defcontract`, and
+imports the `Bond.Predicates` operators into assertion expressions.
+
+```elixir
+defmodule Account do
+  use Bond
+
+  defstruct owner: nil, balance: 0
+
+  @pre positive: amount > 0
+  @post non_negative: result.balance >= 0
+  def withdraw(%Account{} = account, amount) do
+    %{account | balance: account.balance - amount}
+  end
+end
+```
+
+### `use Bond` options
+
+```elixir
+use Bond,
+  # each: true | false | :purge
+  preconditions:  true,
+  postconditions: true,
+  invariants:     true,
+  checks:         true,
+
+  # booleans
+  at_annotations: true,   # false ⇒ no `@` override
+  warn_skipped_invariants: true,
+  warn_unavailable_preconditions: true,
+
+  # inherited contracts
+  behaviours: [Ledger]
+```
+
+Options here beat `:overrides`, which beats global `config :bond`.
+
+### Without the `@` override
+
+For coexisting with another library that overrides `@` (Norm, decorators):
+
+```elixir
+defmodule Api do
+  use Bond, at_annotations: false
+
+  Bond.pre(valid_id: is_integer(id) and id > 0)
+  Bond.post(ok_tuple: {:ok, _} <~ result)
+  def fetch(id), do: {:ok, id}
+end
+```
+
+The calls sit **before** the `def`, exactly where `@pre` would — they are not
+in-body statements. `Bond.pre/1`, `Bond.post/1`, `Bond.invariant/1`,
+`Bond.pre_weaken/1`, `Bond.post_strengthen/1`; `check/1` stays available
+unqualified. These are never imported, so they cannot collide with your
+function names.
+
+## Preconditions and postconditions
+{: .col-2}
+
+### Bare and labelled
+
+```elixir
+# bare — one expression
+@pre amount > 0
+
+# labelled — a keyword list
+@pre positive: amount > 0,
+     sufficient: amount <= account.balance
+
+# string labels for phrases
+@post "whole number of cents": is_integer(result.balance)
+```
+
+Labels appear in the error message. Mixing bare and labelled in **one**
+annotation is a compile error — pick a form per annotation.
+
+Multiple annotations on one function are conjoined:
+
+```elixir
+@pre positive: amount > 0
+@pre sufficient: amount <= account.balance
+def withdraw(account, amount), do: ...
+```
+
+### `result` and `old/1`
+
+`result` is bound to the return value inside `@post`:
+
+```elixir
+@post non_negative: result.balance >= 0
+```
+
+`old(expr)` snapshots a value *before* the body runs. Only valid in `@post`:
+
+```elixir
+@post incremented: current_turn() == old(current_turn()) + 1
+def take_turn do
+  Process.put(:turn, current_turn() + 1)
+  :ok
+end
+```
+
+### `check/1` — assert mid-body
+
+```elixir
+def total(items) do
+  raw = Enum.sum(items)
+  check raw >= 0
+  check total_is_integer: is_integer(raw)
+  raw
+end
+```
+
+Violations raise `Bond.CheckError`. Gated by the `:checks` kind, which is
+independent of the pre/post/invariant chain.
+
+## Predicates and operators
+{: .col-2}
+
+### Operators
+
+| Operator | Meaning |
+| --- | --- |
+| `p ~> q` | implication — "if `p`, then `q`" |
+| `p \|\|\| q` | **exclusive** or — not both |
+| `pattern <~ expr` | `match?(pattern, expr)` |
+
+Both connectives have a named form that behaves identically: `implies?(p, q)`
+for `~>`, and `xor(p, q)` for `|||`.
+
+```elixir
+@post no_fee_below_limit: (amount < 100) ~> (result.fee == 0)
+@post {:ok, _} <~ result
+```
+
+Implication is how one contract covers several input shapes without asserting
+anything about the ones it doesn't apply to.
+
+> #### `|||` is exclusive or, not or {: .warning}
+>
+> Prefer the named `xor(p, q)` in assertions: `|||` reads as logical *or* to
+> anyone who doesn't already know Bond. It also binds tighter than many
+> operators, so parenthesise both sides — `(x - y < 0) ||| (y <= x)`.
+
+Imported automatically inside `use Bond`. Outside it, call them on
+`Bond.Predicates` (`~>`/`<~` are macros; the rest are functions).
+
+### Quantifiers
+
+```elixir
+@pre all_positive: forall(x <- samples, x > 0)
+@pre has_admin:    exists(u <- users, u.role == :admin)
+```
+
+`forall` reports **which element** failed; `exists` reports that none did:
+
+```text
+|   counterexample: element at index 3 (-2) does not satisfy `x > 0`
+```
+
+Quantify over the result too:
+
+```elixir
+@post sorted: forall(i <- 0..(length(result) - 2)//1,
+                     Enum.at(result, i) <= Enum.at(result, i + 1))
+```
+
+> #### Not a comprehension {: .warning}
+>
+> The trailing expression is the **predicate asserted**, not a filter. The
+> right side of `<-` is a plain `Enumerable`, not a generator. One generator,
+> one predicate — nest for a Cartesian assertion. Never quantify over an
+> infinite or effectful stream.
+
+## Destructuring bindings
+{: .col-2}
+
+### `where` (=) asserts the shape
+
+A non-match is a violation.
+
+```elixir
+@post where({:noreply, %{keys: keys, timer: timer}} = result),
+      timer_ref:  is_reference(timer),
+      has_target: exists(k <- keys, k.key == "a")
+```
+
+### `whenever` (<-) is conditional
+
+A non-match is vacuously satisfied — so case analysis is one clause per shape,
+with no `or {:error, _}` boilerplate:
+
+```elixir
+@post whenever({:ok, payload} <- result), valid: valid?(payload)
+@post whenever({:error, reason} <- result),
+      known: reason in [:timeout, :refused]
+```
+
+### Which arrow
+
+| Keyword | Arrow | Non-match |
+| --- | --- | --- |
+| `where` | `=` | violation |
+| `whenever` | `<-` | vacuously true |
+
+A mismatched keyword/arrow pair is a compile error.
+
+Available in `@pre` (binds from arguments), `@post` (and `result`),
+`@invariant` (from `subject`), `@state_invariant` / `@transition_invariant`,
+and inherited contracts.
+
+### All-inside form
+
+Fixed-arity call sites — `Bond.pre`/`post`/`invariant` and `check/1` — take the
+assertions *inside* the call:
+
+```elixir
+Bond.pre(where({:req, n} = req, positive: n > 0))
+Bond.post(where({:ok, items} = result, nonempty: items != []))
+def handle(req), do: {:ok, build(req)}
+```
+
+```elixir
+# inline — bindings are scoped to the check and do not leak
+check whenever({:ok, payload} <- fetch(), valid: valid?(payload))
+```
+
+Also accepted in `@` annotations as an alias of the prefix form. Both forms are
+recognised only at the **start** of a contract — they are not boolean
+subexpressions, so they cannot appear inside `~>` or `or`.
+
+## Invariants
+{: .col-2}
+
+### Struct invariants
+
+Checked on entry to and exit from every **public** function of the struct's own
+module. `subject` is the struct being checked:
+
+```elixir
+defmodule BoundedStack do
+  use Bond
+
+  defstruct items: [], capacity: 0
+
+  @invariant non_negative_capacity: subject.capacity >= 0,
+             size_within_capacity: length(subject.items) <= subject.capacity
+
+  def push(%__MODULE__{} = stack, item) do
+    %{stack | items: [item | stack.items]}
+  end
+end
+```
+
+> #### Give `defstruct` defaults that satisfy the invariant {: .tip}
+>
+> `%BoundedStack{}` is always constructible. With `[:items, :capacity]` the
+> first invariant to touch it evaluates `length(nil)` and raises
+> `Bond.AssertionEvaluationError`.
+
+### Which heads are detected
+
+```text
+def f(%__MODULE__{} = s, ...)                ✓
+def f(x, ...) when is_struct(x, __MODULE__)  ✓
+def f(%__MODULE__{field: _}, ...)            ✓
+def f({:wrapped, %__MODULE__{} = s})         ✓
+
+def f({:wrapped, %__MODULE__{field: _}})     ✗ nothing bound
+def f(x, ...)                                ✗ no pattern
+defp f(...)                                  ✗ private, exempt
+```
+
+A public function that never mentions the struct warns at compile time; silence
+it with `@bond_warn_skipped_invariants false` (scoped to the next `def`) or the
+module/global option.
+
+### Process state — `Bond.Server`
+
+`use Bond.Server` **after** `use GenServer`:
+
+```elixir
+defmodule Counter do
+  use GenServer
+  use Bond.Server
+
+  @state_invariant      non_negative: state.count >= 0
+  @transition_invariant monotonic: new_state.count >= old_state.count
+
+  @impl true
+  def init(n), do: {:ok, %{count: n}}
+
+  @impl true
+  def handle_call(:inc, _from, state),
+    do: {:reply, :ok, %{state | count: state.count + 1}}
+end
+```
+
+| Annotation | Binding |
+| --- | --- |
+| `@state_invariant` | `state` |
+| `@transition_invariant` | `old_state`, `new_state` |
+
+```text
+handle_call/3  handle_cast/2      ← both fire here
+handle_info/2  handle_continue/2
+
+init/1         code_change/3      ← @state_invariant only
+```
+
+`init/1` and `code_change/3` are re-creations, so they have no prior state to
+relate. Both raise `Bond.InvariantError`; the `:kind` field distinguishes them.
+Both are gated under the `:invariants` kind.
+
+## Reusable named contracts
+{: .col-2}
+
+### Define and apply
+
+```elixir
+defmodule Money do
+  use Bond
+
+  defcontract withdrawal(account, amount) do
+    @pre positive: amount > 0
+    @pre sufficient: amount <= account.balance
+    @post non_negative: result.balance >= 0
+  end
+end
+
+defmodule Account do
+  use Bond
+
+  @apply_contract {Money, :withdrawal}
+  def withdraw(acct, amt), do: %{acct | balance: acct.balance - amt}
+end
+```
+
+The head's parameters are the **canonical names** the assertions reference; the
+applying function's parameters rebind positionally. `@apply_contract :name` for
+a local contract, `{Module, :name}` across modules.
+
+### Overload by arity
+
+Contracts are keyed `{name, arity}` — the applying function's arity selects the
+overload:
+
+```elixir
+defcontract positive(x), do: @pre(x > 0)
+defcontract positive(x, floor), do: @pre(x > floor)
+```
+
+### Result-only, arity-agnostic
+
+An explicit empty parameter list applies to a function of **any** arity:
+
+```elixir
+defcontract gate_result() do
+  @post {:ok, :cleared} <~ result
+end
+
+@apply_contract :gate_result
+def can_encode?(a, b), do: {:ok, :cleared}
+```
+
+The `()` is required; preconditions are rejected (no argument names to name).
+
+### Compose with `include`
+
+```elixir
+defcontract valid_item(item) do
+  include positive(item.quantity)
+  include Money.in_range(item.discount, 0, 100)
+end
+```
+
+Arguments are expressions over *this* contract's parameters, substituted into
+the included clauses; the argument count selects the included overload.
+
+One applied contract per function — use `include` to combine several. An
+applied contract cannot be combined with behaviour/protocol inheritance on the
+same function, nor refined with `@pre_weaken`/`@post_strengthen`.
+
+## Contract inheritance
+{: .col-2}
+
+### Behaviours
+
+Contracts go directly above the `@callback`:
+
+```elixir
+defmodule Ledger do
+  use Bond.Behaviour
+
+  @pre positive_amount: amount > 0
+  @post non_negative: result >= 0
+  @callback withdraw(balance :: non_neg_integer, amount :: pos_integer) ::
+              non_neg_integer
+end
+
+defmodule BankAccount do
+  use Bond, behaviours: [Ledger]
+
+  @impl true
+  def withdraw(balance, amount) when amount <= balance, do: balance - amount
+end
+```
+
+`behaviours:` emits `@behaviour` for you. The module passed must
+`use Bond.Behaviour`.
+
+### Protocols
+
+Enforced at the dispatch boundary, across every implementation — the impls stay
+ordinary:
+
+```elixir
+defprotocol Sized do
+  use Bond.Protocol
+
+  @post non_negative: result >= 0
+  def size(data)
+end
+
+defimpl Sized, for: List do
+  def size(list), do: length(list)
+end
+```
+
+Name the protocol arguments (`def size(data)`, not `def size(t)`) — contracts
+reference those names.
+
+### Refinement
+
+An implementation inherits verbatim by default; a plain `@pre`/`@post` on an
+inherited operation is rejected. To refine (behavioural subtyping):
+
+| Annotation | Effective contract |
+| --- | --- |
+| `@pre_weaken` | `inherited or weakened` |
+| `@post_strengthen` | `inherited and strengthened` |
+
+```elixir
+defmodule ZeroTolerant do
+  use Bond, behaviours: [Ledger]
+
+  @pre_weaken allow_zero: amount == 0
+  @post_strengthen bounded: result <= balance
+  @impl true
+  def withdraw(balance, amount), do: balance - amount
+end
+```
+
+Expressions reference the **abstraction's** canonical argument names, not the
+implementation's. For a protocol, refine inside a `defimpl` that does
+`use Bond.Protocol.Impl`.
+
+## Configuration
+{: .col-2}
+
+### Kinds and modes
+
+Four kinds — `:preconditions`, `:postconditions`, `:invariants`, `:checks` —
+each `true | false | :purge`, all defaulting to `true`.
+
+```elixir
+# config/prod.exs — no contract code in the build at all
+config :bond,
+  preconditions:  :purge,
+  postconditions: :purge,
+  invariants:     :purge,
+  checks:         :purge
+```
+
+| Mode | Effect |
+| --- | --- |
+| `true` | compiled in, checked |
+| `false` | compiled in, skipped (runtime-toggleable) |
+| `:purge` | not compiled in at all — zero cost, no toggle |
+
+### The chain
+
+```text
+preconditions ≤ postconditions ≤ invariants
+```
+
+A `:purge`d kind requires every kind **above** it to be purged too — a compile
+error otherwise. At runtime, a `false` kind disables the ones above it and logs
+a one-time warning. `:checks` sits outside the chain.
+
+Preconditions have the best cost-to-value ratio: cheapest to evaluate, and the
+only kind that catches a *caller's* bug.
+
+```elixir
+# keep the lowest kind, drop the rest
+config :bond,
+  preconditions:  true,
+  postconditions: :purge,
+  invariants:     :purge,
+  checks:         :purge
+```
+
+### Per-module overrides
+
+```elixir
+config :bond,
+  preconditions: true,
+  overrides: [
+    {MyApp.HotPath, preconditions: :purge,
+                    postconditions: :purge,
+                    invariants: :purge},
+    {~r/Workers\./, postconditions: false}
+  ]
+```
+
+Precedence, most specific first: `use Bond` options → exact-module override →
+regex override (first match in list order) → global config.
+
+### Runtime toggle
+
+```elixir
+Bond.Config.disable(:preconditions)   # dormant
+Bond.Config.enable(:preconditions)    # active again
+Bond.Config.all()                     # inspect
+Bond.Config.reset/0                   # re-seed from app env
+```
+
+Global, not per-module. Only reaches kinds that were compiled in — `:purge`
+leaves nothing to toggle.
+
+### Compile-time diagnostics
+
+```elixir
+config :bond,
+  lint_assertions: true,   # warn on statically vacuous assertions
+  coverage: false          # instrument for Bond.Coverage
+```
+
+## Testing
+{: .col-2}
+
+### Assert a specific violation
+
+```elixir
+defmodule MathTest do
+  use ExUnit.Case
+  use Bond.Test
+
+  test "rejects negatives" do
+    assert_precondition_violation(Math.sqrt(-1))
+    assert_precondition_violation(Math.sqrt(-1), label: :non_negative_x)
+  end
+end
+```
+
+`assert_precondition_violation/2`, `assert_postcondition_violation/2`,
+`assert_check_violation/2`, `assert_invariant_violation/2` (pass `kind:` to
+distinguish struct / state / transition). Each returns the error struct, so you
+can assert further on its fields.
+
+### `contract_holds/2` — your generators
+
+```elixir
+use Bond.PropertyTest
+
+contract_holds &MyApp.Math.sqrt/1,
+  args: [StreamData.float(min: 0.0)]
+```
+
+You generate only **valid** input; a precondition violation is a test failure.
+
+### `probe_contract/2` — boundary-driven
+
+```elixir
+probe_contract &MyApp.Account.deposit/2,
+  args: [account_gen(), StreamData.integer(-5..105)]
+```
+
+Generate broadly: reads the literal comparisons in the `@pre`, mixes those
+boundaries into the generators, and *filters* on the precondition rather than
+failing — so the `@post` is the oracle.
+
+### `invariants_hold/2` — stateful sequences
+
+```elixir
+invariants_hold BoundedStack,
+  constructors: [{:new, [StreamData.integer(1..100)]}],
+  transformers: [{:push, [StreamData.term()]}, {:pop, []}],
+  observers:    [{:size, []}, {:peek, []}]
+```
+
+The invariants are a free oracle across every reachable state — no model to
+write.
+
+### `server_invariants_hold/2`
+
+```elixir
+server_invariants_hold Bank,
+  init: StreamData.integer(0..100),
+  messages: [
+    call: [{:withdraw, [StreamData.positive_integer()]}, {:balance, []}],
+    cast: [{:deposit, [StreamData.positive_integer()]}],
+    info: [{:tick, []}]
+  ]
+```
+
+Random message sequences over the reachable state space. Modes: `:callbacks`
+(default, in-process) or `:process`.
+
+`Bond.PropertyTest` requires the optional `:stream_data` dependency.
+
+## Errors and telemetry
+{: .col-2}
+
+### Error structs
+
+| Struct | Raised by |
+| --- | --- |
+| `Bond.PreconditionError` | `@pre` |
+| `Bond.PostconditionError` | `@post` |
+| `Bond.InvariantError` | `@invariant`, `@state_invariant`, `@transition_invariant` |
+| `Bond.CheckError` | `check/1` |
+| `Bond.AssertionEvaluationError` | the assertion *expression* itself raised |
+
+The last one is not a violation — the assertion could not be evaluated, so it is
+neither known to hold nor known to fail. Its `:exception` field carries the
+original error, which is what distinguishes it in a handler.
+
+### Fields on every error
+
+```elixir
+:label      :kind       :expression
+:file       :line       :module
+:function   :binding    :exception
+:original_stacktrace
+:source_behaviour   :source_protocol
+:impl               :source_contract
+```
+
+Fields are public and stable; the rendered `Exception.message/1` text is not.
+
+### The one telemetry event
+
+```elixir
+:telemetry.attach(
+  "bond-failure-logger",
+  [:bond, :assertion, :failure],
+  &MyApp.Telemetry.log_bond_failure/4,
+  nil
+)
+```
+
+**Measurements:** `:system_time`, `:monotonic_time`.
+
+**Metadata:** the same fields as the error struct, plus `:assertion_id` — stable
+across firings, so it's safe as an aggregation key.
+
+Only failures are emitted, and the event fires *before* the error is raised — so
+a handler sees every violation even when an upstream `rescue` swallows it.
+
+### Coverage
+
+```elixir
+config :bond, coverage: true          # compile-time opt-in
+```
+
+```elixir
+# test/test_helper.exs
+Bond.Coverage.install_reporter()
+```
+
+Records checked/failed counts per assertion, surfacing assertions that ran but
+were never observed to fail. Also `entries/0`, `report/0`, `reset/0`.

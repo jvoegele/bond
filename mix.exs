@@ -114,6 +114,7 @@ defmodule Bond.MixProject do
         # them: learn it, write it, write it well, then the larger features, then
         # the operational concerns, then reference.
         "guides/getting-started.md",
+        "guides/cheatsheet.cheatmd",
         "guides/writing-contracts.md",
         "guides/writing-sound-assertions.md",
         "guides/invariants.md",
