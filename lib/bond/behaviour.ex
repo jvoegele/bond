@@ -79,6 +79,7 @@ defmodule Bond.Behaviour do
   it directly.
   """
 
+  alias Bond.Compiler.Clauses
   alias Bond.Compiler.EnvSnapshot
   alias Bond.Compiler.InheritedContracts
   alias Bond.Compiler.InheritedContracts.Context
@@ -177,18 +178,7 @@ defmodule Bond.Behaviour do
 
   @doc false
   defmacro __before_compile__(env) do
-    leftover_pre = InheritedContracts.pending(ctx(), env.module, :precondition)
-    leftover_post = InheritedContracts.pending(ctx(), env.module, :postcondition)
-    leftover_apply = Module.get_attribute(env.module, :__bond_pending_apply_contract__)
-
-    if leftover_pre != [] or leftover_post != [] or leftover_apply != nil do
-      raise CompileError,
-        file: env.file,
-        line: env.line,
-        description:
-          "Bond: @pre/@post (or @apply_contract) in #{inspect(env.module)} do not precede an @callback. " <>
-            "Contracts on a behaviour must immediately precede the @callback they constrain."
-    end
+    InheritedContracts.assert_nothing_pending!(ctx(), env)
 
     contracts = collect_contracts(env.module)
     named_contracts_ast = named_contracts_reflection_ast(env.module)
@@ -210,6 +200,8 @@ defmodule Bond.Behaviour do
       reference_scope: "the callback's named arguments",
       pending_pre_key: :__bond_pending_pre__,
       pending_post_key: :__bond_pending_post__,
+      pending_apply_key: :__bond_pending_apply_contract__,
+      declaration_form: "@callback",
       stamp_source_behaviour: true,
       arg_naming_hint?: true
     }
@@ -217,71 +209,50 @@ defmodule Bond.Behaviour do
 
   # --- internal: callback parsing + contract registration ---
 
+  # Flushes whatever `@pre`/`@post`/`@apply_contract` preceded this `@callback` and records the
+  # resolved contract against its `{name, arity}`. Taking, conflict-checking, named-contract
+  # expansion, and reference validation are all shared with `Bond.Protocol` via
+  # `InheritedContracts`; what is behaviour-specific is parsing the callback spec and the entry
+  # shape stored for `__bond_contracts__/0`.
   defp register_callback_contracts(spec, %Macro.Env{} = env) do
-    pre = InheritedContracts.pending(ctx(), env.module, :precondition)
-    post = InheritedContracts.pending(ctx(), env.module, :postcondition)
-    pending_apply = Module.get_attribute(env.module, :__bond_pending_apply_contract__)
+    case InheritedContracts.take_pending!(ctx(), env.module) do
+      # Uncontracted callbacks contribute nothing for implementers to inherit.
+      :none ->
+        :ok
 
-    InheritedContracts.clear_pending(ctx(), env.module)
-    Module.put_attribute(env.module, :__bond_pending_apply_contract__, nil)
+      taken ->
+        {name, arity, callback_arg_names} = parse_callback!(spec, env)
 
-    if pending_apply != nil and (pre != [] or post != []) do
-      {_ref, apply_env} = pending_apply
-
-      raise CompileError,
-        file: apply_env.file,
-        line: apply_env.line,
-        description:
-          "Bond: @apply_contract and @pre/@post cannot both precede the same @callback. " <>
-            "Use @apply_contract alone, or @pre/@post alone."
-    end
-
-    # Only record an entry when this callback actually carries contracts — uncontracted
-    # callbacks contribute nothing for implementers to inherit.
-    if pending_apply != nil or pre != [] or post != [] do
-      case parse_callback(spec) do
-        {name, arity, callback_arg_names} ->
-          {canonical_names, all_pre, all_post} =
-            case pending_apply do
-              nil ->
-                {callback_arg_names, pre, post}
-
-              {ref, apply_env} ->
-                NamedContracts.expand_for_callback(
-                  ref,
-                  name,
-                  arity,
-                  callback_arg_names,
-                  env,
-                  apply_env
-                )
-            end
-
-          InheritedContracts.validate_referenced_names!(
+        {canonical_names, pre, post} =
+          InheritedContracts.resolve_contract!(
             ctx(),
-            all_pre,
-            all_post,
             {name, arity},
-            canonical_names,
+            callback_arg_names,
+            taken,
             env
           )
 
-          entry =
-            {{name, arity},
-             %{arg_names: canonical_names, preconditions: all_pre, postconditions: all_post}}
+        entry =
+          {{name, arity}, %{arg_names: canonical_names, preconditions: pre, postconditions: post}}
 
-          current = Module.get_attribute(env.module, :__bond_callback_contracts__) || []
-          Module.put_attribute(env.module, :__bond_callback_contracts__, [entry | current])
+        current = Module.get_attribute(env.module, :__bond_callback_contracts__) || []
+        Module.put_attribute(env.module, :__bond_callback_contracts__, [entry | current])
+    end
+  end
 
-        :error ->
-          raise CompileError,
-            file: env.file,
-            line: env.line,
-            description:
-              "Bond: could not parse the @callback that the preceding @pre/@post (or " <>
-                "@apply_contract) attaches to. Bond contracts require a named callback of the form " <>
-                "`@callback name(arg :: type, …) :: return`."
-      end
+  defp parse_callback!(spec, env) do
+    case parse_callback(spec) do
+      {_name, _arity, _arg_names} = parsed ->
+        parsed
+
+      :error ->
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description:
+            "Bond: could not parse the @callback that the preceding @pre/@post (or " <>
+              "@apply_contract) attaches to. Bond contracts require a named callback of the form " <>
+              "`@callback name(arg :: type, …) :: return`."
     end
   end
 
@@ -306,13 +277,14 @@ defmodule Bond.Behaviour do
   end
 
   # `arg :: type` binds the canonical name `arg`. An unnamed positional type contributes no
-  # name; generate one matching `Bond.Compiler.Clauses`' convention so the position is still
-  # addressable by the positional rebind (contracts simply can't reference it by name).
+  # name; use the generated placeholder `Bond.Compiler.Clauses` owns so the position is still
+  # addressable by the positional rebind (contracts simply can't reference it by name — that is
+  # what `InheritedContracts.generated_name?/1` recognises).
   defp arg_name({:"::", _meta, [{name, _, ctx}, _type]}, _idx)
        when is_atom(name) and is_atom(ctx),
        do: name
 
-  defp arg_name(_arg, idx), do: :"bond_arg_#{idx}"
+  defp arg_name(_arg, idx), do: Clauses.generated_name(idx)
 
   # --- internal: contract collection ---
 
@@ -324,16 +296,8 @@ defmodule Bond.Behaviour do
 
   # Emits `__bond_named_contracts__/0` when the behaviour defines at least one `defcontract`,
   # so other modules can reference them with `@apply_contract {BehaviourModule, :name}`.
+  # `nil` (no contracts) splices as nothing.
   defp named_contracts_reflection_ast(module) do
-    named = NamedContracts.flatten(module)
-
-    if map_size(named) == 0 do
-      []
-    else
-      quote do
-        @doc false
-        def __bond_named_contracts__, do: unquote(Macro.escape(named))
-      end
-    end
+    module |> NamedContracts.flatten() |> NamedContracts.reflection_ast()
   end
 end

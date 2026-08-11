@@ -27,15 +27,11 @@ defmodule Bond.Compiler.NamedContracts do
 
   alias Bond.Compiler.Assertion
   alias Bond.Compiler.Clauses
+  alias Bond.Compiler.EnvSnapshot
   alias Bond.Compiler.InheritedContracts
   alias Bond.Compiler.InheritedContracts.Context
 
   @registry_attr :__bond_named_contracts__
-
-  @doc """
-  The module attribute under which captured named contracts are accumulated.
-  """
-  def registry_attr, do: @registry_attr
 
   @doc """
   Captures a `defcontract` definition into the defining module's named-contract registry.
@@ -266,18 +262,13 @@ defmodule Bond.Compiler.NamedContracts do
   # Remote include: the other module's reflection is already flattened, so read it directly. Forces
   # the cross-module compile dependency (and, transitively, cycle detection) via Code.ensure_compiled!.
   defp resolve_include({:remote, module, name, arity}, _raw, _path, env) do
-    Code.ensure_compiled!(module)
-
-    unless function_exported?(module, :__bond_named_contracts__, 0) do
-      raise CompileError,
-        file: env.file,
-        line: env.line,
-        description:
-          "Bond: include #{inspect(module)}.#{name} — #{inspect(module)} defines no named " <>
-            "contracts (no `defcontract`, or it does not `use Bond`)."
-    end
-
-    registry = module.__bond_named_contracts__()
+    registry =
+      remote_registry!(
+        module,
+        env,
+        "Bond: include #{inspect(module)}.#{name} — #{inspect(module)} defines no named " <>
+          "contracts (no `defcontract`, or it does not `use Bond`)."
+      )
 
     case Map.fetch(registry, {name, arity}) do
       {:ok, entry} ->
@@ -403,7 +394,8 @@ defmodule Bond.Compiler.NamedContracts do
           line: include_env.line,
           description:
             "Bond: include argument `#{Macro.to_string(arg)}` references " <>
-              "#{Enum.map_join(unknown, ", ", &"`#{&1}`")}, which #{verb(unknown)} not an " <>
+              "#{Enum.map_join(unknown, ", ", &"`#{&1}`")}, which " <>
+              "#{InheritedContracts.verb(unknown)} not an " <>
               "argument of contract #{host_name}. Include arguments may reference only its " <>
               "arguments: #{Enum.map_join(host_arg_names, ", ", &"`#{&1}`")}."
       end
@@ -411,9 +403,6 @@ defmodule Bond.Compiler.NamedContracts do
 
     :ok
   end
-
-  defp verb([_single]), do: "is"
-  defp verb(_many), do: "are"
 
   # --- @apply_contract resolution for Bond.Behaviour / Bond.Protocol (#61) ---
 
@@ -462,7 +451,11 @@ defmodule Bond.Compiler.NamedContracts do
   in the caller's context.
 
   Returns `{:local, name}` for `:name` or `{:remote, Module, :name}` for `{Module, :name}`.
-  Raises a `CompileError` for any other shape.
+  Raises a `CompileError` for any other shape, including the list form (applying several
+  contracts to one operation is a v1 non-goal).
+
+  Shared by every `@apply_contract` surface — `use Bond` (`Bond.Compiler`), `Bond.Behaviour`,
+  and `Bond.Protocol` — so all three diagnose a malformed reference identically.
   """
   @spec parse_ref(Macro.t(), Macro.Env.t()) ::
           {:local, atom()} | {:remote, module(), atom()}
@@ -471,12 +464,21 @@ defmodule Bond.Compiler.NamedContracts do
   def parse_ref({module_ast, name}, env) when is_atom(name),
     do: {:remote, Macro.expand(module_ast, env), name}
 
+  def parse_ref(list, env) when is_list(list) do
+    raise CompileError,
+      file: env.file,
+      line: env.line,
+      description:
+        "Bond: @apply_contract takes a single named contract in v1 (`:name` or " <>
+          "`{Module, :name}`). Applying multiple contracts to one function is not supported."
+  end
+
   def parse_ref(other, env) do
     raise CompileError,
       file: env.file,
       line: env.line,
       description:
-        "Bond: @apply_contract expects a contract name (`:returns_conn`) or a " <>
+        "Bond: @apply_contract expects a contract name (`:withdrawal`) or a " <>
           "`{Module, :name}` pair. Got: `#{Macro.to_string(other)}`."
   end
 
@@ -486,31 +488,67 @@ defmodule Bond.Compiler.NamedContracts do
   end
 
   defp resolve_ref_for_callback({:remote, module, name}, _fun_name, arity, _env, apply_env) do
+    module
+    |> remote_registry!(apply_env, no_named_contracts_message(module, name))
+    |> fetch_for_callback(name, arity, module, apply_env)
+  end
+
+  @doc false
+  # Reads another module's flattened named-contract reflection, forcing the cross-module compile
+  # dependency first. Raises `CompileError` at `env`'s location with `message` when the module
+  # exports no `__bond_named_contracts__/0` — the guard every remote read (`include`,
+  # `@apply_contract` from `use Bond`/`Bond.Behaviour`/`Bond.Protocol`) needs.
+  @spec remote_registry!(module(), Macro.Env.t(), String.t()) :: %{
+          optional({atom(), arity()}) => map()
+        }
+  def remote_registry!(module, %Macro.Env{} = env, message) do
     Code.ensure_compiled!(module)
 
     unless function_exported?(module, :__bond_named_contracts__, 0) do
-      raise CompileError,
-        file: apply_env.file,
-        line: apply_env.line,
-        description:
-          "Bond: @apply_contract {#{inspect(module)}, #{inspect(name)}} — " <>
-            "#{inspect(module)} defines no named contracts (no `defcontract`, or it does " <>
-            "not `use Bond`, `use Bond.Behaviour`, or `use Bond.Protocol`)."
+      raise CompileError, file: env.file, line: env.line, description: message
     end
 
-    registry = module.__bond_named_contracts__()
-    fetch_for_callback(registry, name, arity, module, apply_env)
+    module.__bond_named_contracts__()
+  end
+
+  @doc false
+  # The "that module has no named contracts" diagnostic shared by every `@apply_contract` remote
+  # read.
+  @spec no_named_contracts_message(module(), atom()) :: String.t()
+  def no_named_contracts_message(module, name) do
+    "Bond: @apply_contract {#{inspect(module)}, #{inspect(name)}} — " <>
+      "#{inspect(module)} defines no named contracts (no `defcontract`, or it does " <>
+      "not `use Bond`, `use Bond.Behaviour`, or `use Bond.Protocol`)."
+  end
+
+  @doc false
+  # Looks an applied contract up in a (flattened) registry by `{name, arity}`, falling back to a
+  # zero-argument `defcontract name()` declaration — which is *arity-agnostic*, being result-only:
+  # its postconditions reference only `result`, never an argument name. Returns `{:ok, entry}` or
+  # `:error`; each caller supplies its own not-found diagnostic. Shared by the `use Bond`
+  # application path (`Bond.Compiler`) and the `Bond.Behaviour` / `Bond.Protocol` path below, so
+  # the two agree on which contract an `@apply_contract` selects.
+  @spec fetch_entry(%{optional({atom(), arity()}) => map()}, atom(), arity()) ::
+          {:ok, map()} | :error
+  def fetch_entry(registry, name, arity) do
+    case Map.fetch(registry, {name, arity}) do
+      {:ok, entry} ->
+        {:ok, entry}
+
+      :error ->
+        case Map.fetch(registry, {name, 0}) do
+          {:ok, %{arg_names: []} = entry} -> {:ok, entry}
+          _ -> :error
+        end
+    end
   end
 
   defp fetch_for_callback(registry, name, arity, contract_module, apply_env) do
-    case {Map.fetch(registry, {name, arity}), Map.fetch(registry, {name, 0})} do
-      {{:ok, entry}, _} ->
+    case fetch_entry(registry, name, arity) do
+      {:ok, entry} ->
         {contract_module, name, entry}
 
-      {_, {:ok, %{arg_names: []} = entry}} ->
-        {contract_module, name, entry}
-
-      _ ->
+      :error ->
         available =
           registry
           |> Map.keys()
@@ -531,6 +569,38 @@ defmodule Bond.Compiler.NamedContracts do
     end
   end
 
+  @doc """
+  Returns the quoted `__bond_named_contracts__/0` reflection for a module's `defcontract`s, or
+  `nil` when it declares none.
+
+  `flattened` is the module's contracts as `flatten/1` returns them (`include`s already expanded).
+  The reflection is what lets another module read these contracts at *its* compile time via
+  `@apply_contract {Module, :name}` or `include Module.name(…)` — the same role
+  `__bond_contracts__/0` plays for `Bond.Behaviour`. Each captured assertion's live `Macro.Env` is
+  reduced to an escapable snapshot first, since a live env carries a pid that has no quoted form.
+
+  Emitted by all three `defcontract` hosts — `use Bond` (via `Bond.Compiler`), `Bond.Behaviour`,
+  and `Bond.Protocol` — so a contract is reachable the same way regardless of where it was
+  declared, and all three agree on what an empty declaration emits. Callers needing a list rather
+  than `nil` wrap with `List.wrap/1`.
+  """
+  @spec reflection_ast(%{optional({atom(), arity()}) => map()}) :: Macro.t() | nil
+  def reflection_ast(flattened) when is_map(flattened) do
+    case flattened do
+      empty when map_size(empty) == 0 ->
+        nil
+
+      named ->
+        contracts =
+          Map.new(named, fn {key, entry} -> {key, EnvSnapshot.sanitize_contract_entry(entry)} end)
+
+        quote do
+          @doc false
+          def __bond_named_contracts__, do: unquote(Macro.escape(contracts))
+        end
+    end
+  end
+
   # --- registry ---
 
   defp register(module, {name, arity} = key, entry, env) do
@@ -547,18 +617,13 @@ defmodule Bond.Compiler.NamedContracts do
     Module.put_attribute(module, @registry_attr, [{key, entry} | current])
   end
 
-  # Reference-validation context for the named-contract flavour. `validate_referenced_names!/6`
-  # uses only the diagnostic-wording fields and `reject_old`; the pending-key fields are required
-  # by the struct but unused here (capture does not go through the pending accumulators).
+  # Validation-only `Context` (see `Context`) for the named-contract flavour: `defcontract`
+  # captures its whole body at once, so it never goes through the pending accumulators.
   defp ctx do
     %Context{
       noun: "contract",
       contract_subject: "named contract",
-      reference_scope: "its declared arguments",
-      pending_pre_key: :__bond_named_contract_pending_pre__,
-      pending_post_key: :__bond_named_contract_pending_post__,
-      reject_old: false,
-      arg_naming_hint?: false
+      reference_scope: "its declared arguments"
     }
   end
 end

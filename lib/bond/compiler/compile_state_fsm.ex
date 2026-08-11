@@ -236,11 +236,4 @@ defmodule Bond.Compiler.CompileStateFSM do
   def annotated_functions(fsm) do
     :gen_statem.call(fsm, :annotated_functions)
   end
-
-  @doc """
-  Returns a list of all function definitions that have associated contracts.
-  """
-  def functions_with_contracts(fsm) do
-    :gen_statem.call(fsm, :functions_with_contracts)
-  end
 end

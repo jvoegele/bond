@@ -29,7 +29,6 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
             # definition exactly like preconditions. Each item is `%{ref: ref, line: line,
             # env: env}`; flushed by line into the matching AnnotatedFunction.
             apply_contract_defs: [],
-            functions_with_contracts: [],
             # Contracts inherited from behaviours via `use Bond, behaviours: […]`, keyed by
             # `{name, arity}`. Registered once at the implementer's `use` expansion and merged
             # into the matching AnnotatedFunctions by `Bond.Compiler.__before_compile__/1`.
@@ -170,10 +169,6 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
 
   def handle_event({:call, from}, :inherited_contracts, _state, data) do
     {:keep_state, data, {:reply, from, data.inherited_contracts}}
-  end
-
-  def handle_event({:call, from}, :functions_with_contracts, _state, data) do
-    {:keep_state, data, {:reply, from, functions_with_contracts(data)}}
   end
 
   # NOTE: this clause is used only for testing purposes
@@ -349,10 +344,6 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
 
   defp annotated_functions(%{annotated_function_stack: annotated_function_stack}) do
     Enum.reverse(annotated_function_stack)
-  end
-
-  defp functions_with_contracts(%{functions_with_contracts: functions_with_contracts}) do
-    Enum.reverse(functions_with_contracts)
   end
 
   defp pending_preconditions(data) do

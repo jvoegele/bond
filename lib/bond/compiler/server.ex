@@ -16,7 +16,7 @@ defmodule Bond.Compiler.Server do
       `:invariants` kind, and compiled out entirely under `invariants: :purge`.
 
   The `@state_invariant` / `@transition_invariant` declarations themselves are captured upstream by
-  `Bond.Compiler.register_state_invariant/4` / `register_transition_invariant/4`.
+  `Bond.Compiler.register_assertion/6`, which routes them to the module attributes read here.
   """
 
   # The GenServer state-transition callbacks Bond.Server reasons about. Each carries (or, for
@@ -90,7 +90,7 @@ defmodule Bond.Compiler.Server do
       end
 
     # State and transition invariants are captured into `:bond_state_invariants` /
-    # `:bond_transition_invariants` by `Bond.Compiler.register_{state,transition}_invariant/4` (via
+    # `:bond_transition_invariants` by `Bond.Compiler.register_assertion/6` (via
     # the `@state_invariant` / `@transition_invariant` overrides), newest-last = declaration order.
     state_invariants = Module.get_attribute(env.module, :bond_state_invariants) || []
     transition_invariants = Module.get_attribute(env.module, :bond_transition_invariants) || []
@@ -111,17 +111,11 @@ defmodule Bond.Compiler.Server do
       if modes.invariants == :purge do
         []
       else
-        invariant_check_ast(
-          :__bond_state_invariant_check__,
-          [:state],
-          state_invariants,
-          :state_invariant
-        ) ++
+        invariant_check_ast(:__bond_state_invariant_check__, [:state], state_invariants) ++
           invariant_check_ast(
             :__bond_transition_invariant_check__,
             [:old_state, :new_state],
-            transition_invariants,
-            :transition_invariant
+            transition_invariants
           ) ++
           callback_wrappers_ast(callbacks, state_invariants, transition_invariants, modes, env)
       end
@@ -260,22 +254,23 @@ defmodule Bond.Compiler.Server do
     end
   end
 
-  # Builds the lifted `def <fn_name>(<vars>)` that evaluates every invariant of `kind` against the
+  # Builds the lifted `def <fn_name>(<vars>)` that evaluates every one of `assertions` against the
   # bound state var(s), reusing `Bond.Runtime.Eval.check_assertion/3` exactly as struct
   # `@invariant`s do (`:state` for state invariants; `:old_state`/`:new_state` for transition
-  # invariants). Returns `[]` (no defp emitted) when the module declares none of that kind.
+  # invariants). Returns `[]` (no def emitted) when the module declares none of that kind.
   #
   # The assertion-failure `:function` is NOT baked in here — it is added on the failure path by
   # `Bond.Runtime.Eval.evaluate_server_invariants/2` at the call site, because these module-level
   # invariants are shared across every callback. So the passing path allocates nothing beyond the
-  # boolean checks, and the failure binding is just the state var(s).
-  defp invariant_check_ast(_fn_name, _var_names, [], _kind), do: []
+  # boolean checks, and the failure binding is just the state var(s). Each assertion already
+  # carries its own granular `:kind`, so nothing further has to be threaded in here.
+  defp invariant_check_ast(_fn_name, _var_names, []), do: []
 
-  defp invariant_check_ast(fn_name, var_names, assertions, kind) do
+  defp invariant_check_ast(fn_name, var_names, assertions) do
     # Unhygienic vars the normalized assertion expressions resolve to (see
     # `Bond.Compiler.register_{state,transition}_invariant/4`, which strip the hygiene context).
     vars = Enum.map(var_names, &Macro.var(&1, nil))
-    checks = assertion_check_calls(assertions, kind)
+    checks = assertion_check_calls(assertions)
 
     [
       quote do
@@ -295,50 +290,18 @@ defmodule Bond.Compiler.Server do
   # (the same grouping `@pre`/`@post`/`@invariant` use). `:function` is omitted (added on the
   # failure path by the `evaluate_server_invariants/2` catcher); the binding is deferred via a
   # `fn -> binding() end` thunk so it is built only on failure.
-  defp assertion_check_calls(assertions, kind) do
-    Assertion.grouped_eval(
-      assertions,
-      &server_check_call(&1, kind),
-      &server_shape_mismatch(&1, &2, kind)
-    )
+  defp assertion_check_calls(assertions) do
+    Assertion.grouped_eval(assertions, &server_check_call/1, &server_shape_mismatch/2)
   end
 
-  defp server_check_call(assertion, kind) do
-    quote do
-      Bond.Runtime.Eval.check_assertion(
-        unquote(assertion.expression),
-        unquote(Macro.escape(server_assertion_info(assertion, kind, assertion.code))),
-        fn -> binding() end
-      )
-    end
+  defp server_check_call(assertion) do
+    Assertion.check_call(assertion.expression, Assertion.info(assertion))
   end
 
   # The `:assert` (`where`) non-match branch for a server invariant: a laundered `false` through
   # `check_assertion/3` (so the `:shape` violation flows through `evaluate_server_invariants/2`
   # identically), rendering the violated `pattern = source`.
-  defp server_shape_mismatch(binding, anchor, kind) do
-    info = server_assertion_info(anchor, kind, Assertion.shape_code(binding), :shape)
-
-    quote do
-      Bond.Runtime.Eval.check_assertion(
-        Bond.Predicates.__opaque__(false),
-        unquote(Macro.escape(info)),
-        fn -> binding() end
-      )
-    end
-  end
-
-  defp server_assertion_info(assertion, kind, expression, label \\ nil) do
-    env = assertion.definition_env
-
-    %{
-      assertion_id: assertion.id,
-      kind: kind,
-      label: label || assertion.label,
-      expression: expression,
-      file: env.file,
-      line: env.line,
-      module: env.module
-    }
+  defp server_shape_mismatch(binding, anchor) do
+    Assertion.shape_mismatch_call(binding, Assertion.info(anchor))
   end
 end

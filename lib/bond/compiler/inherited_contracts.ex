@@ -123,6 +123,126 @@ defmodule Bond.Compiler.InheritedContracts do
   defp pending_attr(%Context{pending_post_key: key}, :postcondition), do: key
 
   @doc """
+  Takes everything pending for the operation now being declared — `@pre`, `@post`, and any
+  `@apply_contract` — clearing all three accumulators, and rejects the one combination that is
+  not allowed.
+
+  Returns `{pre, post, applied}` (where `applied` is `{ref, apply_env}` or `nil`) when anything
+  was pending, or `:none` when nothing was: an uncontracted callback or protocol function
+  contributes no entry for implementers to inherit.
+
+  `@apply_contract` and plain `@pre`/`@post` on the same declaration is a compile error. The two
+  express the whole contract in different vocabularies — the named contract's canonical argument
+  names versus the operation's own — so combining them would silently pick one. The error is
+  positioned at the `@apply_contract`, which is the annotation to remove.
+
+  Shared by `Bond.Behaviour` and `Bond.Protocol`; `ctx.declaration_form` names the declaration
+  (`@callback` / protocol `def`) in the diagnostic.
+  """
+  @spec take_pending!(Context.t(), module()) ::
+          {[Assertion.t()], [Assertion.t()], {term(), Macro.Env.t()} | nil} | :none
+  def take_pending!(%Context{} = ctx, module) do
+    pre = pending(ctx, module, :precondition)
+    post = pending(ctx, module, :postcondition)
+    applied = Module.get_attribute(module, ctx.pending_apply_key)
+
+    clear_pending(ctx, module)
+    Module.put_attribute(module, ctx.pending_apply_key, nil)
+
+    if applied != nil and (pre != [] or post != []) do
+      {_ref, apply_env} = applied
+
+      raise CompileError,
+        file: apply_env.file,
+        line: apply_env.line,
+        description:
+          "Bond: @apply_contract and @pre/@post cannot both precede the same " <>
+            "#{ctx.declaration_form}. Use @apply_contract alone, or @pre/@post alone."
+    end
+
+    if applied == nil and pre == [] and post == [], do: :none, else: {pre, post, applied}
+  end
+
+  @doc """
+  Resolves the taken pending contracts of one operation into the
+  `{canonical_arg_names, preconditions, postconditions}` triple that `Bond.Behaviour` and
+  `Bond.Protocol` store per `{name, arity}`.
+
+  With no `@apply_contract` the operation's own declared argument names are canonical and its
+  `@pre`/`@post` pass through. With one, `Bond.Compiler.NamedContracts.expand_for_callback/6`
+  supplies both the contract's clauses and its canonical names (falling back to
+  `declared_arg_names` for a zero-argument, result-only contract).
+
+  Either way the result is validated with `validate_referenced_names!/6`, so a contract naming
+  something the operation does not bind is caught at the behaviour/protocol's own compile time —
+  where the error can point at the offending `@pre`/`@post` — rather than surfacing as an opaque
+  "undefined variable" inside generated code in every implementer.
+  """
+  @spec resolve_contract!(
+          Context.t(),
+          {atom(), arity()},
+          [atom()],
+          {[Assertion.t()], [Assertion.t()], {term(), Macro.Env.t()} | nil},
+          Macro.Env.t()
+        ) :: {[atom()], [Assertion.t()], [Assertion.t()]}
+  def resolve_contract!(
+        %Context{} = ctx,
+        {name, arity} = key,
+        declared_arg_names,
+        {pre, post, applied},
+        %Macro.Env{} = env
+      ) do
+    {canonical_names, all_pre, all_post} =
+      case applied do
+        nil ->
+          {declared_arg_names, pre, post}
+
+        {ref, apply_env} ->
+          Bond.Compiler.NamedContracts.expand_for_callback(
+            ref,
+            name,
+            arity,
+            declared_arg_names,
+            env,
+            apply_env
+          )
+      end
+
+    validate_referenced_names!(ctx, all_pre, all_post, key, canonical_names, env)
+
+    {canonical_names, all_pre, all_post}
+  end
+
+  @doc """
+  Raises when `@pre`/`@post`/`@apply_contract` are still pending at the end of a behaviour or
+  protocol module — they were written without a declaration following them, so they constrain
+  nothing.
+
+  Called from each flavour's `__before_compile__`. Returns `:ok` when nothing is left over.
+  """
+  @spec assert_nothing_pending!(Context.t(), Macro.Env.t()) :: :ok
+  def assert_nothing_pending!(%Context{} = ctx, %Macro.Env{} = env) do
+    leftover_pre = pending(ctx, env.module, :precondition)
+    leftover_post = pending(ctx, env.module, :postcondition)
+    leftover_apply = Module.get_attribute(env.module, ctx.pending_apply_key)
+
+    if leftover_pre != [] or leftover_post != [] or leftover_apply != nil do
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description:
+          "Bond: @pre/@post (or @apply_contract) in #{inspect(env.module)} do not precede " <>
+            "#{article(ctx.declaration_form)} #{ctx.declaration_form}. Contracts on a " <>
+            "#{ctx.contract_subject} must immediately precede the declaration they constrain."
+    end
+
+    :ok
+  end
+
+  defp article("@" <> _), do: "an"
+  defp article(_form), do: "a"
+
+  @doc """
   Verifies every variable a contract references is a name the operation actually binds: one of
   its named arguments, plus `result` in a postcondition.
 
@@ -264,7 +384,13 @@ defmodule Bond.Compiler.InheritedContracts do
     :ok
   end
 
-  defp uses_old?(expression) do
+  @doc false
+  # Whether an assertion expression contains an `old(...)` capture, anywhere. Shared with
+  # `Bond.Compiler`, which rejects `old/1` in a `@post_strengthen` for the same reason this
+  # module rejects it in a protocol contract: it is not precompiled on those paths, so left
+  # alone it would surface as "undefined function old/1" deep inside generated code.
+  @spec uses_old?(Macro.t()) :: boolean()
+  def uses_old?(expression) do
     {_, found?} =
       Macro.prewalk(expression, false, fn
         {:old, _, args} = node, _acc when is_list(args) -> {node, true}

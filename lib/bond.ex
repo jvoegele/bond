@@ -238,7 +238,7 @@ defmodule Bond do
   # attached to them, or keyword lists where the keys are labels and the values are the
   # assertions.
   defmacro @{pre_or_post, meta, [expression]} when pre_or_post in [:pre, :post] do
-    register_pre_or_post(pre_or_post, expression, __CALLER__, meta)
+    register_annotation(pre_or_post, expression, __CALLER__, meta)
   end
 
   # `@pre_weaken` / `@post_strengthen` — Eiffel-style refinement of a contract inherited from a
@@ -298,16 +298,16 @@ defmodule Bond do
   # Matched before the single-arg and arity-error clauses below.
   defmacro @{:invariant, meta, [{binder, _, [binding]} | scoped]}
            when binder in [:where, :whenever] do
-    register_invariant_binding_form(binder, binding, scoped, __CALLER__, meta)
+    register_binding_form(:invariant, binder, binding, scoped, __CALLER__, meta)
   end
 
   # @invariant <expression-or-keyword-list>
   #
   # Invariant expressions reference the implicit `subject` binding, which Bond rebinds at
   # every check site to whichever struct parameter the function head exposes (detected
-  # via `Bond.Compiler.Invariants.detect_struct_params/2`).
+  # via `Bond.Compiler.Invariants.detect_struct_params/4`).
   defmacro @{:invariant, meta, [expression_or_kw_list]} do
-    register_invariant(expression_or_kw_list, __CALLER__, meta)
+    register_annotation(:invariant, expression_or_kw_list, __CALLER__, meta)
   end
 
   # @invariant <name>, <expression-or-keyword-list>
@@ -356,11 +356,11 @@ defmodule Bond do
   # implicit `state` (e.g. `@state_invariant where(%{queue: q} = state), …`).
   defmacro @{:state_invariant, meta, [{binder, _, [binding]} | scoped]}
            when binder in [:where, :whenever] do
-    register_state_invariant_binding_form(binder, binding, scoped, __CALLER__, meta)
+    register_binding_form(:state_invariant, binder, binding, scoped, __CALLER__, meta)
   end
 
   defmacro @{:state_invariant, meta, [expression_or_kw_list]} do
-    register_state_invariant(expression_or_kw_list, __CALLER__, meta)
+    register_annotation(:state_invariant, expression_or_kw_list, __CALLER__, meta)
   end
 
   defmacro @{:state_invariant, _meta, [_, _ | _] = args} do
@@ -386,11 +386,11 @@ defmodule Bond do
   # the implicit `old_state`/`new_state`.
   defmacro @{:transition_invariant, meta, [{binder, _, [binding]} | scoped]}
            when binder in [:where, :whenever] do
-    register_transition_invariant_binding_form(binder, binding, scoped, __CALLER__, meta)
+    register_binding_form(:transition_invariant, binder, binding, scoped, __CALLER__, meta)
   end
 
   defmacro @{:transition_invariant, meta, [expression_or_kw_list]} do
-    register_transition_invariant(expression_or_kw_list, __CALLER__, meta)
+    register_annotation(:transition_invariant, expression_or_kw_list, __CALLER__, meta)
   end
 
   defmacro @{:transition_invariant, _meta, [_, _ | _] = args} do
@@ -543,7 +543,7 @@ defmodule Bond do
       Bond.pre "x must be positive": x > 0
   """
   defmacro pre(expression) do
-    register_pre_or_post(:pre, expression, __CALLER__, line: __CALLER__.line)
+    register_annotation(:pre, expression, __CALLER__, line: __CALLER__.line)
   end
 
   @doc """
@@ -551,7 +551,7 @@ defmodule Bond do
   option of `use Bond` for context; this is the qualified-call equivalent of `@post`.
   """
   defmacro post(expression) do
-    register_pre_or_post(:post, expression, __CALLER__, line: __CALLER__.line)
+    register_annotation(:post, expression, __CALLER__, line: __CALLER__.line)
   end
 
   @doc """
@@ -584,7 +584,7 @@ defmodule Bond do
       Bond.invariant subject.size >= 0
   """
   defmacro invariant(expression_or_kw_list) do
-    register_invariant(expression_or_kw_list, __CALLER__, line: __CALLER__.line)
+    register_annotation(:invariant, expression_or_kw_list, __CALLER__, line: __CALLER__.line)
   end
 
   @doc """
@@ -663,17 +663,18 @@ defmodule Bond do
     :ok
   end
 
-  # Shared by the `@pre`/`@post` single-argument clause and the qualified `Bond.pre/1` /
-  # `Bond.post/1` macros. Registers a bare assertion or each `label: assertion` pair into the
-  # per-module FSM.
-  defp register_pre_or_post(pre_or_post, expression, caller, meta) do
+  # Registers one annotation of `kind` — a bare assertion, a keyword list of `label: assertion`
+  # pairs, or an all-inside `where(…)`/`whenever(…)` binding form. Shared by every `@`-prefixed
+  # annotation clause and its qualified-call twin (`Bond.pre/1`, `Bond.invariant/1`, …); the
+  # kind alone selects the implicit bindings and the storage, in `Bond.Compiler`.
+  defp register_annotation(kind, expression, caller, meta) do
     case binding_expression(expression) do
       {binder, binding, scoped} ->
-        register_binding_form(pre_or_post, binder, binding, scoped, caller, meta)
+        register_binding_form(kind, binder, binding, scoped, caller, meta)
 
       nil ->
         register_each(expression, fn expr, label ->
-          Bond.Compiler.register_assertion(pre_or_post, expr, label, caller, meta)
+          Bond.Compiler.register_assertion(kind, expr, label, caller, meta)
         end)
     end
   end
@@ -689,31 +690,20 @@ defmodule Bond do
 
   defp binding_expression(_expression), do: nil
 
-  # `@pre`/`@post where(...)`/`whenever(...)` (#47): parse + validate the binding clause, collect
-  # the scoped assertions, and hand them to `Bond.Compiler.register_binding_group/7` to register
-  # as one binding group.
-  defp register_binding_form(pre_or_post, binder, binding, scoped, caller, meta) do
-    {mode, pattern, source} = parse_binding!(binder, binding, caller)
-    assertions = parse_scoped_assertions!(binder, scoped, caller)
-
-    Bond.Compiler.register_binding_group(
-      pre_or_post,
-      mode,
-      pattern,
-      source,
-      assertions,
-      caller,
-      meta
-    )
-  end
-
-  # Binding-clause parsing lives in `Bond.Compiler.Assertion` so the direct path here and the
+  # A `where(...)`/`whenever(...)` binding form (#47), for any annotation kind: parse and validate
+  # the binding clause, collect the scoped assertions, and hand them to
+  # `Bond.Compiler.register_binding_group/7` as one group.
+  #
+  # Binding-clause parsing lives in `Bond.Compiler.Assertion` so this direct path and the
   # inherited-contract capture path (`Bond.Compiler.InheritedContracts`) share one implementation.
-  defp parse_binding!(binder, binding, caller),
-    do: Bond.Compiler.Assertion.parse_binding!(binder, binding, caller)
+  defp register_binding_form(kind, binder, binding, scoped, caller, meta) do
+    {mode, pattern, source} =
+      Bond.Compiler.Assertion.parse_binding!(binder, binding, caller)
 
-  defp parse_scoped_assertions!(binder, scoped, caller),
-    do: Bond.Compiler.Assertion.parse_scoped_assertions!(binder, scoped, caller)
+    assertions = Bond.Compiler.Assertion.parse_scoped_assertions!(binder, scoped, caller)
+
+    Bond.Compiler.register_binding_group(kind, mode, pattern, source, assertions, caller, meta)
+  end
 
   # Shared by the `@pre_weaken`/`@post_strengthen` clause and the qualified `Bond.pre_weaken/1` /
   # `Bond.post_strengthen/1` macros. Registers each assertion tagged with its refinement role so
@@ -745,79 +735,6 @@ defmodule Bond do
       "label forms) were removed in Bond 1.0. Use the keyword-list form instead: " <>
       "`@#{pre_or_post} <label>: <expr>`. Labels are atoms — quote for spaces or " <>
       "punctuation, e.g. `@#{pre_or_post} \"must be positive\": x > 0`."
-  end
-
-  # Shared by the `@invariant` single-argument clause and the qualified `Bond.invariant/1` macro.
-  defp register_invariant(expression_or_kw_list, caller, meta) do
-    case binding_expression(expression_or_kw_list) do
-      {binder, binding, scoped} ->
-        register_invariant_binding_form(binder, binding, scoped, caller, meta)
-
-      nil ->
-        register_each(expression_or_kw_list, fn expr, label ->
-          Bond.Compiler.register_invariant(expr, label, caller, meta)
-        end)
-    end
-  end
-
-  # `@invariant where(...)`/`whenever(...)` (#47): same parse/validate as `@pre`/`@post`, routed to
-  # the invariant-specific registration (which normalises `subject` references).
-  defp register_invariant_binding_form(binder, binding, scoped, caller, meta) do
-    {mode, pattern, source} = parse_binding!(binder, binding, caller)
-    assertions = parse_scoped_assertions!(binder, scoped, caller)
-
-    Bond.Compiler.register_invariant_binding_group(
-      mode,
-      pattern,
-      source,
-      assertions,
-      caller,
-      meta
-    )
-  end
-
-  # `@state_invariant` (#34, `Bond.Server`).
-  defp register_state_invariant(expression_or_kw_list, caller, meta) do
-    register_each(expression_or_kw_list, fn expr, label ->
-      Bond.Compiler.register_state_invariant(expr, label, caller, meta)
-    end)
-  end
-
-  # `@state_invariant where(...)`/`whenever(...)` (#47).
-  defp register_state_invariant_binding_form(binder, binding, scoped, caller, meta) do
-    {mode, pattern, source} = parse_binding!(binder, binding, caller)
-    assertions = parse_scoped_assertions!(binder, scoped, caller)
-
-    Bond.Compiler.register_state_invariant_binding_group(
-      mode,
-      pattern,
-      source,
-      assertions,
-      caller,
-      meta
-    )
-  end
-
-  # `@transition_invariant where(...)`/`whenever(...)` (#47).
-  defp register_transition_invariant_binding_form(binder, binding, scoped, caller, meta) do
-    {mode, pattern, source} = parse_binding!(binder, binding, caller)
-    assertions = parse_scoped_assertions!(binder, scoped, caller)
-
-    Bond.Compiler.register_transition_invariant_binding_group(
-      mode,
-      pattern,
-      source,
-      assertions,
-      caller,
-      meta
-    )
-  end
-
-  # `@transition_invariant` (#34, `Bond.Server`).
-  defp register_transition_invariant(expression_or_kw_list, caller, meta) do
-    register_each(expression_or_kw_list, fn expr, label ->
-      Bond.Compiler.register_transition_invariant(expr, label, caller, meta)
-    end)
   end
 
   # Build the AST for a `check` call honouring the per-module `:checks` config:

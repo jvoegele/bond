@@ -34,7 +34,7 @@ defmodule Bond.Compiler.Assertion do
     # `:pre_weaken` (weakens the inherited precondition — combined with `or`) or
     # `:post_strengthen` (strengthens the inherited postcondition — combined with `and`).
     # `nil` for an ordinary `@pre`/`@post`. Set by `Bond.Compiler.register_assertion/6` from
-    # the `@pre_weaken`/`@post_strengthen` macros; consumed by `merge_inherited_contract/2` to
+    # the `@pre_weaken`/`@post_strengthen` macros; consumed by `Bond.Compiler.ContractMerge.merge_inherited_contract/2` to
     # partition impl assertions and fold them per the Eiffel variance rules (#16).
     :refinement,
     # The destructuring binding group this assertion is scoped to, or `nil` for an ordinary
@@ -143,7 +143,7 @@ defmodule Bond.Compiler.Assertion do
   Tags an assertion with its refinement role (`:pre_weaken` or `:post_strengthen`).
 
   Used by `Bond.Compiler.register_assertion/6` when an `@pre_weaken`/`@post_strengthen`
-  annotation is registered, so `merge_inherited_contract/2` can later partition the impl's own
+  annotation is registered, so `Bond.Compiler.ContractMerge.merge_inherited_contract/2` can later partition the impl's own
   assertions from the inherited contract and fold them per the Eiffel variance rules (#16).
   """
   @spec put_refinement(t(), :pre_weaken | :post_strengthen) :: t()
@@ -485,29 +485,71 @@ defmodule Bond.Compiler.Assertion do
     end
   end
 
-  # The `:assert` (`where`) non-match branch for `@pre`/`@post`/`@invariant`: a contract violation
-  # raised through the normal failure path by handing `check_assertion/3` a laundered `false` (so
-  # the member kind's error struct and the deferred `binding()` snapshot come for free), with a
-  # `:shape`-labelled info rendering the violated `pattern = source`.
-  defp post_shape_mismatch(binding, anchor, function_info, function_module) do
-    shape_info =
-      anchor
-      |> assertion_info(function_info, function_module)
-      |> Map.put(:label, :shape)
-      |> Map.put(:expression, shape_code(binding))
-
+  @doc false
+  # The quoted `check_assertion/3` call every contract kind is built from: evaluate `expression`,
+  # and on a falsy result throw the failure `info` together with a `binding()` snapshot taken
+  # lazily (see `build_single_eval/3` for why the snapshot is a thunk, and why the truthiness test
+  # lives in `Eval` rather than being inlined as an `if`).
+  #
+  # Public so `Bond.Compiler.Server` emits its state/transition-invariant checks through the same
+  # path as `@pre`/`@post`/`@invariant`.
+  @spec check_call(Macro.t(), map()) :: Macro.t()
+  def check_call(expression, info) when is_map(info) do
     quote do
       Bond.Runtime.Eval.check_assertion(
-        Bond.Predicates.__opaque__(false),
-        unquote(Macro.escape(shape_info)),
+        unquote(expression),
+        unquote(Macro.escape(info)),
         fn -> binding() end
       )
     end
   end
 
-  # The `binding()` -> single-assertion failure-info map. The MFA module is the module the
-  # function is *compiled into* (the implementer for inherited contracts), not where the assertion
-  # text was written. They coincide for contracts declared directly on the function, so
+  @doc false
+  # The `:assert` (`where`) non-match branch, for every contract kind: a violation raised through
+  # the normal failure path by handing `check_assertion/3` a laundered `false`, so the kind's
+  # error struct, telemetry, and deferred `binding()` snapshot all come for free. `binding` is the
+  # group's binding map; the info is relabelled `:shape` and renders the violated
+  # `pattern = source` (`__opaque__/1` keeps Dialyzer from proving the branch dead).
+  @spec shape_mismatch_call(binding(), map()) :: Macro.t()
+  def shape_mismatch_call(binding, info) when is_map(info) do
+    info = %{info | label: :shape, expression: shape_code(binding)}
+    check_call(quote(do: Bond.Predicates.__opaque__(false)), info)
+  end
+
+  # The `where` non-match branch for `@pre`/`@post`/`@invariant`, anchored on the group's first
+  # member so the violation carries that kind's attribution.
+  defp post_shape_mismatch(binding, anchor, function_info, function_module) do
+    shape_mismatch_call(binding, assertion_info(anchor, function_info, function_module))
+  end
+
+  @doc false
+  # The failure-info map for one assertion: its identity, rendered form, and source location.
+  # `Bond.Runtime.Eval` turns this into the error struct and the `[:bond, :assertion, :failure]`
+  # telemetry metadata. `overrides` supplies the fields that vary by call site — the contract
+  # kinds add `:function` and their attribution, while `Bond.Server`'s module-level invariants
+  # deliberately omit `:function` (they are shared across callbacks, so the callback is attached
+  # on the failure path by `Eval.evaluate_server_invariants/2`).
+  #
+  # Public so `Bond.Compiler.Server` builds its info identically rather than by hand.
+  @spec info(t(), map()) :: map()
+  def info(%__MODULE__{definition_env: env} = assertion, overrides \\ %{}) do
+    Map.merge(
+      %{
+        assertion_id: assertion.id,
+        kind: assertion.kind,
+        label: assertion.label,
+        expression: assertion.code,
+        file: env.file,
+        line: env.line,
+        module: env.module
+      },
+      overrides
+    )
+  end
+
+  # The failure info for a `@pre`/`@post`/`@invariant`. The MFA module is the module the function
+  # is *compiled into* (the implementer, for inherited contracts), not where the assertion text
+  # was written. They coincide for contracts declared directly on the function, so
   # `function_module` is only passed explicitly for inherited contracts; otherwise fall back to
   # the assertion's env.
   defp assertion_info(
@@ -515,18 +557,12 @@ defmodule Bond.Compiler.Assertion do
          function_info,
          function_module
        ) do
-    %{
-      assertion_id: assertion.id,
-      kind: assertion.kind,
-      label: assertion.label,
-      expression: assertion.code,
-      file: env.file,
-      line: env.line,
+    info(assertion, %{
       module: function_module || env.module,
       function: function_info,
       source_behaviour: assertion.source_behaviour,
       source_contract: assertion.source_contract
-    }
+    })
   end
 
   @doc false
@@ -728,38 +764,17 @@ defmodule Bond.Compiler.Assertion do
   end
 
   defp check_single_eval(%__MODULE__{expression: expression} = assertion) do
-    quote do
-      Bond.Runtime.Eval.check_assertion(
-        unquote(expression),
-        unquote(Macro.escape(check_group_info(assertion, assertion.code))),
-        fn -> binding() end
-      )
-    end
+    check_call(expression, check_group_info(assertion))
   end
 
   defp check_shape_mismatch(binding, anchor) do
-    info = anchor |> check_group_info(shape_code(binding)) |> Map.put(:label, :shape)
-
-    quote do
-      Bond.Runtime.Eval.check_assertion(
-        Bond.Predicates.__opaque__(false),
-        unquote(Macro.escape(info)),
-        fn -> binding() end
-      )
-    end
+    shape_mismatch_call(binding, check_group_info(anchor))
   end
 
-  defp check_group_info(%__MODULE__{definition_env: env} = assertion, expression) do
-    %{
-      assertion_id: assertion.id,
-      kind: :check,
-      label: assertion.label,
-      expression: expression,
-      file: env.file,
-      line: env.line,
-      module: env.module,
-      function: env.function
-    }
+  # A `check` group member's failure info. `check/1` runs inline in the user's function, so the
+  # enclosing function comes from the assertion's own env rather than being passed in.
+  defp check_group_info(%__MODULE__{definition_env: env} = assertion) do
+    info(assertion, %{function: env.function})
   end
 
   @doc """
