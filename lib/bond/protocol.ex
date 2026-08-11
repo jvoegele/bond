@@ -55,6 +55,7 @@ defmodule Bond.Protocol do
   (`config :bond, …` and `Bond.Config`) applies as usual.
   """
 
+  alias Bond.Compiler.Clauses
   alias Bond.Compiler.EnvSnapshot
   alias Bond.Compiler.InheritedContracts
   alias Bond.Compiler.InheritedContracts.Context
@@ -67,6 +68,7 @@ defmodule Bond.Protocol do
   # `Kernel.@/1`). The reserved `@moduledoc`/`@doc`/`@before_compile` forms are unaffected.
   defp pending_pre_key, do: :__bond_protocol_pending_pre__
   defp pending_post_key, do: :__bond_protocol_pending_post__
+  defp pending_apply_key, do: :__bond_protocol_pending_apply_contract__
   defp contracts_key, do: :__bond_protocol_contracts__
 
   @doc false
@@ -122,7 +124,7 @@ defmodule Bond.Protocol do
   defmacro @{:apply_contract, _meta, [expression]} do
     env = __CALLER__
     ref = NamedContracts.parse_ref(expression, env)
-    Module.put_attribute(env.module, :__bond_protocol_pending_apply_contract__, {ref, env})
+    Module.put_attribute(env.module, pending_apply_key(), {ref, env})
     :ok
   end
 
@@ -162,18 +164,7 @@ defmodule Bond.Protocol do
 
   @doc false
   defmacro __before_compile__(env) do
-    leftover_pre = InheritedContracts.pending(ctx(), env.module, :precondition)
-    leftover_post = InheritedContracts.pending(ctx(), env.module, :postcondition)
-    leftover_apply = Module.get_attribute(env.module, :__bond_protocol_pending_apply_contract__)
-
-    if leftover_pre != [] or leftover_post != [] or leftover_apply != nil do
-      raise CompileError,
-        file: env.file,
-        line: env.line,
-        description:
-          "Bond: @pre/@post (or @apply_contract) in #{inspect(env.module)} do not precede a " <>
-            "protocol `def`. Contracts on a protocol must immediately precede the function they constrain."
-    end
+    InheritedContracts.assert_nothing_pending!(ctx(), env)
 
     contracts = Module.get_attribute(env.module, contracts_key()) || []
 
@@ -206,9 +197,12 @@ defmodule Bond.Protocol do
         def __bond_protocol_contract__(_name, _arity), do: :no_contract
       end
 
-    named_contracts_ast = named_contracts_reflection_ast(env.module)
+    # Emits `__bond_named_contracts__/0` when the protocol defines at least one `defcontract`,
+    # so other modules can reference them with `@apply_contract {ProtocolModule, :name}`.
+    named_contracts_ast =
+      env.module |> NamedContracts.flatten() |> NamedContracts.reflection_ast() |> List.wrap()
 
-    {:__block__, [], wrappers ++ contract_clauses ++ [catch_all, named_contracts_ast]}
+    {:__block__, [], wrappers ++ contract_clauses ++ [catch_all] ++ named_contracts_ast}
   end
 
   # The shared inheritance plumbing (pending accumulation, reference validation, diagnostics)
@@ -223,81 +217,47 @@ defmodule Bond.Protocol do
       reference_scope: "its named arguments",
       pending_pre_key: pending_pre_key(),
       pending_post_key: pending_post_key(),
+      pending_apply_key: pending_apply_key(),
+      declaration_form: "protocol `def`",
       reject_old: true
     }
   end
 
   # --- internal: record a function's contracts ---
 
+  # Flushes whatever `@pre`/`@post`/`@apply_contract` preceded this protocol `def` and records the
+  # resolved contract against its `{name, arity}`. Taking, conflict-checking, named-contract
+  # expansion, and reference validation are all shared with `Bond.Behaviour` via
+  # `InheritedContracts`; what is protocol-specific is reading canonical names off a bare argument
+  # list and the entry shape the dispatch wrapper consumes.
   defp register_function_contracts(name, args, %Macro.Env{} = env) do
-    pre = InheritedContracts.pending(ctx(), env.module, :precondition)
-    post = InheritedContracts.pending(ctx(), env.module, :postcondition)
-    pending_apply = Module.get_attribute(env.module, :__bond_protocol_pending_apply_contract__)
+    case InheritedContracts.take_pending!(ctx(), env.module) do
+      # An uncontracted protocol function needs no dispatch wrapper.
+      :none ->
+        :ok
 
-    InheritedContracts.clear_pending(ctx(), env.module)
-    Module.put_attribute(env.module, :__bond_protocol_pending_apply_contract__, nil)
+      taken ->
+        arity = length(args)
+        key = {name, arity}
 
-    if pending_apply != nil and (pre != [] or post != []) do
-      {_ref, apply_env} = pending_apply
+        {canonical_names, pre, post} =
+          InheritedContracts.resolve_contract!(ctx(), key, canonical_arg_names(args), taken, env)
 
-      raise CompileError,
-        file: apply_env.file,
-        line: apply_env.line,
-        description:
-          "Bond: @apply_contract and @pre/@post cannot both precede the same protocol `def`. " <>
-            "Use @apply_contract alone, or @pre/@post alone."
-    end
-
-    if pending_apply != nil or pre != [] or post != [] do
-      arity = length(args)
-      def_arg_names = canonical_arg_names(args)
-
-      {canonical_names, all_pre, all_post} =
-        case pending_apply do
-          nil ->
-            {def_arg_names, pre, post}
-
-          {ref, apply_env} ->
-            NamedContracts.expand_for_callback(ref, name, arity, def_arg_names, env, apply_env)
-        end
-
-      InheritedContracts.validate_referenced_names!(
-        ctx(),
-        all_pre,
-        all_post,
-        {name, arity},
-        canonical_names,
-        env
-      )
-
-      entry = {{name, arity}, canonical_names, all_pre, all_post}
-      contracts = Module.get_attribute(env.module, contracts_key()) || []
-      Module.put_attribute(env.module, contracts_key(), [entry | contracts])
+        entry = {key, canonical_names, pre, post}
+        contracts = Module.get_attribute(env.module, contracts_key()) || []
+        Module.put_attribute(env.module, contracts_key(), [entry | contracts])
     end
   end
 
+  # One canonical name per position: the `def`'s own parameter name, or — for a position that is
+  # not a bare variable — the generated placeholder `Bond.Compiler.Clauses` owns, which
+  # `InheritedContracts.generated_name?/1` recognises as unreferenceable.
   defp canonical_arg_names(args) do
     args
     |> Enum.with_index()
     |> Enum.map(fn
       {{n, _, ctx}, _idx} when is_atom(n) and is_atom(ctx) -> n
-      {_arg, idx} -> :"bond_arg_#{idx}"
+      {_arg, idx} -> Clauses.generated_name(idx)
     end)
-  end
-
-  # Emits `__bond_named_contracts__/0` when the protocol defines at least one `defcontract`,
-  # so other modules can reference them with `@apply_contract {ProtocolModule, :name}`.
-  defp named_contracts_reflection_ast(module) do
-    named = NamedContracts.flatten(module)
-
-    if map_size(named) == 0 do
-      quote do
-      end
-    else
-      quote do
-        @doc false
-        def __bond_named_contracts__, do: unquote(Macro.escape(named))
-      end
-    end
   end
 end

@@ -121,40 +121,29 @@ defmodule Bond.Compiler.AnnotatedFunction do
     %{function_def | clauses: clauses ++ [Clause.new(clause_def)]}
   end
 
-  def put_preconditions(%__MODULE__{preconditions: existing} = annotated_function, preconditions)
-      when is_list(preconditions) do
-    %{
-      annotated_function
-      | preconditions: existing ++ validate_all!(preconditions, fn %Assertion{} -> :ok end)
-    }
+  def put_preconditions(%__MODULE__{} = annotated_function, preconditions)
+      when is_list(preconditions),
+      do: append_assertions(annotated_function, :preconditions, preconditions)
+
+  def put_postconditions(%__MODULE__{} = annotated_function, postconditions)
+      when is_list(postconditions),
+      do: append_assertions(annotated_function, :postconditions, postconditions)
+
+  def put_invariants(%__MODULE__{} = annotated_function, invariants) when is_list(invariants),
+    do: append_assertions(annotated_function, :invariants, invariants)
+
+  # Appends to one of the assertion lists, first asserting that every element is the expected
+  # struct — any `Assertion` for preconditions/postconditions, an `Assertion` of `kind:
+  # :invariant` for invariants. The resulting `MatchError` means the compiler wired one kind's
+  # list into another kind's field, which is a Bond bug rather than anything the user wrote.
+  defp append_assertions(annotated_function, :invariants = field, assertions) do
+    Enum.each(assertions, fn %Assertion{kind: :invariant} -> :ok end)
+    Map.update!(annotated_function, field, &(&1 ++ assertions))
   end
 
-  def put_postconditions(
-        %__MODULE__{postconditions: existing} = annotated_function,
-        postconditions
-      )
-      when is_list(postconditions) do
-    %{
-      annotated_function
-      | postconditions: existing ++ validate_all!(postconditions, fn %Assertion{} -> :ok end)
-    }
-  end
-
-  def put_invariants(%__MODULE__{invariants: existing} = annotated_function, invariants)
-      when is_list(invariants) do
-    %{
-      annotated_function
-      | invariants:
-          existing ++ validate_all!(invariants, fn %Assertion{kind: :invariant} -> :ok end)
-    }
-  end
-
-  # Raises (a MatchError from `validator`) unless every element is the expected assertion struct —
-  # preconditions/postconditions any `Assertion`, invariants an `Assertion` of `kind: :invariant`.
-  # Returns the list unchanged so callers can append it inline.
-  defp validate_all!(assertions, validator) do
-    Enum.each(assertions, validator)
-    assertions
+  defp append_assertions(annotated_function, field, assertions) do
+    Enum.each(assertions, fn %Assertion{} -> :ok end)
+    Map.update!(annotated_function, field, &(&1 ++ assertions))
   end
 
   def put_doc_attributes(
@@ -203,7 +192,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
   @doc """
   Replaces the precondition/postcondition lists outright (vs the appending `put_*` setters).
 
-  Used by `Bond.Compiler.merge_inherited_contract/2` when folding a refinement: the impl's own
+  Used by `Bond.Compiler.ContractMerge.merge_inherited_contract/2` when folding a refinement: the impl's own
   `@pre_weaken`/`@post_strengthen` assertions are moved off `preconditions`/`postconditions`
   (where the FSM placed them) into the dedicated refinement fields, and these fields are reset to
   hold only the inherited (canonical-named) assertions they fold against.
@@ -442,7 +431,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
          config
        )
        when inv_mode != :purge do
-    warn? = resolve_warn_skipped_invariants(annotated_function.clauses, config)
+    warn? = resolve_warn(annotated_function.clauses, config, :warn_skipped_invariants)
 
     if warn? and
          not Invariants.any_clause_checks_invariants?(
@@ -465,13 +454,6 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
   defp maybe_warn_skipped_invariants(_annotated_function, _inv_mode, _config), do: :ok
 
-  # Resolves the final warn-or-not decision. Per-function override (first clause
-  # with a non-nil override wins) takes precedence over the module/global config
-  # value. If no clause has an override, fall back to the resolved config.
-  #
-  # Uses an explicit nil check rather than `Enum.find_value/2` because the
-  # override is a tri-state (nil | true | false) and `find_value` treats `false`
-  # the same as nil — which would silently drop legitimate `false` overrides.
   # A purged contract is discarded before its AST reaches the BEAM, taking with it the
   # only read of any module attribute it mentioned (#79). Read those attributes here so
   # the constant does not warn as unused in the purging build.
@@ -508,7 +490,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
        when pre_mode != :purge do
     private_defs = Map.get(config, :private_defs, MapSet.new())
 
-    if resolve_warn_unavailable_preconditions(annotated_function.clauses, config) and
+    if resolve_warn(annotated_function.clauses, config, :warn_unavailable_preconditions) and
          MapSet.size(private_defs) > 0 do
       calls =
         annotated_function.preconditions
@@ -533,26 +515,26 @@ defmodule Bond.Compiler.AnnotatedFunction do
 
   defp maybe_warn_unavailable_preconditions(_annotated_function, _pre_mode, _config), do: :ok
 
-  defp resolve_warn_unavailable_preconditions(clauses, config) do
+  # Resolves the final warn-or-not decision for one of the per-function warning flags. The
+  # per-function `@bond_warn_*` override — the first clause that set one wins — takes precedence
+  # over the module/global config value; with no override, the resolved config decides.
+  #
+  # `flag` names both the clause field holding the override (`<flag>_override`) and the config
+  # key, which are deliberately kept in step.
+  #
+  # Uses an explicit nil search rather than `Enum.find_value/2` because the override is a
+  # tri-state (nil | true | false) and `find_value` treats `false` the same as nil — which would
+  # silently drop legitimate `false` overrides.
+  defp resolve_warn(clauses, config, flag) do
+    override_field = :"#{flag}_override"
+
     per_function_override =
       clauses
-      |> Enum.map(& &1.warn_unavailable_preconditions_override)
+      |> Enum.map(&Map.fetch!(&1, override_field))
       |> Enum.find(&(&1 != nil))
 
     case per_function_override do
-      nil -> Map.get(config, :warn_unavailable_preconditions, true)
-      bool when is_boolean(bool) -> bool
-    end
-  end
-
-  defp resolve_warn_skipped_invariants(clauses, config) do
-    per_function_override =
-      clauses
-      |> Enum.map(& &1.warn_skipped_invariants_override)
-      |> Enum.find(&(&1 != nil))
-
-    case per_function_override do
-      nil -> Map.get(config, :warn_skipped_invariants, true)
+      nil -> Map.get(config, flag, true)
       bool when is_boolean(bool) -> bool
     end
   end
@@ -809,16 +791,7 @@ defmodule Bond.Compiler.AnnotatedFunction do
          env,
          wc
        ) do
-    maybe_build_assertion_defp(
-      wc.pre_fn_name,
-      defp_params,
-      [],
-      af.preconditions,
-      info,
-      module,
-      env,
-      wc.pre_mode
-    )
+    build_assertion_defp(wc.pre_fn_name, defp_params, af.preconditions, info, module, env)
   end
 
   defp build_pre_defp(%__MODULE__{} = af, defp_params, info, module, env, wc) do
@@ -842,15 +815,13 @@ defmodule Bond.Compiler.AnnotatedFunction do
          env,
          wc
        ) do
-    maybe_build_assertion_defp(
+    build_assertion_defp(
       wc.post_fn_name,
-      defp_params,
-      postcondition_extra_params(wc.old_pairs),
+      defp_params ++ postcondition_extra_params(wc.old_pairs),
       postconditions,
       info,
       module,
-      env,
-      wc.post_mode
+      env
     )
   end
 
@@ -867,9 +838,17 @@ defmodule Bond.Compiler.AnnotatedFunction do
     build_lifted_defp_with_body(wc.post_fn_name, params, body, env)
   end
 
-  # Emits the `@dialyzer {:nowarn_function, ...}` + `defp name(params) do body end` pair shared by
-  # the refined assertion defps (the ordinary path inlines the same shape in
-  # `maybe_build_assertion_defp/8`). See that function for why the nowarn attribute is needed.
+  # Emits the `@dialyzer {:nowarn_function, …}` + `defp name(params) do body end` pair that every
+  # lifted assertion defp is built from — the ordinary conjunctions and the refined
+  # (`@pre_weaken` / `@post_strengthen`) forms alike.
+  #
+  # The nowarn suppresses Dialyzer warnings for this generated defp, rather than widening the
+  # wrapper's argument types through `Bond.Predicates.__opaque__/1` at the call boundary. A
+  # `@pre`/`@post` that duplicates a typespec-implied guard (e.g. `is_binary(x)` on a `binary()`
+  # argument) makes the `false ->` branch of the assertion's `and/2` expansion appear dead; nowarn
+  # silences that pattern_match warning at zero runtime cost. Because the assertion result is
+  # `term()`-checked in `Bond.Runtime.Eval.check_assertion/3`, little real Dialyzer coverage is
+  # lost.
   defp build_lifted_defp_with_body(name, params, body, env) do
     arity = length(params)
 
@@ -881,34 +860,11 @@ defmodule Bond.Compiler.AnnotatedFunction do
     end
   end
 
-  # The `:purge` mode is intercepted by `build_pre_defp/6` / `build_post_defp/7` before reaching
-  # here, so this builder is only ever called for an emitted kind.
-  defp maybe_build_assertion_defp(
-         name,
-         call_params,
-         extra_params,
-         assertions,
-         function_info,
-         function_module,
-         env,
-         _mode
-       ) do
+  # The unrefined conjunction defp: every assertion of the kind, evaluated in order. The `:purge`
+  # mode is intercepted by `build_pre_defp/6` / `build_post_defp/7` before reaching here, so this
+  # is only ever called for an emitted kind.
+  defp build_assertion_defp(name, params, assertions, function_info, function_module, env) do
     body = Assertion.assertions_body(assertions, function_info, function_module)
-    params = call_params ++ extra_params
-    arity = length(params)
-
-    quote file: env.file, line: env.line do
-      # Suppress Dialyzer warnings for this generated assertion defp rather than widening
-      # the wrapper's argument types through `Bond.Predicates.__opaque__/1` at the call
-      # boundary. A `@pre`/`@post` that duplicates a typespec-implied guard (e.g.
-      # `is_binary(x)` on a `binary()` argument) makes the `false ->` branch of the
-      # assertion's `and/2` expansion appear dead; nowarn silences that pattern_match
-      # warning at zero runtime cost. Because the assertion result is `term()`-checked in
-      # `Bond.Runtime.Eval.check_assertion/3`, little real Dialyzer coverage is lost.
-      @dialyzer {:nowarn_function, [{unquote(name), unquote(arity)}]}
-      defp unquote(name)(unquote_splicing(params)) do
-        unquote(body)
-      end
-    end
+    build_lifted_defp_with_body(name, params, body, env)
   end
 end

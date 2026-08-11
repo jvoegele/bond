@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Internal
+
+- **The compiler's internals were reviewed and refactored.** No behaviour change — no public
+  module, function, macro, or diagnostic message differs, and the full suite passes unchanged.
+
+  Three `defcontract`/`@apply_contract` front-ends (`use Bond`, `Bond.Behaviour`,
+  `Bond.Protocol`) had drifted into re-implementing the same logic. Reference parsing, the
+  zero-argument contract fallback lookup, the remote-registry guard, and the
+  `__bond_named_contracts__/0` reflection builder now have one implementation each in
+  `Bond.Compiler.NamedContracts` — the three copies of the reflection builder had disagreed on
+  what "no contracts" emits, and two of them skipped the `EnvSnapshot` sanitisation the third
+  performed. `Bond.Behaviour` and `Bond.Protocol` now share their pending-contract flush via
+  `Bond.Compiler.InheritedContracts`, and both take generated argument-name placeholders from
+  `Bond.Compiler.Clauses` rather than spelling the convention out again.
+
+  `Bond.Compiler`'s five parallel registration paths — which differed only in *which* implicit
+  bindings to normalise and *where* to store the result — collapsed into one table-driven pair of
+  functions, `register_assertion/6` and `register_binding_group/7`.
+
+  `Bond.Compiler` itself is split. It had grown to hold three unrelated concerns despite a
+  moduledoc describing only one; config resolution moved to **`Bond.Compiler.Config`** and
+  contract folding to **`Bond.Compiler.ContractMerge`**, leaving the module to be the
+  `@on_definition` / `@before_compile` / `@after_compile` handler it says it is. A `use Bond`
+  expansion still names `Bond.Compiler.resolve_config/3`, now a delegate, so the compile-time
+  dependency surface of a using module is unchanged — deliberately, given this codebase's history
+  with the parallel compiler.
+
+  Also removed: `Bond.Compiler.CompileStateFSM.functions_with_contracts/1` and its backing field,
+  which tracked data nothing ever populated, along with several unused types and an unreachable
+  clause.
+
 ### Documentation
 
 - **A [cheatsheet](guides/cheatsheet.cheatmd)**, listed after Getting Started. Every form Bond

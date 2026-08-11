@@ -19,16 +19,14 @@ defmodule Bond.Compiler.FunctionDefinition do
             warn_unavailable_preconditions_override: nil,
             external_override?: false
 
-  @type doc_attribute_value :: String.t() | Keyword.t()
-  @type doc_attribute :: {meta :: Keyword.t(), value :: doc_attribute_value()}
+  @typedoc """
+  One buffered `@doc` attribute: its metadata (carrying the source `:line`, which is how the FSM
+  associates it with the definition that follows) and its value — a docstring, `false`, or a
+  metadata keyword list.
+  """
+  @type doc_attribute :: {meta :: Keyword.t(), value :: String.t() | false | Keyword.t()}
 
   @type kind :: :def | :defp
-
-  @type function_parameters :: list()
-  @type function_guards :: list()
-  @type function_body :: list() | nil
-
-  @type clause :: {Macro.Env.t(), function_parameters(), function_guards(), function_body()}
 
   @type t :: %__MODULE__{
           env: Macro.Env.t(),
@@ -64,11 +62,10 @@ defmodule Bond.Compiler.FunctionDefinition do
     }
   end
 
+  @spec mfa(t()) :: mfa()
   def mfa(%__MODULE__{module: module, fun: function, params: params}) do
     {module, function, length(params)}
   end
-
-  def mfa(_), do: nil
 
   @doc """
   Records the per-function `@bond_warn_skipped_invariants` override captured at
