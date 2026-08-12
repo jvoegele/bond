@@ -5,13 +5,14 @@ defmodule Bond.Compiler.ContractDocs do
   `@doc` (if any) plus auto-generated `#### Preconditions` / `#### Postconditions`
   sections.
 
-  Lives in its own module (rather than as private functions inside
-  `Bond.Compiler.AnnotatedFunction`) for the same compile-order reason `Invariants`
-  was extracted: `AnnotatedFunction.new/1` is called by `Bond.Compiler.CompileStateFSM`
-  at user-module compile time, so the smaller `AnnotatedFunction` stays the more
-  reliably it finishes compiling before the test-support and other client modules
-  start their own. Doc-generation is a self-contained ~80 lines that's only consumed
-  by `apply_contract/2`, so it's the cheapest mass to shed.
+  Lives in its own module rather than as private functions inside
+  `Bond.Compiler.AnnotatedFunction`: doc generation is a self-contained concern, consumed only
+  by `apply_contract/2`, and keeps that much prose-formatting out of the codegen path.
+
+  It was originally split off to keep `AnnotatedFunction` small enough to win a
+  parallel-compile race. That reason is gone — ordering is now guaranteed by the
+  `Code.ensure_compiled!/1` chain (see `Bond.__using__/1`) — but the separation earns its
+  keep on its own.
   """
 
   alias Bond.Compiler.AnnotatedFunction

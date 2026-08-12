@@ -23,9 +23,11 @@ defmodule Bond.Compiler.ClauseWrapper do
   (since multi-clause dispatch is preserved by reproducing each clause's
   pattern in the wrapper head).
 
-  Lives in its own module so `Bond.Compiler.AnnotatedFunction` — which is on
-  the FSM's hot path via `AnnotatedFunction.new/1` — stays small. See the
-  compile-order gotcha memory.
+  Lives in its own module to keep per-clause emission separate from
+  `Bond.Compiler.AnnotatedFunction`'s data model. (It was split off to keep that
+  file small enough to win a parallel-compile race; ordering is now guaranteed by
+  the `Code.ensure_compiled!/1` chain — see `Bond.__using__/1` — so this is a
+  readability boundary now, not a correctness one.)
   """
 
   alias Bond.Compiler.Clauses

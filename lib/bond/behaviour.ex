@@ -181,12 +181,14 @@ defmodule Bond.Behaviour do
     InheritedContracts.assert_nothing_pending!(ctx(), env)
 
     contracts = collect_contracts(env.module)
-    named_contracts_ast = named_contracts_reflection_ast(env.module)
+
+    named_contracts_ast =
+      env.module |> NamedContracts.flatten() |> NamedContracts.reflection_ast() |> List.wrap()
 
     quote do
       @doc false
       def __bond_contracts__, do: unquote(Macro.escape(contracts))
-      unquote(named_contracts_ast)
+      unquote_splicing(named_contracts_ast)
     end
   end
 
@@ -292,12 +294,5 @@ defmodule Bond.Behaviour do
     (Module.get_attribute(module, :__bond_callback_contracts__) || [])
     |> Enum.reverse()
     |> Map.new(fn {key, entry} -> {key, EnvSnapshot.sanitize_contract_entry(entry)} end)
-  end
-
-  # Emits `__bond_named_contracts__/0` when the behaviour defines at least one `defcontract`,
-  # so other modules can reference them with `@apply_contract {BehaviourModule, :name}`.
-  # `nil` (no contracts) splices as nothing.
-  defp named_contracts_reflection_ast(module) do
-    module |> NamedContracts.flatten() |> NamedContracts.reflection_ast()
   end
 end

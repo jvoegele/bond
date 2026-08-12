@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Internal
 
+- **The compile-order anchors are now `Code.ensure_compiled!/1` calls rather than `require`s, and
+  the lint job runs on the newest Elixir.** Bond compiles `lib` and `test/support` in one parallel
+  run, so a fixture's `use Bond` can expand while `Bond.Compiler` is still being written. That
+  ordering was enforced by seven `require`s placed purely for their scheduling effect. They
+  worked — but from Elixir 1.20 they warn `unused require (convert it to an alias instead)`, which
+  had quietly cost the "Format and library warnings" job its `--warnings-as-errors` coverage on
+  the newest compiler.
+
+  The `require`s are now plain `alias`es, with the ordering stated explicitly as
+  `Code.ensure_compiled!/1` at each link in the chain: `Bond.__using__/1` →
+  `Bond.Compiler`'s `init/1` → the compile-state FSM's `start_link/1`, the last of which already
+  covered the gen_statem callback module and the structs its callbacks build. Unlike a `require`,
+  this says what it means and survives a reader who "tidies up" an alias.
+
+  Both mechanisms were measured rather than assumed: `require`s alone (guards removed) passed 6
+  clean builds out of 6; aliases alone, with no guard, failed **12 out of 12** with
+  `Bond.Compiler.CompileStateFSM.Server.init/1 is undefined`; the shipped combination passed 15
+  clean builds plus 8 partial recompiles of `server.ex`, the historical trigger. Worth recording
+  that neither `mix xref graph --label compile` nor the 1.20 warning could see the ordering the
+  `require`s provided — so neither is evidence that such a `require` is safe to drop.
+
+  The lint job moved from Elixir 1.19.5 to 1.20.0 / OTP 29.0.1, tracking the newest leg of the
+  test matrix, and Bond now compiles warning-free under it.
+
 - **The compiler's internals were reviewed and refactored.** No behaviour change — no public
   module, function, macro, or diagnostic message differs, and the full suite passes unchanged.
 
@@ -34,7 +58,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   dependency surface of a using module is unchanged — deliberately, given this codebase's history
   with the parallel compiler.
 
-  Also removed: `Bond.Compiler.CompileStateFSM.functions_with_contracts/1` and its backing field,
+  Also removed: the CompileStateFSM's `functions_with_contracts` query and its backing field,
   which tracked data nothing ever populated, along with several unused types and an unreachable
   clause.
 

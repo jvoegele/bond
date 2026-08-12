@@ -6,29 +6,33 @@ defmodule Bond.Compiler do
   Bond installs this module as the `@on_definition`, `@before_compile`, and `@after_compile`
   handler for any module that does `use Bond`. As the user's module is being compiled:
 
-    * `@pre`, `@post`, and `@doc` annotations are intercepted by `Bond` and forwarded here via
-      `register_assertion/5` and `register_doc/3`. They accumulate in the per-module
-      `Bond.Compiler.CompileStateFSM` process.
+    * Every contract annotation — `@pre`, `@post`, `@invariant`, the `Bond.Server` state and
+      transition invariants, and their `where`/`whenever` binding-group forms — is intercepted by
+      `Bond` and forwarded here via `register_assertion/6` or `register_binding_group/7`, with
+      `@doc` arriving through `register_doc/3`. The assertion's kind alone decides which implicit
+      bindings are normalised and where it is stored; see the `@kinds` table below.
     * Every `def` and `defp` definition fires `__on_definition__/6`, which builds a
-      `Bond.Compiler.FunctionDefinition` and feeds it to the FSM. The FSM groups clauses by
-      `{module, fun, arity}` and attaches any pending preconditions/postconditions/docs to the
-      resulting `Bond.Compiler.AnnotatedFunction`.
-    * `__before_compile__/1` asks the FSM for every `AnnotatedFunction` that has a contract and
-      delegates to `AnnotatedFunction.apply_contract/1` to emit a `defoverridable` plus a
-      single override clause that wraps the original function in pre/post evaluation.
+      `Bond.Compiler.FunctionDefinition` and feeds it to the per-module
+      `Bond.Compiler.CompileStateFSM` process. The FSM groups clauses by `{module, fun, arity}`
+      and attaches any pending preconditions/postconditions/docs to the resulting
+      `Bond.Compiler.AnnotatedFunction`.
+    * `__before_compile__/1` asks the FSM for every `AnnotatedFunction` that has a contract,
+      folds in anything inherited or applied, and delegates to
+      `AnnotatedFunction.apply_contract/2` to emit a `defoverridable` plus the override clauses
+      that wrap the original function in pre/post evaluation.
     * `__after_compile__/2` stops the FSM process.
+
+  Two neighbouring concerns live in their own modules rather than here:
+  `Bond.Compiler.Config` resolves the per-module configuration this module's codegen reads
+  (reached through `resolve_config/3`), and `Bond.Compiler.ContractMerge` folds behaviour-
+  inherited and `@apply_contract` contracts into an `AnnotatedFunction`.
   """
 
   alias Bond.Compiler.AnnotatedFunction
   alias Bond.Compiler.Assertion
   alias Bond.Compiler.Boundaries
   alias Bond.Compiler.Config
-  # `require` (not `alias`) so Mix creates a strong compile-time dep on
-  # CompileStateFSM and schedules compile_state_fsm.ex (and transitively
-  # server.ex) before this file. User modules have compile deps on Bond.Compiler
-  # via @before_compile/@on_definition; requiring CompileStateFSM here ensures
-  # the gen_statem and its callback module are on disk before they are started.
-  require Bond.Compiler.CompileStateFSM, as: FSM
+  alias Bond.Compiler.CompileStateFSM, as: FSM
   alias Bond.Compiler.ContractDocs
   alias Bond.Compiler.ContractMerge
   alias Bond.Compiler.FunctionDefinition
@@ -41,6 +45,12 @@ defmodule Bond.Compiler do
 
   @doc false
   def init(module) do
+    # Next link in the chain `Bond.__using__/1` starts: block until the FSM module is on disk
+    # before calling into it. LOAD-BEARING — see the note there for why an `alias` plus a
+    # qualified call establishes no ordering of its own. `start_link/1` in turn covers its own
+    # callback module and the structs it builds.
+    Code.ensure_compiled!(FSM)
+
     {:ok, _fsm_pid} = FSM.start_link(module)
     :ok
   end

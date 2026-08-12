@@ -47,7 +47,7 @@ defmodule Bond.AssertionError do
       @type t :: %__MODULE__{
               label: Bond.assertion_label(),
               # One of :precondition | :postcondition | :invariant | :state_invariant |
-              # :transition_invariant | :check (see `Bond.assertion_kind/0`, hidden).
+              # :transition_invariant | :check (see `t:Bond.assertion_kind/0`, hidden).
               kind: atom(),
               expression: Bond.assertion_expression(),
               file: Path.t(),

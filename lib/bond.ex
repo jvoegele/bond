@@ -9,27 +9,6 @@ defmodule Bond do
              |> String.split("<!-- README END -->")
              |> List.first()
 
-  # `require` (not `alias`) so Mix creates strong compile-time deps on both
-  # Bond.Compiler and Bond.Compiler.AnnotatedFunction, and schedules both
-  # before this file. Every user module has a compile dep on bond.ex via
-  # `use Bond`, so this transitively ensures:
-  #
-  #   (a) Bond.Compiler.AnnotatedFunction is compiled before any user
-  #       module's @on_definition callbacks fire (the original 0.17.4 race
-  #       fix, see the bond-compile-order memory note).
-  #   (b) The full chain Bond.Compiler → CompileStateFSM → Server is on
-  #       disk before this file's __using__ macro body calls
-  #       `Bond.Compiler.init/1` (which starts the gen_statem).
-  #
-  # (b) is needed because the call to Bond.Compiler.init/1 from the macro
-  # body would otherwise be just a fully-qualified reference — sometimes
-  # tracked as a compile dep by Mix's parallel scheduler, sometimes not.
-  # Under cache-warm CI conditions, a doc-only change to server.ex was
-  # enough to flip a previously-working race and break compilation of
-  # `use Bond` modules — see the gotcha note for the symptom + diagnosis.
-  require Bond.Compiler
-  require Bond.Compiler.AnnotatedFunction
-
   @typedoc false
   @type assertion_kind ::
           :precondition
@@ -119,6 +98,23 @@ defmodule Bond do
   > `Bond.pre`, `Bond.post`, and `Bond.invariant`.
   """
   defmacro __using__(opts) when is_list(opts) do
+    # Block until the compiler half is on disk before calling into it. LOAD-BEARING: `MIX_ENV=test`
+    # compiles `lib` and `test/support` in ONE parallel run, so a fixture's `use Bond` can expand
+    # while `Bond.Compiler` is still being written. Without this guard that is not a rare race but
+    # a reliable failure — every clean build, `CompileStateFSM.Server.init/1 is undefined`.
+    #
+    # The alias/qualified call establishes no ordering; neither does `require`, whose scheduling
+    # effect here (real, and what this used to rely on) is invisible to both `mix xref graph
+    # --label compile` and the 1.20 "unused require" warning. Do not take either as licence to
+    # drop an ordering guard.
+    #
+    # `Code.ensure_compiled!/1` states it explicitly: during compilation it suspends the caller
+    # until the named module finishes. `Bond.Compiler.init/1` continues the chain, and
+    # `Bond.Compiler.CompileStateFSM.start_link/1` covers the gen_statem callback module and the
+    # structs its callbacks build. Deadlock-free: none of those modules depends on this one, or on
+    # the user module being compiled.
+    Code.ensure_compiled!(Bond.Compiler)
+
     Bond.Compiler.init(__CALLER__.module)
 
     {at_annotations?, opts_without_at} = Keyword.pop(opts, :at_annotations, true)
@@ -707,7 +703,8 @@ defmodule Bond do
 
   # Shared by the `@pre_weaken`/`@post_strengthen` clause and the qualified `Bond.pre_weaken/1` /
   # `Bond.post_strengthen/1` macros. Registers each assertion tagged with its refinement role so
-  # `Bond.Compiler.merge_inherited_contract/2` folds it into the inherited contract.
+  # `Bond.Compiler.ContractMerge.merge_inherited_contract/2` folds it into the inherited
+  # contract.
   defp register_refinement(refinement, expression, caller, meta) do
     kind = refinement_kind(refinement)
 
@@ -742,7 +739,7 @@ defmodule Bond do
   #   * `:purge` — expand to `:ok` at compile time; `build_inline_ast` is never called and
   #     the wrapped expression is not evaluated at runtime.
   #   * `true` / `false` — call `build_inline_ast` with the compile-time-resolved mode to
-  #     produce the call(s) to `Bond.Runtime.Eval.evaluate_check/2`. The runtime guard
+  #     produce the call(s) to `Bond.Runtime.Eval.evaluate_check/1`. The runtime guard
   #     (a `:persistent_term` read defaulting to the compile-time mode) lives inside `Eval`.
   defp build_check(module, expressions, build_inline_ast) do
     case checks_mode(module) do

@@ -46,7 +46,7 @@ defmodule Bond.Compiler.Assertion do
     # `:assert` (`where`, arrow `=`) makes a non-match a contract violation; `:conditional`
     # (`whenever`, arrow `<-`) makes a non-match vacuously satisfied. `group_id` ties the run's
     # members together so `assertions_eval_list/3` can wrap them in a single `case` over `source`
-    # that binds `pattern`'s names for the members. Set by `Bond.Compiler.register_binding_group/6`.
+    # that binds `pattern`'s names for the members. Set by `Bond.Compiler.register_binding_group/7`.
     :binding
   ]
 
@@ -157,7 +157,7 @@ defmodule Bond.Compiler.Assertion do
 
   Every assertion scoped to one `where`/`whenever` form shares the same `binding` map; the common
   `group_id` lets `assertions_eval_list/3` wrap the run's members in a single `case` over the
-  bound `source`. Used by `Bond.Compiler.register_binding_group/6`.
+  bound `source`. Used by `Bond.Compiler.register_binding_group/7`.
   """
   @spec put_binding(t(), binding()) :: t()
   def put_binding(%__MODULE__{} = assertion, %{mode: mode, group_id: group_id} = binding)
@@ -690,7 +690,7 @@ defmodule Bond.Compiler.Assertion do
 
   @doc """
   Returns a quoted block intended to be used as the body of a 0-arity closure passed to
-  `Bond.Runtime.Eval.evaluate_check/2`.
+  `Bond.Runtime.Eval.evaluate_check/1`.
 
   On success the block evaluates to the value of the assertion expression (so that callers of
   `Bond.check/1,2` continue to receive the expression's value back). On failure it throws
