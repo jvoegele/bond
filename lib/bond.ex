@@ -9,27 +9,6 @@ defmodule Bond do
              |> String.split("<!-- README END -->")
              |> List.first()
 
-  # `require` (not `alias`) so Mix creates strong compile-time deps on both
-  # Bond.Compiler and Bond.Compiler.AnnotatedFunction, and schedules both
-  # before this file. Every user module has a compile dep on bond.ex via
-  # `use Bond`, so this transitively ensures:
-  #
-  #   (a) Bond.Compiler.AnnotatedFunction is compiled before any user
-  #       module's @on_definition callbacks fire (the original 0.17.4 race
-  #       fix, see the bond-compile-order memory note).
-  #   (b) The full chain Bond.Compiler → CompileStateFSM → Server is on
-  #       disk before this file's __using__ macro body calls
-  #       `Bond.Compiler.init/1` (which starts the gen_statem).
-  #
-  # (b) is needed because the call to Bond.Compiler.init/1 from the macro
-  # body would otherwise be just a fully-qualified reference — sometimes
-  # tracked as a compile dep by Mix's parallel scheduler, sometimes not.
-  # Under cache-warm CI conditions, a doc-only change to server.ex was
-  # enough to flip a previously-working race and break compilation of
-  # `use Bond` modules — see the gotcha note for the symptom + diagnosis.
-  require Bond.Compiler
-  require Bond.Compiler.AnnotatedFunction
-
   @typedoc false
   @type assertion_kind ::
           :precondition
@@ -119,6 +98,31 @@ defmodule Bond do
   > `Bond.pre`, `Bond.post`, and `Bond.invariant`.
   """
   defmacro __using__(opts) when is_list(opts) do
+    # Block until the compiler half is on disk before calling into it. THIS IS LOAD-BEARING —
+    # do not remove it, and do not assume the alias above provides ordering.
+    #
+    # Under `MIX_ENV=test` this project compiles `lib` and `test/support` in ONE parallel run, so
+    # a fixture module's `use Bond` can expand while `Bond.Compiler` is still being written. That
+    # is the 0.17.4 race, and without a guard it is not merely possible but reliable: stripping
+    # these calls fails 12 clean builds out of 12, with
+    # `Bond.Compiler.CompileStateFSM.Server.init/1 is undefined`.
+    #
+    # This was previously enforced by a chain of `require`s placed purely for their scheduling
+    # effect. Those worked — measured, not assumed: `require`s alone, with these calls removed,
+    # passed 6 clean builds out of 6. But from Elixir 1.20 they warn "unused require (convert it
+    # to an alias instead)", which is misleading here (the require was never about macros) and
+    # cost the lint job its `--warnings-as-errors` coverage. Note that `mix xref graph --label
+    # compile` reports no edge for them either: neither diagnostic can see the ordering they
+    # actually provided.
+    #
+    # `Code.ensure_compiled!/1` buys the same guarantee explicitly: during compilation it
+    # suspends the caller until the named module finishes, whatever the parallel compiler
+    # scheduled. `Bond.Compiler.init/1` continues the chain, and
+    # `Bond.Compiler.CompileStateFSM.start_link/1` covers the gen_statem callback module and the
+    # structs its callbacks build. Deadlock-free: none of those modules depends on this one, or
+    # on the user module being compiled.
+    Code.ensure_compiled!(Bond.Compiler)
+
     Bond.Compiler.init(__CALLER__.module)
 
     {at_annotations?, opts_without_at} = Keyword.pop(opts, :at_annotations, true)

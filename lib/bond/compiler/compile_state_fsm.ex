@@ -15,11 +15,9 @@ defmodule Bond.Compiler.CompileStateFSM do
   """
 
   alias Bond.Compiler.FunctionDefinition
-  # `require` (not `alias`) so Mix creates a strong compile-time dep on the Server module
-  # and schedules server.ex before this file. Without this, the parallel compiler on
-  # Elixir 1.19+ can race: test-support files call `use Bond` (which starts the gen_statem)
-  # before CompileStateFSM.Server.beam has been written to disk.
-  require Bond.Compiler.CompileStateFSM.Server, as: FSMServer
+  # `start_link/1` below blocks on Server via `Code.ensure_compiled!/1` before starting the
+  # gen_statem, which is what actually guarantees it is on disk; a plain alias is enough here.
+  alias Bond.Compiler.CompileStateFSM.Server, as: FSMServer
 
   @type server_ref :: :gen_statem.server_ref()
   @type state :: :no_contracts_pending | :contracts_pending | :error | :done
@@ -38,16 +36,17 @@ defmodule Bond.Compiler.CompileStateFSM do
   """
   @spec start_link(module()) :: {:ok, pid()} | {:error, reason :: term()}
   def start_link(module) when is_atom(module) do
-    # Deterministically defeat the parallel-compile race (Elixir 1.19+): this runs at the
-    # *user* module's compile time (via `Bond.Compiler.init/1` in the `use Bond` expansion),
-    # and the gen_statem callback module plus the structs its callbacks build must already be
-    # compiled to disk. The `require` chain from bond.ex is meant to schedule them first, but
-    # that ordering is not reliably honoured under the parallel compiler — a change to
-    # server.ex alone can flip a previously-working race, surfacing as
-    # `CompileStateFSM.Server.init/1 is undefined` / "module ... is not available". Blocking on
-    # `Code.ensure_compiled!/1` waits for each module's compilation to finish, removing the
-    # race regardless of scheduling. (Safe from deadlock: none of these modules has a
-    # compile-time dependency back on this one or on the user module being compiled.)
+    # Last link in the `Code.ensure_compiled!/1` chain that starts in `Bond.__using__/1`, and
+    # the one that matters most: this runs at the *user* module's compile time, and the
+    # gen_statem callback module plus the structs its callbacks build must already be on disk.
+    # LOAD-BEARING — see the note in `Bond.__using__/1`. Removing this fails every clean build,
+    # deterministically, with `CompileStateFSM.Server.init/1 is undefined`; the aliases above
+    # provide no ordering of their own.
+    #
+    # Blocking here waits for each module's compilation to finish, so the guarantee holds
+    # regardless of how the parallel compiler scheduled them. (Safe from deadlock: none of these
+    # modules has a compile-time dependency back on this one or on the user module being
+    # compiled.)
     Enum.each(
       [
         Bond.Compiler.CompileStateFSM.Server,

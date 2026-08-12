@@ -78,10 +78,16 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
+      # Tracks the newest Elixir in the test matrix, deliberately: the warning set grows with
+      # each release, and pinning this job to an older minor means the newest compiler's
+      # diagnostics reach nobody. 1.20 is where the "unused require (convert it to an alias
+      # instead)" warning began firing on the compile-order anchors this project used to carry
+      # — which turned out to be correct, and is why they are now `Code.ensure_compiled!/1`
+      # calls instead. Bump this in step with the matrix.
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: "27.2"
-          elixir-version: "1.19.5"
+          otp-version: "29.0.1"
+          elixir-version: "1.20.0"
       - uses: actions/cache@v5
         with:
           path: |

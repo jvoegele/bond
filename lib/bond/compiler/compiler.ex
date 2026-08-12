@@ -23,12 +23,7 @@ defmodule Bond.Compiler do
   alias Bond.Compiler.Assertion
   alias Bond.Compiler.Boundaries
   alias Bond.Compiler.Config
-  # `require` (not `alias`) so Mix creates a strong compile-time dep on
-  # CompileStateFSM and schedules compile_state_fsm.ex (and transitively
-  # server.ex) before this file. User modules have compile deps on Bond.Compiler
-  # via @before_compile/@on_definition; requiring CompileStateFSM here ensures
-  # the gen_statem and its callback module are on disk before they are started.
-  require Bond.Compiler.CompileStateFSM, as: FSM
+  alias Bond.Compiler.CompileStateFSM, as: FSM
   alias Bond.Compiler.ContractDocs
   alias Bond.Compiler.ContractMerge
   alias Bond.Compiler.FunctionDefinition
@@ -41,6 +36,12 @@ defmodule Bond.Compiler do
 
   @doc false
   def init(module) do
+    # Next link in the chain `Bond.__using__/1` starts: block until the FSM module is on disk
+    # before calling into it. LOAD-BEARING — see the note there for why an `alias` plus a
+    # qualified call establishes no ordering of its own. `start_link/1` in turn covers its own
+    # callback module and the structs it builds.
+    Code.ensure_compiled!(FSM)
+
     {:ok, _fsm_pid} = FSM.start_link(module)
     :ok
   end
