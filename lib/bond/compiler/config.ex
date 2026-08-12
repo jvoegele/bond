@@ -22,7 +22,8 @@ defmodule Bond.Compiler.Config do
   """
 
   @typedoc """
-  Per-kind compilation mode. See `Bond.Compiler.AnnotatedFunction.mode/0`.
+  Per-kind compilation mode: compile the kind in with the runtime gate defaulting to on
+  (`true`) or off (`false`), or omit its code from the BEAM entirely (`:purge`).
   """
   @type mode :: true | false | :purge
 

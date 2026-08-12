@@ -12,10 +12,13 @@ defmodule Bond.Compiler.Invariants do
        producing the pre-/post-invariant call sites. Keeping these apart makes both files
        easier to read.
 
-    2. **Compilation order.** Growing `AnnotatedFunction` past a certain size shifted it
-       later in the parallel-compile schedule, which raced with the test-support modules
-       starting their own compilation. Splitting the emission logic out of
-       `AnnotatedFunction` keeps that file smaller and avoids the race.
+    2. **Size.** `AnnotatedFunction` is large enough already; the emission logic is the
+       cleanest slice to move out of it.
+
+  This split was originally made for a third reason — growing `AnnotatedFunction` shifted it
+  later in the parallel-compile schedule, racing the test-support modules — which no longer
+  applies. Compilation order is now guaranteed outright by the `Code.ensure_compiled!/1` chain
+  (see `Bond.__using__/1`), so file size is a readability concern here, not a correctness one.
 
   The functions here are called from `Bond.Compiler.AnnotatedFunction.apply_contract/2` at
   the user module's `__before_compile__` time, and produce AST that's spliced into the

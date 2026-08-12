@@ -98,29 +98,21 @@ defmodule Bond do
   > `Bond.pre`, `Bond.post`, and `Bond.invariant`.
   """
   defmacro __using__(opts) when is_list(opts) do
-    # Block until the compiler half is on disk before calling into it. THIS IS LOAD-BEARING —
-    # do not remove it, and do not assume the alias above provides ordering.
+    # Block until the compiler half is on disk before calling into it. LOAD-BEARING: `MIX_ENV=test`
+    # compiles `lib` and `test/support` in ONE parallel run, so a fixture's `use Bond` can expand
+    # while `Bond.Compiler` is still being written. Without this guard that is not a rare race but
+    # a reliable failure — every clean build, `CompileStateFSM.Server.init/1 is undefined`.
     #
-    # Under `MIX_ENV=test` this project compiles `lib` and `test/support` in ONE parallel run, so
-    # a fixture module's `use Bond` can expand while `Bond.Compiler` is still being written. That
-    # is the 0.17.4 race, and without a guard it is not merely possible but reliable: stripping
-    # these calls fails 12 clean builds out of 12, with
-    # `Bond.Compiler.CompileStateFSM.Server.init/1 is undefined`.
+    # The alias/qualified call establishes no ordering; neither does `require`, whose scheduling
+    # effect here (real, and what this used to rely on) is invisible to both `mix xref graph
+    # --label compile` and the 1.20 "unused require" warning. Do not take either as licence to
+    # drop an ordering guard.
     #
-    # This was previously enforced by a chain of `require`s placed purely for their scheduling
-    # effect. Those worked — measured, not assumed: `require`s alone, with these calls removed,
-    # passed 6 clean builds out of 6. But from Elixir 1.20 they warn "unused require (convert it
-    # to an alias instead)", which is misleading here (the require was never about macros) and
-    # cost the lint job its `--warnings-as-errors` coverage. Note that `mix xref graph --label
-    # compile` reports no edge for them either: neither diagnostic can see the ordering they
-    # actually provided.
-    #
-    # `Code.ensure_compiled!/1` buys the same guarantee explicitly: during compilation it
-    # suspends the caller until the named module finishes, whatever the parallel compiler
-    # scheduled. `Bond.Compiler.init/1` continues the chain, and
+    # `Code.ensure_compiled!/1` states it explicitly: during compilation it suspends the caller
+    # until the named module finishes. `Bond.Compiler.init/1` continues the chain, and
     # `Bond.Compiler.CompileStateFSM.start_link/1` covers the gen_statem callback module and the
-    # structs its callbacks build. Deadlock-free: none of those modules depends on this one, or
-    # on the user module being compiled.
+    # structs its callbacks build. Deadlock-free: none of those modules depends on this one, or on
+    # the user module being compiled.
     Code.ensure_compiled!(Bond.Compiler)
 
     Bond.Compiler.init(__CALLER__.module)
@@ -711,7 +703,8 @@ defmodule Bond do
 
   # Shared by the `@pre_weaken`/`@post_strengthen` clause and the qualified `Bond.pre_weaken/1` /
   # `Bond.post_strengthen/1` macros. Registers each assertion tagged with its refinement role so
-  # `Bond.Compiler.merge_inherited_contract/2` folds it into the inherited contract.
+  # `Bond.Compiler.ContractMerge.merge_inherited_contract/2` folds it into the inherited
+  # contract.
   defp register_refinement(refinement, expression, caller, meta) do
     kind = refinement_kind(refinement)
 
@@ -746,7 +739,7 @@ defmodule Bond do
   #   * `:purge` — expand to `:ok` at compile time; `build_inline_ast` is never called and
   #     the wrapped expression is not evaluated at runtime.
   #   * `true` / `false` — call `build_inline_ast` with the compile-time-resolved mode to
-  #     produce the call(s) to `Bond.Runtime.Eval.evaluate_check/2`. The runtime guard
+  #     produce the call(s) to `Bond.Runtime.Eval.evaluate_check/1`. The runtime guard
   #     (a `:persistent_term` read defaulting to the compile-time mode) lives inside `Eval`.
   defp build_check(module, expressions, build_inline_ast) do
     case checks_mode(module) do

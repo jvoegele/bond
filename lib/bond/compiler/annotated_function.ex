@@ -7,12 +7,14 @@ defmodule Bond.Compiler.AnnotatedFunction do
   All clauses of a function (with the same name and arity) are gathered into one
   `AnnotatedFunction` struct. The `:clauses` field holds an ordered list of
   `Bond.Compiler.AnnotatedFunction.Clause` structs, one per `def`/`defp` clause. The
-  `:preconditions`, `:postconditions`, and `:doc_attributes` fields apply to all clauses.
+  `:preconditions`, `:postconditions`, `:invariants`, and `:doc_attributes` fields apply to all
+  clauses.
 
   An `AnnotatedFunction` is produced by `Bond.Compiler.CompileStateFSM` from the
-  `Bond.Compiler.FunctionDefinition` events emitted by `@on_definition`, and consumed by
-  `apply_contract/1` in this module to generate the override that wraps the original function in
-  pre/post evaluation.
+  `Bond.Compiler.FunctionDefinition` events emitted by `@on_definition`, has any inherited or
+  applied contract folded in by `Bond.Compiler.ContractMerge`, and is consumed by
+  `apply_contract/2` in this module to generate the wrappers that surround the original function
+  with pre/post/invariant evaluation.
   """
 
   alias Bond.Compiler.Assertion
@@ -318,9 +320,10 @@ defmodule Bond.Compiler.AnnotatedFunction do
       appears.
     * `:purge` — no code is emitted for that kind. The doc section is omitted.
 
-  When both `:preconditions` and `:postconditions` resolve to `:purge` (or when the function
-  has no contracts of either kind), `apply_contract/2` returns `nil`. The caller filters
-  `nil`s out and the user's `def`/`defp` runs as written, with zero per-call overhead.
+  When every kind — `:preconditions`, `:postconditions`, and `:invariants` — resolves to
+  `:purge` (or the function has no contracts of any kind), `apply_contract/2` returns `nil`.
+  The caller filters `nil`s out and the user's `def`/`defp` runs as written, with zero per-call
+  overhead.
 
   When an override IS emitted, the expression contains:
 
@@ -328,27 +331,31 @@ defmodule Bond.Compiler.AnnotatedFunction do
     2. Zero or more `@doc` clauses re-emitting the user's `@doc` attributes, with the
        auto-generated `#### Preconditions` / `#### Postconditions` sections appended (filtered
        by the per-kind mode).
-    3. A single override clause for the function that:
+    3. One override clause **per user clause** (see `Bond.Compiler.ClauseWrapper`), each of
+       which:
 
-         * (when `preconditions != :purge`) calls `Bond.Runtime.Eval.evaluate_preconditions/2`
+         * (when `invariants != :purge`) checks the invariants of any struct-bearing parameter
+           in its head;
+         * (when `preconditions != :purge`) calls `Bond.Runtime.Eval.evaluate_preconditions/1`
            with a thin closure that delegates to the lifted precondition defp;
          * resolves any `old(...)` expressions found in the postconditions into local bindings;
          * delegates to the original implementation via `super(...)`, capturing the result;
-         * (when `postconditions != :purge`) calls `Bond.Runtime.Eval.evaluate_postconditions/2`
+         * (when `invariants != :purge`) re-checks the invariants against the captured result;
+         * (when `postconditions != :purge`) calls `Bond.Runtime.Eval.evaluate_postconditions/1`
            with a thin closure that delegates to the lifted postcondition defp (passing the
            function params, the captured result, and the resolved old-value bindings);
          * returns the captured result.
 
-    4. One private `defp` per non-purged kind containing the assertion-evaluation block
-       produced by `Bond.Compiler.Assertion.assertions_body/2`. Naming convention:
-       `:"__bond_preconditions__\#{fun}__\#{arity}"` /
-       `:"__bond_postconditions__\#{fun}__\#{arity}"`. Lifting the closure body into a named
-       defp keeps the override clause itself tiny and avoids re-emitting the full assertion
-       AST inline.
+    4. One private `defp` per non-purged kind, shared by every wrapper clause, containing the
+       assertion-evaluation block produced by `Bond.Compiler.Assertion.assertions_body/3`.
+       Naming convention: `:"__bond_preconditions__\#{fun}__\#{arity}"` /
+       `:"__bond_postconditions__\#{fun}__\#{arity}"` / `:"__bond_invariants__\#{fun}__\#{arity}"`.
+       Lifting the body into a named defp keeps each wrapper tiny and avoids re-emitting the
+       full assertion AST once per clause.
 
-  The override clause uses the parameter names from the function's first clause. For
-  multi-clause functions Elixir's normal pattern matching applies inside `super(...)`, so a
-  single wrapper clause covers every original clause.
+  Each wrapper reproduces its own clause's pattern and guards, so multi-clause dispatch is
+  preserved exactly; the positions are rebound to canonical names agreed across the clauses
+  (`Bond.Compiler.Clauses`) so that all the wrappers can share one lifted defp per kind.
   """
   @spec apply_contract(t(), contract_config()) :: Macro.t() | nil
   def apply_contract(annotated_function, config \\ %{preconditions: true, postconditions: true})

@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   The `require`s are now plain `alias`es, with the ordering stated explicitly as
   `Code.ensure_compiled!/1` at each link in the chain: `Bond.__using__/1` →
-  `Bond.Compiler.init/1` → `Bond.Compiler.CompileStateFSM.start_link/1`, the last of which already
+  `Bond.Compiler`'s `init/1` → the compile-state FSM's `start_link/1`, the last of which already
   covered the gen_statem callback module and the structs its callbacks build. Unlike a `require`,
   this says what it means and survives a reader who "tidies up" an alias.
 
@@ -58,7 +58,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   dependency surface of a using module is unchanged — deliberately, given this codebase's history
   with the parallel compiler.
 
-  Also removed: `Bond.Compiler.CompileStateFSM.functions_with_contracts/1` and its backing field,
+  Also removed: the CompileStateFSM's `functions_with_contracts` query and its backing field,
   which tracked data nothing ever populated, along with several unused types and an unreachable
   clause.
 

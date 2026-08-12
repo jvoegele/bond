@@ -36,17 +36,11 @@ defmodule Bond.Compiler.CompileStateFSM do
   """
   @spec start_link(module()) :: {:ok, pid()} | {:error, reason :: term()}
   def start_link(module) when is_atom(module) do
-    # Last link in the `Code.ensure_compiled!/1` chain that starts in `Bond.__using__/1`, and
-    # the one that matters most: this runs at the *user* module's compile time, and the
+    # Last link in the ordering chain that starts in `Bond.__using__/1` — see the note there —
+    # and the one that matters most: this runs at the *user* module's compile time, and the
     # gen_statem callback module plus the structs its callbacks build must already be on disk.
-    # LOAD-BEARING — see the note in `Bond.__using__/1`. Removing this fails every clean build,
-    # deterministically, with `CompileStateFSM.Server.init/1 is undefined`; the aliases above
-    # provide no ordering of their own.
-    #
-    # Blocking here waits for each module's compilation to finish, so the guarantee holds
-    # regardless of how the parallel compiler scheduled them. (Safe from deadlock: none of these
-    # modules has a compile-time dependency back on this one or on the user module being
-    # compiled.)
+    # LOAD-BEARING; the aliases above provide no ordering of their own. Deadlock-free: none of
+    # these modules depends on this one or on the user module being compiled.
     Enum.each(
       [
         Bond.Compiler.CompileStateFSM.Server,
