@@ -13,10 +13,13 @@ The full set of modules in published API docs is the source-of-truth for
   * `Bond`
   * `Bond.Behaviour`
   * `Bond.Protocol`
+  * `Bond.Protocol.Impl`
   * `Bond.Server`
+  * `Bond.Config`
   * `Bond.Predicates`
   * `Bond.Test`
   * `Bond.PropertyTest`
+  * `Bond.PropertyTest.FilterTooRestrictiveError`
   * `Bond.Coverage`
   * `Bond.PreconditionError`
   * `Bond.PostconditionError`
@@ -229,8 +232,8 @@ the public surface; the exact wording of those diagnostics is not.
 
 ## Stateful process contracts
 
-`use Bond.Server`, alongside `use GenServer` (and after it), enables module-wide
-invariants on a server's process state:
+`use Bond.Server`, **after** `use GenServer`, enables module-wide invariants on a
+server's process state:
 
   * **`@state_invariant expr`** / **`@state_invariant label: expr, ...`** — same
     bare-or-keyword-list shape as `@invariant`. The implicit binding is `state`,
@@ -343,6 +346,13 @@ Brought into ExUnit modules via `use Bond.PropertyTest`. Provides:
 
 Requires the optional `:stream_data` dependency in the consumer's `mix.exs`.
 
+`Bond.PropertyTest.FilterTooRestrictiveError` is raised by `probe_contract/2`
+when a function's precondition discards too many consecutive generated inputs
+for the property to proceed. It is a *test-harness* error rather than a contract
+violation — it is not raised by any contract, does not fire telemetry, and does
+not share the error-struct shape described under "Error structs" below. Its
+existence and its name are part of the public surface; its message text is not.
+
 ## `Bond.Coverage`
 
 A compile-time-opt-in test diagnostic (enabled with `config :bond, coverage: true`) that
@@ -354,6 +364,27 @@ surfacing assertions that ran but were never observed to fail. Public functions:
   * `report/0` — the coverage as a human-readable table.
   * `reset/0` — clear accumulated coverage.
   * `install_reporter/0` — print `report/0` after the ExUnit suite (call in `test_helper.exs`).
+
+## `Bond.Config`
+
+Runtime control over which kinds Bond evaluates, for kinds compiled in as `true`
+or `false`. `:purge`d kinds have no runtime presence and are unreachable from
+here. The state lives in a single `:persistent_term` entry, lazily seeded from
+application env on first use — so `Application.put_env/3` after the first
+contracted call has no effect (use `reset/0` to re-seed). See
+[Configuring Contracts](configuration.md#runtime-toggling).
+
+  * `kinds/0` — the list of kinds this module controls.
+  * `enable/1` / `disable/1` — turn a kind on or off; equivalent to
+    `put(kind, true)` / `put(kind, false)`.
+  * `put/2` — set a kind's runtime state to a boolean explicitly.
+  * `enabled?/1` — whether a kind currently evaluates.
+  * `all/0` — the effective state of every kind, as a map.
+  * `reset/0` — discard the cached state and re-seed from current application env.
+
+The toggle is **global**, not per-module: per-module control is a compile-time
+concern, expressed with `:overrides` or `use Bond` options. Toggling a lower kind
+off also skips the kinds above it, per the contract-checking chain.
 
 ## Telemetry
 
@@ -445,7 +476,8 @@ and is human-readable — the exact text is *not* part of the public surface
 
 ## Application config keys
 
-All under the `:bond` application:
+All under the `:bond` application. These are read at compile time (and, for the
+per-kind modes, used to seed the runtime state that `Bond.Config` controls):
 
   * `:preconditions` — mode (`true | false | :purge`).
   * `:postconditions` — mode.

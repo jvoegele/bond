@@ -369,8 +369,8 @@ multi-struct heads, and per-module configuration.
 
 A struct `@invariant` constrains a *value*. To constrain the state of a running
 `GenServer` — checked after every callback, catching inline state mutations a
-struct invariant would miss — add `use Bond.Server` and declare a
-`@state_invariant`. A `@transition_invariant` goes further, relating the prior
+struct invariant would miss — add `use Bond.Server` **after** `use GenServer` and
+declare a `@state_invariant`. A `@transition_invariant` goes further, relating the prior
 state (`old_state`) to the next (`new_state`) across each transition:
 
 ```elixir

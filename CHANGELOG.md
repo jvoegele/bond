@@ -2335,7 +2335,7 @@ call site with a migration message.
   it with `@pre`/`@post`. The capture rewrite passes the original input
   through cleanly.
 
-- **`Bond.Compiler.Invariants.detect_struct_params/2`** — internal helper
+- **Bond.Compiler.Invariants.detect_struct_params/2** — internal helper
   that finds every struct-bearing parameter in a function head, returning a
   list of `{:bound, var, idx}` or `{:destructure, idx}` descriptors.
   Replaces the single-struct `find_struct_arg/2` removed below.

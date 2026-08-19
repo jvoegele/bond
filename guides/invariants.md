@@ -180,9 +180,8 @@ guide works through both.
 ## Stateful contracts for processes
 
 A struct `@invariant` constrains every *value* of a type. `Bond.Server` constrains
-the *state of a running `GenServer`*: do `use GenServer` and `use Bond.Server`
-(in that order), then declare module-wide invariants Bond checks around the
-server's callbacks.
+the *state of a running `GenServer`*: `use Bond.Server` **after** `use GenServer`,
+then declare module-wide invariants Bond checks around the server's callbacks.
 
 ```elixir
 defmodule Counter do
