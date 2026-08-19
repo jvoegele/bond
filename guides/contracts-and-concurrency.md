@@ -128,10 +128,10 @@ the counter in the function `result`.
 
 ## Strengthening the State module with invariants
 
-Bond 0.13.0 added `@invariant` declarations that constrain properties of a
-struct across *every* public function in its defining module — rather than a
-single function at a time. For the `Counter.State` module above we can express
-a structural property of the state as an invariant:
+An `@invariant` constrains a property of a struct across *every* public function
+in its defining module, rather than one function at a time. For the
+`Counter.State` module above we can express a structural property of the state
+as an invariant:
 
 ```elixir
 defmodule Counter.State do
@@ -170,35 +170,17 @@ processes one message at a time, and its state is touched only from inside the
 server process. There is no interleaving to defend against — which makes it the
 natural home for the strongest stateful contracts Bond offers.
 
-`Bond.Server` adds two module-wide annotations that Bond checks around the
-server's state-transition callbacks. Because the checks run *inside the server
-process, on its own sequentially-processed state*, they are race-free by
-construction:
+`Bond.Server` adds two module-wide annotations: `@state_invariant`, a property of
+the state itself, and `@transition_invariant`, a relation between the state
+before a transition and the state after. Because the checks run *inside the
+server process, on its own sequentially-processed state*, they are race-free by
+construction.
 
-```elixir
-defmodule Counter do
-  use GenServer
-  use Bond.Server
-
-  @state_invariant      non_negative: state.count >= 0
-  @transition_invariant monotonic:    new_state.count >= old_state.count
-
-  @impl true
-  def init(n), do: {:ok, %{count: n}}
-
-  @impl true
-  def handle_call(:inc, _from, state), do: {:reply, :ok, %{state | count: state.count + 1}}
-
-  @impl true
-  def handle_cast(:dec, state), do: {:noreply, %{state | count: state.count - 1}}
-end
-```
-
-`@state_invariant` is a property of the state itself, checked after `init/1`
-establishes the initial state and after each
-`handle_call`/`handle_cast`/`handle_info`/`handle_continue`/`code_change` returns
-a new one. The `non_negative` invariant raises `Bond.InvariantError` (with `:kind`
-`:state_invariant`) from inside the server, naming the callback it failed after.
+The [Invariants](invariants.md#stateful-contracts-for-processes) guide is the
+reference for both — the `Counter` example, which callbacks each one fires
+after, the bindings, and how they configure. This section is about something
+that guide doesn't cover: *why* they can promise what a shared-state contract
+cannot.
 
 > #### Invariants guard *produced* states, not *incoming* ones {: .info}
 >
@@ -213,28 +195,26 @@ a new one. The `non_negative` invariant raises `Bond.InvariantError` (with `:kin
 > is caught, drive the server through a transition that would *produce* it, rather
 > than feeding the bad state straight into a callback.
 
-### Transition invariants
+### What serialization buys you
 
-`@transition_invariant` is the temporal cousin: a relation between the prior
-state (`old_state`) and the next state (`new_state`) that must hold across *every*
-transition. It has no struct-level analog — a struct `@invariant` constrains every
-*value*, whereas a transition invariant constrains every *change*. (In
-Design by Contract terms it is a *history constraint*, in the sense of Liskov &
-Wing — but Bond treats it as one more flavour of invariant.)
+A transition invariant constrains every *change*, where a struct `@invariant`
+constrains every *value*. (In Design by Contract terms it is a *history
+constraint*, in the sense of Liskov & Wing.) It has no struct-level analog, and
+that is not an accident: relating a before-state to an after-state only means
+something if nothing can intervene between them.
 
-The `monotonic` invariant above — "the counter never decreases" — is exactly the
-kind of property the racy `Agent` counter at the start of this guide could *not*
-soundly assert: there, a concurrent update could slip between the `old` snapshot
-and the comparison. Inside a `GenServer`, transitions are serialized, so the
-relation is meaningful. The `:dec` callback violates it and raises
-`Bond.InvariantError` (with `:kind` `:transition_invariant`), naming the transition
-it failed across.
+"The counter never decreases" is exactly the property the racy `Agent` counter at
+the start of this guide could *not* soundly assert. There, a concurrent update
+could slip between the `old` snapshot and the comparison, so the assertion would
+fail on perfectly correct code — a contract that cries wolf is worse than none.
+Inside a `GenServer`, transitions are serialized, so the same sentence becomes
+meaningful: a violation means the *server* is wrong, not that two callers raced.
 
-Transition invariants are checked across the four message-handling callbacks
-(`handle_call`/`handle_cast`/`handle_info`/`handle_continue`). `init/1` and
-`code_change/3` are treated as *re-creations* — they establish a new state but
-have no comparable prior state — so only `@state_invariant` applies to them; an
-upgrade in `code_change/3` may legitimately break a monotonic relation.
+That is the first half of this guide arrived at from the other direction. There,
+we weakened `count_incremented_by_1` to `count_increased`, because that was all a
+shared `Agent` could honestly promise. Here the concurrency model is strong
+enough that nothing has to be given up — the strongest form of the assertion is
+also the true one.
 
 ### How this relates to the State-struct pattern
 
@@ -255,8 +235,7 @@ mind:
     server. Use `@state_invariant` for properties of the *server's* state as a
     whole, and as a safety net over callbacks that change state directly.
 
-Like every Bond contract, `@state_invariant` and `@transition_invariant` honour
-configuration: they share the `:invariants` kind, so
-`Bond.Config.disable(:invariants)` turns them off at runtime and
-`use Bond.Server, invariants: :purge` compiles them out of a production build.
-See `Bond.Server` for the full reference.
+To drive either flavour from a property test — including
+`server_invariants_hold/2`, which explores the server's *reachable* states rather
+than the ones you thought to generate — see
+[Testing Contracts](testing-contracts.md#testing-bond-servers).

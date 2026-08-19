@@ -394,9 +394,13 @@ end
 
 Because the checks run inside the serialized server process, they are race-free —
 even a temporal property like "the counter never decreases". A `:dec` cast that
-drops `count` below the previous value raises `Bond.InvariantError`. See
-`Bond.Server` and the
-[Contracts in a Concurrent World](contracts-and-concurrency.md) guide.
+drops `count` below the previous value raises `Bond.InvariantError`.
+
+This `Counter` is the running example of the
+[Invariants](invariants.md#stateful-contracts-for-processes) guide, which is the
+reference for both annotations; `Bond.Server` is the module reference, and
+[Contracts in a Concurrent World](contracts-and-concurrency.md) explains why a
+`GenServer` can promise things a shared `Agent` cannot.
 
 ## Deciding what runs in production
 
