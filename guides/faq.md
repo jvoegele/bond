@@ -49,8 +49,8 @@ For concrete numbers — how many nanoseconds each contract kind adds per
 call, and how much compile time Bond costs per module — see the
 [Overhead](overhead.md) guide. Headline figures from the reference
 environment: a `:purge`d contract is free; an enabled `@pre` adds ~78
-ns/call; an enabled `@invariant` (entry + exit) adds ~216 ns/call; Bond
-compile-time overhead is ~35 ms per module that uses contracts.
+ns/call; an enabled `@invariant` (entry + exit) adds ~212 ns/call; Bond
+compile-time overhead is ~33 ms per module that uses contracts.
 
 ## Can I toggle contracts at runtime without recompiling?
 

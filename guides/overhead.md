@@ -25,8 +25,8 @@ The short version, for the impatient:
     leave them off by default in production, flip on for incident
     debugging."
 
-Compile-time overhead is roughly **35 ms per module** that uses Bond
-with a few contracts. For a 200-module app, that's about 7 seconds added
+Compile-time overhead is roughly **30–35 ms per module** that uses Bond
+with a few contracts. For a 200-module app, that's about 6–7 seconds added
 to a clean `mix compile`. Incremental compiles only re-run on changed
 files, so the cost is amortized after the first build.
 
@@ -64,27 +64,39 @@ startup overhead a subprocess `mix compile` would add. The disk-write
 cost of an actual `mix compile` adds a roughly constant amount across
 both kinds, so it cancels out of the differential reported here.
 
-### Results — 200 modules, median of 5 runs
+### Results — 200 modules, one representative run
 
 | Kind | Total | Per module |
 | --- | ---: | ---: |
-| Baseline (no Bond) | 520 ms | 2.6 ms/module |
-| With Bond (every module + 6 contracts) | 7431 ms | 37.2 ms/module |
-| **Overhead added by Bond** | **6911 ms** | **35 ms/module** |
+| Baseline (no Bond) | 448 ms | 2.2 ms/module |
+| With Bond (every module + 6 contracts) | 7429 ms | 37.1 ms/module |
+| **Overhead added by Bond** | **6980 ms** | **35 ms/module** |
 
-Ratio: ~14× baseline — but treat the ratio as the soft number here. The
-**per-module overhead** reproduces to within a few percent across runs
-(6911 ms and 6945 ms on two consecutive runs); the ratio swings between
-about 14× and 17× on the same machine, because the 200-module baseline
-is small enough (~0.5 s) that ordinary scheduling noise moves the
-denominator. Compare per-module deltas, not ratios.
+One run is not the whole picture, and this benchmark is noisier than it
+looks. Across eight whole-benchmark runs on the reference host, the
+per-module overhead ranged **31–35 ms** (median ~33). Treat the figure as
+"about 30–35 ms per module", not as three significant figures.
+
+> #### Don't compare ratios {: .warning}
+>
+> The `Ratio: N× baseline` line the benchmark prints is the least stable
+> number it produces, and it should not be used to compare anything. Sixteen
+> runs on one quiet machine, over code with no measurable difference between
+> revisions, produced ratios from **14.3× to 19.2×**.
+>
+> The cause is the denominator. The Bond half is a ~7 s measurement and varies
+> by about ±6%; the baseline half is a ~0.4 s measurement of 200 trivial
+> modules and varies by more than ±20%, because at that duration scheduling and
+> GC noise are a large fraction of the total. Dividing by it amplifies that
+> noise rather than cancelling it. Compare **per-module overhead in
+> milliseconds** instead.
 
 For a typical application:
 
-  * **100 modules using Bond:** ~3.5 s of additional `mix compile` time
+  * **100 modules using Bond:** ~3 s of additional `mix compile` time
     on a clean build.
-  * **500 modules:** ~18 s.
-  * **1000+ modules:** ~35 s — still amortized away by incremental
+  * **500 modules:** ~17 s.
+  * **1000+ modules:** ~33 s — still amortized away by incremental
     compilation after the first build, but long enough to be felt in a
     "watch for changes and rebuild" loop, and worth measuring against
     your own codebase with `bench/compile_overhead.exs` before deciding
@@ -104,8 +116,12 @@ compilation. Measured alternatives that avoid it — emitting no `try`, or
 moving it into Bond's runtime behind a closure — both cost two to three times
 more *per call*, so the trade also happens to favour this shape at runtime.
 The measurements are in
-[#96](https://github.com/jvoegele/bond/issues/96), and CI now guards the
-figure against drifting further.
+[#96](https://github.com/jvoegele/bond/issues/96), and CI runs this benchmark
+on every build to catch a further step change. The figure has been stable
+since: a bisect puts every release from 1.2.0 through 1.13.2 at 9–11 ms per
+module, the `try/rescue` change takes it to ~31, and 1.14.0 through the current
+`main` are indistinguishable from each other when the two are measured
+alternately on the same machine.
 
 Bond starts a `:gen_statem` per compiling module (stopped in
 `__after_compile__`), so the per-module overhead is roughly constant
@@ -123,13 +139,23 @@ repeats per cell; median reported (more robust to GC pauses and
 scheduler pre-emption than mean). Min and max from the 7 samples are
 also reported so the spread is visible.
 
-The table below is one representative run. Whole-benchmark invocations
-also vary: three consecutive runs on the reference host agreed within a
-few ns on every cell except the `:purge` rows and the struct baseline,
-which sit close enough to the noise floor (~10 ns) that a single run can
-misreport them by 5–10 ns. If a `:purge` row looks *faster* than
-baseline on your machine, that is measurement noise, not a speedup —
-`:purge` emits no wrapper, so baseline is exactly what it should cost.
+The cells below are medians across **five** whole-benchmark runs, not a single
+run. That extra layer matters: the `true` rows reproduce to within a few percent
+run-to-run, but the `:purge` rows and the struct baseline sit close to the noise
+floor (~10 ns) and are bimodal across VM starts — the same cell lands near 11 ns
+on some runs and near 18 ns on others, apparently depending on where the VM
+happens to place things. A single run can therefore report a `:purge` row as
+*faster* than baseline. That is noise, not a speedup: `:purge` emits no wrapper,
+so baseline is exactly what it should cost.
+
+Two things the absolute numbers include, and one they don't. The measured loop
+is `for _ <- 1..N, do: fun.()`, which **accumulates a list of N results**, so
+every figure below carries the cost of a cons plus the eventual GC — a constant
+of a few ns added uniformly to every cell, baseline included. It therefore
+cancels out of the `Δ over baseline` columns, which is why those are the columns
+to read. What the numbers do *not* include is the cost of a contract that
+*fails*: every measurement is on the passing path, since that is the one a
+running system takes.
 
 Each contract kind is measured in three modes:
 
@@ -147,8 +173,8 @@ to the default `true` value, and then evaluates the contract expression.
 
 | Function shape | ns/call |
 | --- | ---: |
-| plain function `def f(x), do: x` | 11.3 |
-| struct function `def f(%__MODULE__{} = s), do: s` | 13.9 |
+| plain function `def f(x), do: x` | 11.7 |
+| struct function `def f(%__MODULE__{} = s), do: s` | 15.0 |
 
 ### `@pre` only — `@pre is_number(x)` on a plain function
 
@@ -156,7 +182,7 @@ Only the precondition wrapper is emitted; all other kinds `:purge`d.
 
 | Mode | ns/call | Δ over baseline |
 | --- | ---: | ---: |
-| `:purge` | 10.7 | ~0 (essentially baseline) |
+| `:purge` | 11.2 | ~0 (essentially baseline) |
 | `false` (runtime-disabled) | 24.7 | +13 ns |
 | `true` (enabled) | 89.4 | +78 ns |
 
@@ -181,9 +207,9 @@ numbers isolate the invariant.
 
 | Mode | ns/call | Δ over baseline (struct) |
 | --- | ---: | ---: |
-| `:purge` | 14.0 | ~0 (essentially baseline) |
-| `false` (runtime-disabled) | 34.9 | +21 ns |
-| `true` (enabled) | 229.4 | +216 ns |
+| `:purge` | 13.6 | ~0 (essentially baseline) |
+| `false` (runtime-disabled) | 33.9 | +19 ns |
+| `true` (enabled) | 226.6 | +212 ns |
 
 `@invariant` is more expensive than `@pre` or `@post` because it fires
 twice (on entry, on exit) and does a struct-shape check on the return
@@ -195,7 +221,7 @@ value to decide whether to fire the post-check.
 | --- | ---: | ---: |
 | `:purge` | 11.0 | ~0 (essentially baseline) |
 | `false` (runtime-disabled) | 20.0 | +9 ns |
-| `true` (enabled) | 272.3 | +261 ns |
+| `true` (enabled) | 263.9 | +252 ns |
 
 An enabled `check/1` is the most expensive single assertion in the table —
 noticeably dearer than an enabled `@pre` evaluating the same predicate. A
@@ -212,9 +238,9 @@ The one row that exercises the generated code at realistic width.
 
 | Mode | ns/call |
 | --- | ---: |
-| plain `f/6`, no Bond | 12.3 |
-| `:purge` | 9.6 |
-| `true` (enabled) | 181.4 |
+| plain `f/6`, no Bond | 12.2 |
+| `:purge` | 9.5 |
+| `true` (enabled) | 178.6 |
 
 An enabled `@pre` + `@post` with an `old/1` capture over six parameters
 costs about the same as the same pair over one parameter (173.9 ns above).
