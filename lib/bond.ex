@@ -30,7 +30,8 @@ defmodule Bond do
   @type assertion_expression :: {atom(), Macro.metadata(), list()}
 
   @doc """
-  `use Bond` enables `@pre`, `@post`, and `check/1` annotations in the using module.
+  `use Bond` enables the `@pre`, `@post`, and `@invariant` annotations, the `check/1` macro,
+  and `defcontract`/`@apply_contract` in the using module.
 
   When the module also inherits contracts (`use Bond, behaviours: […]`), `@pre_weaken` and
   `@post_strengthen` are additionally available to *refine* an inherited contract — weakening a

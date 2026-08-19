@@ -118,7 +118,7 @@ compile time by the reference validator.
     module, read through that module's generated reflection at compile time.
 
 ```elixir
-defmodule Ledger do
+defmodule Bookkeeping do
   use Bond
 
   @apply_contract {Money, :withdrawal}      # arity 2 → Money.withdrawal/2
@@ -212,7 +212,7 @@ module, letting the behaviour author name a shared agreement once and reference 
 from multiple callbacks:
 
 ```elixir
-defmodule Ledger do
+defmodule Accounts do
   use Bond.Behaviour
 
   defcontract ledger_op(account, amount) do
@@ -228,7 +228,7 @@ defmodule Ledger do
 end
 ```
 
-Implementers see no difference — `use Bond, behaviours: [Ledger]` inherits
+Implementers see no difference — `use Bond, behaviours: [Accounts]` inherits
 `withdraw/2` and `deposit/2` with the same canonical argument names and assertions
 as if the contracts had been written with plain `@pre`/`@post`.
 
@@ -296,7 +296,7 @@ defmodule Audited do
 end
 
 defmodule AuditedAccount do
-  use Bond, behaviours: [Ledger]  # Ledger @post: result.balance >= 0
+  use Bond, behaviours: [Accounts]  # Accounts @post: result.balance >= 0
 
   @apply_contract {Audited, :audit_trail}
   @impl true
@@ -306,7 +306,7 @@ end
 
 `AuditedAccount.withdraw/2` enforces both the inherited `non_negative` postcondition
 and the `audit_written?` assertion. The inherited `@pre` and canonical argument names
-from `Ledger` remain in force.
+from `Accounts` remain in force.
 
 Only **zero-argument** contracts may be combined with behaviour inheritance — they
 reference only `result` and so do not conflict with the inherited contract's canonical

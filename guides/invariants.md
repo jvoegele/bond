@@ -3,9 +3,14 @@
 `@pre` and `@post` constrain a single call. An `@invariant` constrains a *type* —
 every value of a struct produced by or passed into its own module's public API.
 
-This guide covers struct invariants. For the state of a running process, see
-[Contracts in a Concurrent World](contracts-and-concurrency.md), which covers
-`Bond.Server`'s `@state_invariant` and `@transition_invariant`.
+Bond has two flavours, and this guide is the reference for both: **struct
+invariants** (`@invariant`), and the **process-state invariants** a
+`Bond.Server` adds (`@state_invariant` and `@transition_invariant`, covered
+under [Stateful contracts for processes](#stateful-contracts-for-processes)).
+
+For *why* a `GenServer` is the right home for stateful contracts — and why an
+`Agent` is not — see
+[Contracts in a Concurrent World](contracts-and-concurrency.md).
 
 ## `@invariant` for struct modules
 
@@ -171,18 +176,19 @@ this matches Eiffel's class-locality and keeps cross-module ownership
 clean.
 
 For a **`GenServer`**'s process state, `Bond.Server` adds `@state_invariant`
-and `@transition_invariant` — see "Stateful contracts for processes" below. For
-**`Agent`** state and other state shared across processes there is no separate
-feature: keep the state in a struct and declare invariants on that struct's
-module. The [Contracts in a Concurrent World](contracts-and-concurrency.md)
-guide works through both.
+and `@transition_invariant` — see
+[Stateful contracts for processes](#stateful-contracts-for-processes) below.
+For **`Agent`** state and other state shared across processes there is no
+separate feature: keep the state in a struct and declare invariants on that
+struct's module, which the
+[Contracts in a Concurrent World](contracts-and-concurrency.md) guide works
+through.
 
 ## Stateful contracts for processes
 
 A struct `@invariant` constrains every *value* of a type. `Bond.Server` constrains
-the *state of a running `GenServer`*: do `use GenServer` and `use Bond.Server`
-(in that order), then declare module-wide invariants Bond checks around the
-server's callbacks.
+the *state of a running `GenServer`*: `use Bond.Server` **after** `use GenServer`,
+then declare module-wide invariants Bond checks around the server's callbacks.
 
 ```elixir
 defmodule Counter do
@@ -223,5 +229,11 @@ decreases" is race-free: the `:dec` cast above raises it across `handle_cast/2`.
 `@state_invariant`/`@transition_invariant` share the `:invariants` configuration kind —
 they honour the contract-checking chain, toggle with `Bond.Config.disable(:invariants)`,
 and compile out under `invariants: :purge`. Declaring either outside a `Bond.Server`
-module is a compile warning. See `Bond.Server` and the
-[Contracts in a Concurrent World](contracts-and-concurrency.md) guide.
+module is a compile warning.
+
+See `Bond.Server` for the module reference,
+[Contracts in a Concurrent World](contracts-and-concurrency.md) for why the
+serialized server process is what makes a temporal property like `monotonic`
+soundly assertable at all, and
+[Testing Contracts](testing-contracts.md#testing-bond-servers) for driving these
+invariants from a property test.

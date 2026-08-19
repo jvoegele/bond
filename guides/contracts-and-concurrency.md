@@ -9,13 +9,9 @@ a shared ETS table, a database row. Another process can interleave between
 the `old` snapshot and the postcondition's read of the new state, and the
 comparison becomes meaningless.
 
-This guide works through the problem with a concrete example — a counter
-built on top of `Agent` — and ends with a refactoring pattern that recovers
-the strong "incremented by exactly one" assertion the natural postcondition
-wanted to express. The first half shows the race; the second half shows the
-fix.
-
-Here's the `Counter` module:
+The rest of this guide works the problem through a counter built on `Agent`:
+first the race, then the refactoring that recovers the strong assertion the
+obvious postcondition was reaching for.
 
 ```elixir
 defmodule Counter do
@@ -37,18 +33,18 @@ defmodule Counter do
 end
 ```
 
-This implementation suffers from race conditions that invalidate the
-correctness of the postcondition for `increment_count/1`: if a concurrent
-call to `increment_count/1` is interleaved anywhere between the two calls
-to `get_count/1` (in the postcondition) and the call to `Agent.update/3`,
-then the postcondition will fail because the count will have increased by
-more than one. (Keep in mind that `old` expressions are resolved prior to
-function execution, and therefore the call to `get_count/1` in
-`old(get_count(agent))` will be done before the call to `Agent.update/3`.)
+That postcondition is wrong, and not because the function is. `old` expressions
+resolve *before* the body runs, so evaluating this contract means three separate
+trips to the agent: the `old(get_count(agent))` snapshot, then
+`Agent.update/3`, then the `get_count(agent)` read in the postcondition. A
+concurrent `increment_count/1` interleaving at any point between them pushes the
+count up by more than one, and the assertion fails on code that did exactly what
+it was asked to.
 
-The first thing we can do is weaken the assertion in the postcondition so
-that it guarantees only that the count increased by some amount, not
-necessarily by exactly one:
+That is the worst failure mode a contract can have — it accuses correct code, so
+it teaches you to distrust the contract rather than the program. The honest move
+is to assert only what the implementation can actually guarantee: that the count
+went up.
 
 ```elixir
   @post count_increased: get_count(agent) > old(get_count(agent))
@@ -57,22 +53,18 @@ necessarily by exactly one:
   end
 ```
 
-As noted, this is the best we can do with the given implementation of the
-`Counter` that uses an `Agent` to store the counter state. Since agents are
-stateful, concurrent processes that do not offer a locking mechanism or
-isolated transactions, concurrent state updates between evaluation of
-preconditions, postconditions, and the function body are always a possibility.
-Given this possibility, contracts can only make weak guarantees about the
-observable effects of concurrent state updates, such as `count_increased` above.
+`count_increased` survives interleaving, because "went up" stays true however
+many other processes also incremented. It is also much less than the function
+actually does, and that gap is the cost of the design: an `Agent` offers neither
+locking nor isolated transactions, so an update can always land between a
+contract's reads. While the state lives there, weak guarantees are the only
+honest ones.
 
-However, we can do better if we refactor the `Counter` module to separate the
-purely functional parts from the stateful and concurrent parts of the code.
-This oft-given advice is useful not only in the context of contract
-programming, but also for improving the testability and design of the code in
-general.
-
-Let's see how we can do this for our `Counter` module, and how it strengthens
-the assertions that we can express:
+The gap closes by moving the interesting part somewhere a contract can speak
+precisely — separating the pure transformation from the process that stores it.
+The advice is not specific to contracts; it improves testability and design
+generally. What contracts add is a way to *see* the payoff, because the
+assertions you can write get stronger the moment the logic stops being shared:
 
 ```elixir
 defmodule Counter do
@@ -105,33 +97,29 @@ defmodule Counter do
 end
 ```
 
-We've added a nested `State` module to our existing `Counter` module. It
-defines a struct with a single `:count` field, and contains one pure function,
-namely `increment_count/1`. (This is for demonstration purposes only.
-In a more realistic scenario, the `Counter.State` module would exist
-independently of the `Counter` module and be given a name appropriate to its
-role in the problem domain, and would likely have more than just one field
-in the struct.)
+The agent now holds a `State` struct, and `Counter.increment_count/1` delegates
+the actual arithmetic to the pure `Counter.State.increment_count/1`. (The nested
+module keeps the example short. In real code the state module would stand on its
+own, named for its role in the domain, with more than one field.)
 
-The `Counter` module has been updated to use an instance of this struct as the
-agent state, and `Counter.increment_count/1` uses
-`Counter.State.increment_count/1` to update the state in a purely functional
-way.
+The wrapper's contract is unchanged — `count_increased` is still the strongest
+thing `Counter.increment_count/1` can promise, because it still talks to a shared
+`Agent`. What changed is that the interesting claim now has somewhere to live:
+`count_incremented_by_1` is exactly true of `Counter.State.increment_count/1`,
+because that function is pure. Nothing can interleave with a value.
 
-Although the `count_increased` assertion is still the strongest we can provide
-for `Counter.increment_count/1`, the stronger `count_incremented_by_1`
-assertion is now valid for `Counter.State.increment_count/1`, because it is a
-pure function! Also notice that we didn't even need to use an `old` expression
-in `count_incremented_by_1` since that assertion is comparing the "old" value
-of the counter from the function argument to the "new" or "current" value of
-the counter in the function `result`.
+Notice it no longer needs `old/1` either. The "before" state arrived as an
+argument and the "after" state is the `result`, so both are in scope at once —
+which is the general shape of the thing. `old/1` exists to reach outside the
+function for a before-state; a function that takes its input and returns its
+output has no outside to reach into.
 
 ## Strengthening the State module with invariants
 
-Bond 0.13.0 added `@invariant` declarations that constrain properties of a
-struct across *every* public function in its defining module — rather than a
-single function at a time. For the `Counter.State` module above we can express
-a structural property of the state as an invariant:
+An `@invariant` constrains a property of a struct across *every* public function
+in its defining module, rather than one function at a time. For the
+`Counter.State` module above we can express a structural property of the state
+as an invariant:
 
 ```elixir
 defmodule Counter.State do
@@ -148,18 +136,17 @@ defmodule Counter.State do
 end
 ```
 
-The `non_negative_count` invariant is now checked automatically on the way
-into and out of `Counter.State.increment_count/1` — and on the way into and
-out of *every* other public function in `Counter.State` that takes or returns
-a `%Counter.State{}`. We didn't have to repeat it as a precondition or
-postcondition; declaring it once as an invariant covers the module's whole
-public API.
+`non_negative_count` is now checked on the way into and out of
+`Counter.State.increment_count/1`, and of *every* other public function in
+`Counter.State` that takes or returns a `%Counter.State{}` — including the ones
+added later. It never had to be repeated as a precondition or postcondition;
+declaring it once covers the module's whole public API.
 
-This pattern — pure functional state struct with invariants, plus a thin
-stateful wrapper — gives the strongest guarantees Bond can provide for code
-that has both pure and concurrent concerns. Structure your modules this way
-when you can; the strong contracts on the State struct, plus the weakened
-postconditions on the Agent wrapper, together describe what's actually true.
+This is the shape to reach for whenever code has both pure and concurrent
+concerns: a state struct carrying the real contracts, wrapped by a thin stateful
+shell carrying weak ones. Neither half is the whole truth on its own. Together
+they say what is actually the case — that the transformation is exact, and that
+observing it through a shared process is not.
 
 ## Process state invariants with `Bond.Server`
 
@@ -170,35 +157,17 @@ processes one message at a time, and its state is touched only from inside the
 server process. There is no interleaving to defend against — which makes it the
 natural home for the strongest stateful contracts Bond offers.
 
-`Bond.Server` adds two module-wide annotations that Bond checks around the
-server's state-transition callbacks. Because the checks run *inside the server
-process, on its own sequentially-processed state*, they are race-free by
-construction:
+`Bond.Server` adds two module-wide annotations: `@state_invariant`, a property of
+the state itself, and `@transition_invariant`, a relation between the state
+before a transition and the state after. Because the checks run *inside the
+server process, on its own sequentially-processed state*, they are race-free by
+construction.
 
-```elixir
-defmodule Counter do
-  use GenServer
-  use Bond.Server
-
-  @state_invariant      non_negative: state.count >= 0
-  @transition_invariant monotonic:    new_state.count >= old_state.count
-
-  @impl true
-  def init(n), do: {:ok, %{count: n}}
-
-  @impl true
-  def handle_call(:inc, _from, state), do: {:reply, :ok, %{state | count: state.count + 1}}
-
-  @impl true
-  def handle_cast(:dec, state), do: {:noreply, %{state | count: state.count - 1}}
-end
-```
-
-`@state_invariant` is a property of the state itself, checked after `init/1`
-establishes the initial state and after each
-`handle_call`/`handle_cast`/`handle_info`/`handle_continue`/`code_change` returns
-a new one. The `non_negative` invariant raises `Bond.InvariantError` (with `:kind`
-`:state_invariant`) from inside the server, naming the callback it failed after.
+The [Invariants](invariants.md#stateful-contracts-for-processes) guide is the
+reference for both — the `Counter` example, which callbacks each one fires
+after, the bindings, and how they configure. This section is about something
+that guide doesn't cover: *why* they can promise what a shared-state contract
+cannot.
 
 > #### Invariants guard *produced* states, not *incoming* ones {: .info}
 >
@@ -213,28 +182,26 @@ a new one. The `non_negative` invariant raises `Bond.InvariantError` (with `:kin
 > is caught, drive the server through a transition that would *produce* it, rather
 > than feeding the bad state straight into a callback.
 
-### Transition invariants
+### What serialization buys you
 
-`@transition_invariant` is the temporal cousin: a relation between the prior
-state (`old_state`) and the next state (`new_state`) that must hold across *every*
-transition. It has no struct-level analog — a struct `@invariant` constrains every
-*value*, whereas a transition invariant constrains every *change*. (In
-Design by Contract terms it is a *history constraint*, in the sense of Liskov &
-Wing — but Bond treats it as one more flavour of invariant.)
+A transition invariant constrains every *change*, where a struct `@invariant`
+constrains every *value*. (In Design by Contract terms it is a *history
+constraint*, in the sense of Liskov & Wing.) It has no struct-level analog, and
+that is not an accident: relating a before-state to an after-state only means
+something if nothing can intervene between them.
 
-The `monotonic` invariant above — "the counter never decreases" — is exactly the
-kind of property the racy `Agent` counter at the start of this guide could *not*
-soundly assert: there, a concurrent update could slip between the `old` snapshot
-and the comparison. Inside a `GenServer`, transitions are serialized, so the
-relation is meaningful. The `:dec` callback violates it and raises
-`Bond.InvariantError` (with `:kind` `:transition_invariant`), naming the transition
-it failed across.
+"The counter never decreases" is exactly the property the racy `Agent` counter at
+the start of this guide could *not* soundly assert. There, a concurrent update
+could slip between the `old` snapshot and the comparison, so the assertion would
+fail on perfectly correct code — a contract that cries wolf is worse than none.
+Inside a `GenServer`, transitions are serialized, so the same sentence becomes
+meaningful: a violation means the *server* is wrong, not that two callers raced.
 
-Transition invariants are checked across the four message-handling callbacks
-(`handle_call`/`handle_cast`/`handle_info`/`handle_continue`). `init/1` and
-`code_change/3` are treated as *re-creations* — they establish a new state but
-have no comparable prior state — so only `@state_invariant` applies to them; an
-upgrade in `code_change/3` may legitimately break a monotonic relation.
+That is the first half of this guide arrived at from the other direction. There,
+we weakened `count_incremented_by_1` to `count_increased`, because that was all a
+shared `Agent` could honestly promise. Here the concurrency model is strong
+enough that nothing has to be given up — the strongest form of the assertion is
+also the true one.
 
 ### How this relates to the State-struct pattern
 
@@ -255,8 +222,7 @@ mind:
     server. Use `@state_invariant` for properties of the *server's* state as a
     whole, and as a safety net over callbacks that change state directly.
 
-Like every Bond contract, `@state_invariant` and `@transition_invariant` honour
-configuration: they share the `:invariants` kind, so
-`Bond.Config.disable(:invariants)` turns them off at runtime and
-`use Bond.Server, invariants: :purge` compiles them out of a production build.
-See `Bond.Server` for the full reference.
+To drive either flavour from a property test — including
+`server_invariants_hold/2`, which explores the server's *reachable* states rather
+than the ones you thought to generate — see
+[Testing Contracts](testing-contracts.md#testing-bond-servers).

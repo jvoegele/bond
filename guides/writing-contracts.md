@@ -138,6 +138,137 @@ assertion expressions, so you can use these operators directly:
 
 See `Bond.Predicates` for the full list of predicates and operators.
 
+## Quantified assertions
+
+To assert something about *every* element of a collection — or that *some*
+element exists — use the `forall` and `exists` macros. Both take one
+comprehension-style generator and one predicate:
+
+```elixir
+defmodule Stats do
+  use Bond
+
+  @pre all_positive: forall(x <- samples, x > 0)
+  def geometric_mean(samples) do
+    :math.pow(Enum.product(samples), 1 / length(samples))
+  end
+end
+
+defmodule Roster do
+  use Bond
+
+  @pre has_admin: exists(u <- users, u.role == :admin)
+  def authorize(users), do: Enum.map(users, &grant/1)
+end
+```
+
+You could write both with `Enum.all?/2` and `Enum.any?/2`. What you would lose is
+the diagnosis: when one of those fails, Bond can only report that the whole
+expression was false. A quantifier reports **which element** broke the contract,
+and where it was:
+
+```
+** (Bond.PreconditionError) precondition failed for call to Stats.geometric_mean/1
+|   label: :all_positive
+|   assertion: forall(x <- samples, x > 0)
+|   counterexample: element at index 3 (-2) does not satisfy `x > 0`
+|   binding: [samples: [5, 2, 8, -2]]
+```
+
+`exists` instead reports that no element satisfied the predicate, and how many it
+looked at:
+
+```
+** (Bond.PreconditionError) precondition failed for call to Roster.authorize/1
+|   label: :has_admin
+|   assertion: exists(u <- users, u.role == :admin)
+|   counterexample: no element of `users` satisfies `u.role == :admin` (3 elements)
+|   binding: [users: [%{role: :user}, %{role: :guest}, %{role: :user}]]
+```
+
+Both forms:
+
+- **short-circuit** — `forall` stops at the first violation, `exists` at the
+  first witness;
+- return ordinary booleans, so they **compose** with `and`, `or`, `not`, and `~>`;
+- work in `@pre`, `@post` (including quantifying over `result`), `@invariant`,
+  the `Bond.Server` `@state_invariant` / `@transition_invariant`, and `check/1`.
+
+Quantifying over `result` reads naturally — asserting a function returns a sorted
+list, for example:
+
+```elixir
+@post sorted: forall(i <- 0..(length(result) - 2)//1,
+                     Enum.at(result, i) <= Enum.at(result, i + 1))
+def sort(list), do: Enum.sort(list)
+```
+
+### Not a `for` comprehension (or a property generator)
+
+The `pattern <- enumerable` syntax is borrowed from `for` comprehensions — and
+looks like StreamData's `check all` / `gen all` — but the resemblance is only
+skin-deep. Two differences worth internalising:
+
+- The right-hand side of `<-` is a **plain `Enumerable`** (a list, range, map,
+  stream…), not a StreamData generator. The closest analogues are `Enum.all?/2`
+  and `Enum.any?/2`, not `for` or property testing.
+- The trailing expression is the **predicate being asserted**, *not a filter*. In
+  `check all x <- list, x > 0 do … end`, the `x > 0` clause *discards*
+  non-matching values; in `forall(x <- list, x > 0)` it is the thing that must
+  hold for every element. There is no `do` block.
+
+So read `forall(x <- items, x > 0)` as the logical statement "for all `x` in
+`items`, `x > 0`" — not "for the `x` in `items` where `x > 0`".
+
+The generator *pattern* follows the same rule: it binds, and a structural pattern
+also asserts shape, so a non-matching element **fails** the contract rather than
+being skipped. See [Quantifier generators bind and assert shape](writing-sound-assertions.md#quantifier-generators-bind-and-assert-shape-they-do-not-filter)
+for that distinction and the `~>` idiom that recovers comprehension-style
+filtering.
+
+### Limitations
+
+- Each quantifier takes **one generator and one predicate**; there is no
+  multi-generator or filter syntax as in a `for` comprehension. Nest a quantifier
+  inside another for a Cartesian assertion. (A `for`-style multi-generator call
+  raises a clear compile-time error pointing you at nesting.)
+- When several quantifiers appear in one assertion — including **nested** ones —
+  the element-level `counterexample:` line reflects the outermost
+  (last-evaluated) quantifier to fail. For a single, bare quantifier it is exact.
+  The plain truthy/falsy verdict is always correct regardless. See
+  [Why does my nested `forall` report the row instead of the failing inner element?](faq.md#why-does-my-nested-forall-report-the-row-instead-of-the-failing-inner-element)
+
+### Large collections, streams, and side effects
+
+A quantifier **enumerates the collection** — once, lazily, stopping at the first
+violation (`forall`) or first witness (`exists`). Keep three things in mind:
+
+- **Cost is `O(n)`.** Quantifying over a large collection on a hot path adds a
+  full (short-circuited) traversal to every call, just like `Enum.all?/2` would.
+  This is what Bond's runtime gate is for — disable the kind in production
+  (`config :bond, postconditions: false`, or `Bond.Config` at runtime; see
+  [Choosing what runs in production](configuration.md#choosing-what-runs-in-production))
+  so the traversal never runs there.
+
+- **Assertions must be side-effect-free — and enumerating a lazy stream is a side
+  effect.** A `@post` that quantifies over a stream `result` (or a `@pre` over a
+  stream argument) will *enumerate that stream* to check the predicate. For a
+  pure, re-enumerable stream that merely **doubles the work** — the stream runs
+  once for the contract and again for the caller. But for a stream backed by a
+  **one-shot or effectful source** — `IO.stream/2` over stdin, an
+  `Ecto.Repo.stream` cursor, a socket via `Stream.resource/3` — the contract's
+  enumeration consumes or re-fires the resource, corrupting what the caller
+  receives. **Don't quantify over an effectful stream.** If the producer is
+  finite and pure and you really want to assert over it, materialise it
+  explicitly — `forall(x <- Enum.to_list(result), …)` — so the cost and the
+  single enumeration are visible at the call site.
+
+- **Never quantify over an infinite stream.** `forall` returns only when an
+  element *fails*, and `exists` only when one *succeeds* — so an all-passing
+  `forall` (or a no-match `exists`) over `Stream.cycle/1`, `Stream.iterate/2`,
+  etc. never terminates. Bond can't detect this (a finite and an infinite stream
+  have the same type); it's on you to quantify only over bounded collections.
+
 ## `old` expressions
 
 `old` expressions in postconditions snapshot a value before the function
@@ -184,7 +315,8 @@ closure.
 > `GenServer.call/3`, a shared ETS table — another process can
 > interleave and the comparison becomes meaningless. The
 > [Contracts in a Concurrent World](contracts-and-concurrency.md)
-> guide covers the locking pattern that recovers correctness there.
+> guide works through what you can honestly assert in that case, and the
+> refactoring that lets you assert the strong version somewhere else.
 > For struct-based state machines, `@invariant` is usually a better
 > fit than `old` — it constrains every operation's input and output
 > struct rather than a single delta.
@@ -252,25 +384,6 @@ are a closed sublanguage (no `exists`/`forall`, no function calls, no
 comparisons against computed values). When you need Bond's **full** assertion
 syntax on a value nested inside a result — a list inside a map inside a tuple,
 say — reach for `where` or `whenever`.
-
-> #### `forall` and `exists` {: .info}
->
-> `forall` and `exists`, mentioned just above and used in the examples below,
-> are Bond's two quantifiers. `forall(x <- enum, predicate)` asserts the
-> predicate holds for every element; `exists(x <- enum, predicate)` asserts it
-> holds for at least one.
->
-> They earn their place by what they say on failure. A hand-written
-> `Enum.all?(urls, &String.starts_with?(&1, "https"))` reports only `false`;
-> `forall` reports the **counterexample** — which element failed, and its index:
->
-> ```
-> |   counterexample: element at index 2 ("http://x") does not satisfy `String.starts_with?(u, "https")`
-> ```
->
-> See `Bond.Predicates` for both, and the
-> [Quantified assertions](getting-started.md#quantified-assertions)
-> section of the Getting Started guide for a walkthrough.
 
 Both wrap a destructuring binding and scope a set of ordinary (optionally
 labelled) assertions to the names it binds:

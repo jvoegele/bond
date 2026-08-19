@@ -110,11 +110,11 @@ defmodule Bond.MixProject do
       extras: [
         {"LICENSE", [title: "License"]},
         "CHANGELOG.md",
-        # Ordered roughly by the questions a reader asks, in the order they ask
-        # them: learn it, write it, write it well, then the larger features, then
-        # the operational concerns, then reference.
+        # Guides are ordered by the questions a reader asks, in the order they
+        # ask them: learn it, write it, write it well, then the larger features,
+        # then the operational concerns. Reference is for lookup rather than
+        # reading, so it sits after the narrative path.
         "guides/getting-started.md",
-        "guides/cheatsheet.cheatmd",
         "guides/writing-contracts.md",
         "guides/writing-sound-assertions.md",
         "guides/invariants.md",
@@ -125,11 +125,37 @@ defmodule Bond.MixProject do
         "guides/configuration.md",
         "guides/overhead.md",
         "guides/telemetry.md",
-        "guides/stability.md",
-        "guides/public-api.md",
+        "guides/cheatsheet.cheatmd",
         "guides/faq.md",
+        "guides/public-api.md",
+        "guides/stability.md",
         "guides/about.md",
         "guides/history.md"
+      ],
+      groups_for_extras: [
+        Guides: [
+          "guides/getting-started.md",
+          "guides/writing-contracts.md",
+          "guides/writing-sound-assertions.md",
+          "guides/invariants.md",
+          "guides/reusable-contracts.md",
+          "guides/contract-inheritance.md",
+          "guides/contracts-and-concurrency.md",
+          "guides/testing-contracts.md",
+          "guides/configuration.md",
+          "guides/overhead.md",
+          "guides/telemetry.md"
+        ],
+        Reference: [
+          "guides/cheatsheet.cheatmd",
+          "guides/faq.md",
+          "guides/public-api.md",
+          "guides/stability.md"
+        ],
+        About: [
+          "guides/about.md",
+          "guides/history.md"
+        ]
       ],
       filter_modules: fn _module, meta ->
         # This allows us to tag modules as internal and exclude them from the API docs as follows:

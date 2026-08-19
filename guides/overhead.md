@@ -18,26 +18,28 @@ The short version, for the impatient:
     range latencies), contracts are noise. For tight inner loops at
     nanosecond scales, the cost shows up — measure for your case.
   * **`false`** keeps the wrapper compiled in but consults runtime
-    config to decide whether to evaluate. Roughly half the cost of
-    `true` for simple predicates; useful for "compile contracts in but
+    config to decide whether to evaluate. A **small fraction** of the
+    cost of `true` — the gate is one `:persistent_term` read and the
+    predicate never runs, so it lands between roughly 7% and 30% of the
+    enabled cost depending on the kind. Useful for "compile contracts in but
     leave them off by default in production, flip on for incident
     debugging."
 
-Compile-time overhead is roughly **30 ms per module** that uses Bond
-with a few contracts. For a 200-module app, that's about 6 seconds added
+Compile-time overhead is roughly **35 ms per module** that uses Bond
+with a few contracts. For a 200-module app, that's about 7 seconds added
 to a clean `mix compile`. Incremental compiles only re-run on changed
 files, so the cost is amortized after the first build.
 
 ## Reference environment
 
-All numbers below are from a single host, measured 2026-08-04:
+All numbers below are from a single host, measured 2026-08-19:
 
   * **CPU:** Apple M3 Max (16 cores)
   * **RAM:** 64 GB
-  * **OS:** macOS 26.5
+  * **OS:** macOS 26.5.2
   * **Erlang/OTP:** 29 (erts-17.0.1, JIT)
   * **Elixir:** 1.20.0
-  * **Bond:** 1.13.2
+  * **Bond:** 1.14.0
 
 Don't take these as a promise across hardware. A Linux x86_64 server,
 a Raspberry Pi, or a CI runner will produce different numbers. The
@@ -66,24 +68,29 @@ both kinds, so it cancels out of the differential reported here.
 
 | Kind | Total | Per module |
 | --- | ---: | ---: |
-| Baseline (no Bond) | 423 ms | 2.1 ms/module |
-| With Bond (every module + 6 contracts) | 6498 ms | 32.5 ms/module |
-| **Overhead added by Bond** | **6074 ms** | **30 ms/module** |
+| Baseline (no Bond) | 520 ms | 2.6 ms/module |
+| With Bond (every module + 6 contracts) | 7431 ms | 37.2 ms/module |
+| **Overhead added by Bond** | **6911 ms** | **35 ms/module** |
 
-Ratio: ~15× baseline.
+Ratio: ~14× baseline — but treat the ratio as the soft number here. The
+**per-module overhead** reproduces to within a few percent across runs
+(6911 ms and 6945 ms on two consecutive runs); the ratio swings between
+about 14× and 17× on the same machine, because the 200-module baseline
+is small enough (~0.5 s) that ordinary scheduling noise moves the
+denominator. Compare per-module deltas, not ratios.
 
 For a typical application:
 
-  * **100 modules using Bond:** ~3 s of additional `mix compile` time on
-    a clean build.
-  * **500 modules:** ~15 s.
-  * **1000+ modules:** ~30 s — still amortized away by incremental
+  * **100 modules using Bond:** ~3.5 s of additional `mix compile` time
+    on a clean build.
+  * **500 modules:** ~18 s.
+  * **1000+ modules:** ~35 s — still amortized away by incremental
     compilation after the first build, but long enough to be felt in a
     "watch for changes and rebuild" loop, and worth measuring against
     your own codebase with `bench/compile_overhead.exs` before deciding
     whether `:purge`ing in dev is worth it.
 
-That figure is roughly three times what it was through 1.13.2, and the
+That figure is roughly three times what it was before 1.14.0, and the
 increase is deliberate. Bond wraps each emitted assertion in a `try/rescue`
 so that an assertion which *raises* — rather than returning true or false —
 is reported as a `Bond.AssertionEvaluationError` naming the contract, instead
@@ -116,6 +123,14 @@ repeats per cell; median reported (more robust to GC pauses and
 scheduler pre-emption than mean). Min and max from the 7 samples are
 also reported so the spread is visible.
 
+The table below is one representative run. Whole-benchmark invocations
+also vary: three consecutive runs on the reference host agreed within a
+few ns on every cell except the `:purge` rows and the struct baseline,
+which sit close enough to the noise floor (~10 ns) that a single run can
+misreport them by 5–10 ns. If a `:purge` row looks *faster* than
+baseline on your machine, that is measurement noise, not a speedup —
+`:purge` emits no wrapper, so baseline is exactly what it should cost.
+
 Each contract kind is measured in three modes:
 
   * **`:purge`** — contract removed at compile time. No wrapper.
@@ -132,8 +147,8 @@ to the default `true` value, and then evaluates the contract expression.
 
 | Function shape | ns/call |
 | --- | ---: |
-| plain function `def f(x), do: x` | 10.7 |
-| struct function `def f(%__MODULE__{} = s), do: s` | 11.8 |
+| plain function `def f(x), do: x` | 11.3 |
+| struct function `def f(%__MODULE__{} = s), do: s` | 13.9 |
 
 ### `@pre` only — `@pre is_number(x)` on a plain function
 
@@ -141,22 +156,22 @@ Only the precondition wrapper is emitted; all other kinds `:purge`d.
 
 | Mode | ns/call | Δ over baseline |
 | --- | ---: | ---: |
-| `:purge` | 10.1 | ~0 (essentially baseline) |
-| `false` (runtime-disabled) | 24.8 | +14 ns |
-| `true` (enabled) | 83.9 | +73 ns |
+| `:purge` | 10.7 | ~0 (essentially baseline) |
+| `false` (runtime-disabled) | 24.7 | +13 ns |
+| `true` (enabled) | 89.4 | +78 ns |
 
 ### `@post` over `@pre` (marginal cost of adding `@post`)
 
 The chain `preconditions ≤ postconditions` means measuring `@post` in
 isolation isn't possible. This row reports cost when `@pre` is already
 enabled, with `@post` varying. Subtract the `@pre` `true` row above
-(83.9 ns) to get the marginal cost of `@post`.
+(89.4 ns) to get the marginal cost of `@post`.
 
 | Mode | ns/call | Marginal Δ over `@pre` true |
 | --- | ---: | ---: |
-| `:purge` | 85.1 | +1 ns |
-| `false` (runtime-disabled) | 98.2 | +14 ns |
-| `true` (enabled) | 178.8 | +95 ns |
+| `:purge` | 89.4 | ~0 ns |
+| `false` (runtime-disabled) | 96.3 | +7 ns |
+| `true` (enabled) | 173.9 | +85 ns |
 
 ### `@invariant` only — `@invariant subject.value > 0` on a struct method
 
@@ -166,9 +181,9 @@ numbers isolate the invariant.
 
 | Mode | ns/call | Δ over baseline (struct) |
 | --- | ---: | ---: |
-| `:purge` | 12.5 | ~0 (essentially baseline) |
-| `false` (runtime-disabled) | 38.3 | +27 ns |
-| `true` (enabled) | 226.7 | +215 ns |
+| `:purge` | 14.0 | ~0 (essentially baseline) |
+| `false` (runtime-disabled) | 34.9 | +21 ns |
+| `true` (enabled) | 229.4 | +216 ns |
 
 `@invariant` is more expensive than `@pre` or `@post` because it fires
 twice (on entry, on exit) and does a struct-shape check on the return
@@ -178,9 +193,9 @@ value to decide whether to fire the post-check.
 
 | Mode | ns/call | Δ over baseline |
 | --- | ---: | ---: |
-| `:purge` | 10.2 | ~0 (essentially baseline) |
-| `false` (runtime-disabled) | 20.2 | +10 ns |
-| `true` (enabled) | 251.0 | +240 ns |
+| `:purge` | 11.0 | ~0 (essentially baseline) |
+| `false` (runtime-disabled) | 20.0 | +9 ns |
+| `true` (enabled) | 272.3 | +261 ns |
 
 An enabled `check/1` is the most expensive single assertion in the table —
 noticeably dearer than an enabled `@pre` evaluating the same predicate. A
@@ -188,8 +203,8 @@ noticeably dearer than an enabled `@pre` evaluating the same predicate. A
 with an already-assembled argument list; a `check/1` sits in the middle of
 your function body, where the assertion has to be evaluated against the
 full local scope at that point. Disabled (`false`), it collapses to the
-cheapest row in the table: the gate reads one `:persistent_term` entry and
-skips everything.
+cheapest `false` row in the table: the gate reads one `:persistent_term`
+entry and skips everything.
 
 ### Wide signature — `@pre` + `@post` with `old/1` on an arity-6 function
 
@@ -197,12 +212,12 @@ The one row that exercises the generated code at realistic width.
 
 | Mode | ns/call |
 | --- | ---: |
-| plain `f/6`, no Bond | 10.8 |
-| `:purge` | 8.5 |
-| `true` (enabled) | 179.7 |
+| plain `f/6`, no Bond | 12.3 |
+| `:purge` | 9.6 |
+| `true` (enabled) | 181.4 |
 
 An enabled `@pre` + `@post` with an `old/1` capture over six parameters
-costs about the same as the same pair over one parameter (178.8 ns above).
+costs about the same as the same pair over one parameter (173.9 ns above).
 The failure `binding()` snapshot is captured lazily and only materialised
 when an assertion actually fails, so per-call cost tracks the number of
 assertions, not the width of the signature.

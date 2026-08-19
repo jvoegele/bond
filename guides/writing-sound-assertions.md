@@ -197,9 +197,10 @@ a noisy contract linter gets turned off wholesale. In particular it **cannot** c
 type-disjoint comparison above (`key not in remaining_keys`) — knowing `remaining_keys` holds
 maps requires type inference Bond does not do without Dialyzer. Nor can it catch a precondition
 made unreachable by a guard, which needs the same reasoning about what the guard admits. Those
-classes stay your responsibility, which is why the "prove it can fail once" habit still matters. (Watching an
-assertion that never fails is also the job of contract-coverage tooling — the dynamic complement
-to this static check.)
+classes stay your responsibility, which is why the "prove it can fail once" habit still matters.
+Watching for an assertion that never fails is the dynamic complement to this static check, and
+`Bond.Coverage` does it across a whole suite — see
+[Contract coverage](testing-contracts.md#contract-coverage-which-assertions-have-you-seen-fail).
 
 To silence it — e.g. for a deliberate placeholder assertion — disable it globally:
 

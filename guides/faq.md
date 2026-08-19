@@ -48,9 +48,9 @@ inert so a remote console can switch them on mid-incident. See
 For concrete numbers — how many nanoseconds each contract kind adds per
 call, and how much compile time Bond costs per module — see the
 [Overhead](overhead.md) guide. Headline figures from the reference
-environment: a `:purge`d contract is free; an enabled `@pre` adds ~75
-ns/call; an enabled `@invariant` (entry + exit) adds ~215 ns/call; Bond
-compile-time overhead is ~30 ms per module that uses contracts.
+environment: a `:purge`d contract is free; an enabled `@pre` adds ~78
+ns/call; an enabled `@invariant` (entry + exit) adds ~216 ns/call; Bond
+compile-time overhead is ~35 ms per module that uses contracts.
 
 ## Can I toggle contracts at runtime without recompiling?
 
@@ -1392,7 +1392,7 @@ the refinement hooks only, not the ordinary `@pre`/`@post` machinery.)
 ## Why does my nested `forall` report the row instead of the failing inner element?
 
 The `forall`/`exists` quantifiers (see the
-[Quantified assertions](getting-started.md#quantified-assertions) guide) capture
+[Quantified assertions](writing-contracts.md#quantified-assertions) guide) capture
 the offending element through a single per-process side channel that Bond reads
 when the assertion fails. That channel holds **one** failure at a time, so when
 quantifiers nest, the *outermost* (last-evaluated) failure wins:
