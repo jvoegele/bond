@@ -219,8 +219,10 @@ organised around the questions that tend to arrive in this order:
   * **[Getting Started](guides/getting-started.md)** — a walkthrough that builds
     one example at a time. The place to go next.
   * **[Writing Contracts](guides/writing-contracts.md)** — the full reference for
-    `@pre`, `@post`, `check/1`, `old/1`, the assertion language, and how contracts
-    appear in your generated docs.
+    `@pre`, `@post`, `check/1`, `old/1`, `forall`/`exists`, the assertion
+    language, and how contracts appear in your generated docs.
+  * **[Cheatsheet](guides/cheatsheet.cheatmd)** — every form Bond gives you on
+    one page, once you know what you're looking for.
   * **[Writing sound assertions](guides/writing-sound-assertions.md)** — the
     mistakes that make a contract silently vacuous, and how to avoid them.
   * **[Invariants](guides/invariants.md)** — properties of a struct, checked at

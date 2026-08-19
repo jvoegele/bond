@@ -9,13 +9,9 @@ a shared ETS table, a database row. Another process can interleave between
 the `old` snapshot and the postcondition's read of the new state, and the
 comparison becomes meaningless.
 
-This guide works through the problem with a concrete example — a counter
-built on top of `Agent` — and ends with a refactoring pattern that recovers
-the strong "incremented by exactly one" assertion the natural postcondition
-wanted to express. The first half shows the race; the second half shows the
-fix.
-
-Here's the `Counter` module:
+The rest of this guide works the problem through a counter built on `Agent`:
+first the race, then the refactoring that recovers the strong assertion the
+obvious postcondition was reaching for.
 
 ```elixir
 defmodule Counter do
@@ -37,18 +33,18 @@ defmodule Counter do
 end
 ```
 
-This implementation suffers from race conditions that invalidate the
-correctness of the postcondition for `increment_count/1`: if a concurrent
-call to `increment_count/1` is interleaved anywhere between the two calls
-to `get_count/1` (in the postcondition) and the call to `Agent.update/3`,
-then the postcondition will fail because the count will have increased by
-more than one. (Keep in mind that `old` expressions are resolved prior to
-function execution, and therefore the call to `get_count/1` in
-`old(get_count(agent))` will be done before the call to `Agent.update/3`.)
+That postcondition is wrong, and not because the function is. `old` expressions
+resolve *before* the body runs, so evaluating this contract means three separate
+trips to the agent: the `old(get_count(agent))` snapshot, then
+`Agent.update/3`, then the `get_count(agent)` read in the postcondition. A
+concurrent `increment_count/1` interleaving at any point between them pushes the
+count up by more than one, and the assertion fails on code that did exactly what
+it was asked to.
 
-The first thing we can do is weaken the assertion in the postcondition so
-that it guarantees only that the count increased by some amount, not
-necessarily by exactly one:
+That is the worst failure mode a contract can have — it accuses correct code, so
+it teaches you to distrust the contract rather than the program. The honest move
+is to assert only what the implementation can actually guarantee: that the count
+went up.
 
 ```elixir
   @post count_increased: get_count(agent) > old(get_count(agent))
@@ -57,22 +53,18 @@ necessarily by exactly one:
   end
 ```
 
-As noted, this is the best we can do with the given implementation of the
-`Counter` that uses an `Agent` to store the counter state. Since agents are
-stateful, concurrent processes that do not offer a locking mechanism or
-isolated transactions, concurrent state updates between evaluation of
-preconditions, postconditions, and the function body are always a possibility.
-Given this possibility, contracts can only make weak guarantees about the
-observable effects of concurrent state updates, such as `count_increased` above.
+`count_increased` survives interleaving, because "went up" stays true however
+many other processes also incremented. It is also much less than the function
+actually does, and that gap is the cost of the design: an `Agent` offers neither
+locking nor isolated transactions, so an update can always land between a
+contract's reads. While the state lives there, weak guarantees are the only
+honest ones.
 
-However, we can do better if we refactor the `Counter` module to separate the
-purely functional parts from the stateful and concurrent parts of the code.
-This oft-given advice is useful not only in the context of contract
-programming, but also for improving the testability and design of the code in
-general.
-
-Let's see how we can do this for our `Counter` module, and how it strengthens
-the assertions that we can express:
+The gap closes by moving the interesting part somewhere a contract can speak
+precisely — separating the pure transformation from the process that stores it.
+The advice is not specific to contracts; it improves testability and design
+generally. What contracts add is a way to *see* the payoff, because the
+assertions you can write get stronger the moment the logic stops being shared:
 
 ```elixir
 defmodule Counter do
@@ -105,26 +97,22 @@ defmodule Counter do
 end
 ```
 
-We've added a nested `State` module to our existing `Counter` module. It
-defines a struct with a single `:count` field, and contains one pure function,
-namely `increment_count/1`. (This is for demonstration purposes only.
-In a more realistic scenario, the `Counter.State` module would exist
-independently of the `Counter` module and be given a name appropriate to its
-role in the problem domain, and would likely have more than just one field
-in the struct.)
+The agent now holds a `State` struct, and `Counter.increment_count/1` delegates
+the actual arithmetic to the pure `Counter.State.increment_count/1`. (The nested
+module keeps the example short. In real code the state module would stand on its
+own, named for its role in the domain, with more than one field.)
 
-The `Counter` module has been updated to use an instance of this struct as the
-agent state, and `Counter.increment_count/1` uses
-`Counter.State.increment_count/1` to update the state in a purely functional
-way.
+The wrapper's contract is unchanged — `count_increased` is still the strongest
+thing `Counter.increment_count/1` can promise, because it still talks to a shared
+`Agent`. What changed is that the interesting claim now has somewhere to live:
+`count_incremented_by_1` is exactly true of `Counter.State.increment_count/1`,
+because that function is pure. Nothing can interleave with a value.
 
-Although the `count_increased` assertion is still the strongest we can provide
-for `Counter.increment_count/1`, the stronger `count_incremented_by_1`
-assertion is now valid for `Counter.State.increment_count/1`, because it is a
-pure function! Also notice that we didn't even need to use an `old` expression
-in `count_incremented_by_1` since that assertion is comparing the "old" value
-of the counter from the function argument to the "new" or "current" value of
-the counter in the function `result`.
+Notice it no longer needs `old/1` either. The "before" state arrived as an
+argument and the "after" state is the `result`, so both are in scope at once —
+which is the general shape of the thing. `old/1` exists to reach outside the
+function for a before-state; a function that takes its input and returns its
+output has no outside to reach into.
 
 ## Strengthening the State module with invariants
 
@@ -148,18 +136,17 @@ defmodule Counter.State do
 end
 ```
 
-The `non_negative_count` invariant is now checked automatically on the way
-into and out of `Counter.State.increment_count/1` — and on the way into and
-out of *every* other public function in `Counter.State` that takes or returns
-a `%Counter.State{}`. We didn't have to repeat it as a precondition or
-postcondition; declaring it once as an invariant covers the module's whole
-public API.
+`non_negative_count` is now checked on the way into and out of
+`Counter.State.increment_count/1`, and of *every* other public function in
+`Counter.State` that takes or returns a `%Counter.State{}` — including the ones
+added later. It never had to be repeated as a precondition or postcondition;
+declaring it once covers the module's whole public API.
 
-This pattern — pure functional state struct with invariants, plus a thin
-stateful wrapper — gives the strongest guarantees Bond can provide for code
-that has both pure and concurrent concerns. Structure your modules this way
-when you can; the strong contracts on the State struct, plus the weakened
-postconditions on the Agent wrapper, together describe what's actually true.
+This is the shape to reach for whenever code has both pure and concurrent
+concerns: a state struct carrying the real contracts, wrapped by a thin stateful
+shell carrying weak ones. Neither half is the whole truth on its own. Together
+they say what is actually the case — that the transformation is exact, and that
+observing it through a shared process is not.
 
 ## Process state invariants with `Bond.Server`
 

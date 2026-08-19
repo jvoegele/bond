@@ -1392,7 +1392,7 @@ the refinement hooks only, not the ordinary `@pre`/`@post` machinery.)
 ## Why does my nested `forall` report the row instead of the failing inner element?
 
 The `forall`/`exists` quantifiers (see the
-[Quantified assertions](getting-started.md#quantified-assertions) guide) capture
+[Quantified assertions](writing-contracts.md#quantified-assertions) guide) capture
 the offending element through a single per-process side channel that Bond reads
 when the assertion fails. That channel holds **one** failure at a time, so when
 quantifiers nest, the *outermost* (last-evaluated) failure wins:

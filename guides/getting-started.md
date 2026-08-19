@@ -174,9 +174,10 @@ undefined for a negative sample (the product's root is complex), and a roster
 with nobody able to authorize is a roster that will deadlock the moment someone
 needs approval.
 
-You could already write these with `Enum.all?/2` and `Enum.any?/2`, but
-when one fails Bond can only tell you the *whole* expression was false.
-`forall`/`exists` capture **which element** broke the contract:
+You could already write these with `Enum.all?/2` and `Enum.any?/2`. What you
+would lose is the diagnosis — when one of those fails, Bond can only tell you
+the *whole* expression was false. A quantifier names **which element** broke the
+contract:
 
 ```
 ** (Bond.PreconditionError) precondition failed for call to Stats.geometric_mean/1
@@ -186,97 +187,17 @@ when one fails Bond can only tell you the *whole* expression was false.
 |   binding: [samples: [5, 2, 8, -2]]
 ```
 
-`exists` instead reports that no element satisfied the predicate:
+`exists` instead reports that no element satisfied the predicate.
 
-```
-** (Bond.PreconditionError) precondition failed for call to Roster.authorize/1
-|   label: :has_admin
-|   assertion: exists(u <- users, u.role == :admin)
-|   counterexample: no element of `users` satisfies `u.role == :admin` (3 elements)
-|   binding: [users: [%{role: :user}, %{role: :guest}, %{role: :user}]]
-```
+One thing to unlearn straight away: despite the syntax, the trailing expression
+is the **predicate being asserted**, not a filter — `forall(x <- items, x > 0)`
+means "for all `x` in `items`, `x > 0`", not "for the `x` in `items` where
+`x > 0`". There is no `do` block, and the right-hand side of `<-` is a plain
+`Enumerable`, not a StreamData generator.
 
-Both forms:
-
-- **short-circuit** — `forall` stops at the first violation, `exists` at
-  the first witness;
-- return ordinary booleans, so they **compose** with `and`, `or`, `not`,
-  and `~>`;
-- work in `@pre`, `@post` (including quantifying over `result`),
-  `@invariant`, and `Bond.check/1`.
-
-A `@post` that quantifies over the result reads naturally — for example,
-asserting a function returns a sorted list:
-
-```elixir
-@post sorted: forall(i <- 0..(length(result) - 2)//1,
-                     Enum.at(result, i) <= Enum.at(result, i + 1))
-def sort(list), do: Enum.sort(list)
-```
-
-### Not a `for` comprehension (or a property generator)
-
-The `pattern <- enumerable` syntax is borrowed from `for` comprehensions —
-and looks like StreamData's `check all` / `gen all` — but the resemblance
-is only skin-deep. Two differences worth internalising:
-
-- The right-hand side of `<-` is a **plain `Enumerable`** (a list, range,
-  map, stream…), not a StreamData generator. The closest analogues are
-  `Enum.all?/2` and `Enum.any?/2`, not `for` or property testing.
-- The trailing expression is the **predicate being asserted**, *not a
-  filter*. In `check all x <- list, x > 0 do … end`, the `x > 0` clause
-  *discards* non-matching values; in `forall(x <- list, x > 0)` it is the
-  thing that must hold for every element. There is no `do` block.
-
-So read `forall(x <- items, x > 0)` as the logical statement "for all `x`
-in `items`, `x > 0`" — not "for the `x` in `items` where `x > 0`".
-
-### Limitations
-
-- Each quantifier takes **one generator and one predicate**; there is no
-  multi-generator or filter syntax as in a `for` comprehension. Nest a
-  quantifier inside another for a Cartesian assertion. (A `for`-style
-  multi-generator call raises a clear compile-time error pointing you at
-  nesting.)
-- When several quantifiers appear in one assertion — including **nested**
-  ones — the element-level `counterexample:` line reflects the outermost
-  (last-evaluated) quantifier to fail. For a single, bare quantifier it is
-  exact. The plain truthy/falsy verdict is always correct regardless.
-
-### Large collections, streams, and side effects
-
-A quantifier **enumerates the collection** — once, lazily, stopping at the
-first violation (`forall`) or first witness (`exists`). Keep three things
-in mind:
-
-- **Cost is `O(n)`.** Quantifying over a large collection on a hot path
-  adds a full (short-circuited) traversal to every call, just like
-  `Enum.all?/2` would. This is exactly what Bond's runtime gate is for —
-  disable the kind in production (`config :bond, postconditions: false`, or
-  `Bond.Config` at runtime; see
-  [Deciding what runs in production](#deciding-what-runs-in-production))
-  so the traversal never runs there.
-
-- **Assertions must be side-effect-free — and enumerating a lazy stream is
-  a side effect.** A `@post` that quantifies over a stream `result` (or a
-  `@pre` over a stream argument) will *enumerate that stream* to check the
-  predicate. For a pure, re-enumerable stream that merely **doubles the
-  work** — the stream runs once for the contract and again for the caller.
-  But for a stream backed by a **one-shot or effectful source** —
-  `IO.stream/2` over stdin, an `Ecto.Repo.stream` cursor, a socket via
-  `Stream.resource/3` — the contract's enumeration consumes or re-fires the
-  resource, corrupting what the caller receives. **Don't quantify over an
-  effectful stream.** If the producer is finite and pure and you really
-  want to assert over it, materialise it explicitly —
-  `forall(x <- Enum.to_list(result), …)` — so the cost and the single
-  enumeration are visible at the call site.
-
-- **Never quantify over an infinite stream.** `forall` returns only when an
-  element *fails*, and `exists` only when one *succeeds* — so an
-  all-passing `forall` (or a no-match `exists`) over `Stream.cycle/1`,
-  `Stream.iterate/2`, etc. never terminates. Bond can't detect this
-  (a finite and an infinite stream have the same type); it's on you to
-  quantify only over bounded collections.
+See [Quantified assertions](writing-contracts.md#quantified-assertions) for the
+rest: where they may appear, nesting, and the rules for quantifying over large
+collections and streams.
 
 ## `old` expressions in postconditions
 
@@ -285,31 +206,22 @@ the *new* state to the *old* state. The `old/1` macro snapshots a value
 before the function body runs:
 
 ```elixir
-defmodule TurnCounter do
-  use Bond
-
-  # Per-process turn counter stored in the process dictionary. Owned by
-  # the running process, so the snapshot and the post-check observe the
-  # same world.
-  def current_turn, do: Process.get(:turn, 0)
-
-  @post incremented: current_turn() == old(current_turn()) + 1
-  def take_turn do
-    Process.put(:turn, current_turn() + 1)
-    :ok
-  end
+@post incremented: current_turn() == old(current_turn()) + 1
+def take_turn do
+  Process.put(:turn, current_turn() + 1)
+  :ok
 end
 ```
 
-`old` is only available inside `@post`. Bond resolves every `old(...)`
-expression at the start of function execution and threads the captured
-value into the postcondition.
+`old` is only available inside `@post`, and Bond resolves every `old(...)`
+expression at the start of function execution. It is meaningful only for state
+that actually changes: for an immutable parameter `x`, `old(x)` and `x` are the
+same value.
 
-For state shared across processes — an `Agent`, a `GenServer`, an ETS
-table — `old(...)` reads a snapshot that another process can race
-against before the post-check runs. See the
-[Contracts in a Concurrent World](contracts-and-concurrency.md) guide
-for the locking pattern that handles this.
+See [`old` expressions](writing-contracts.md#old-expressions) for the full
+semantics, and [Contracts in a Concurrent World](contracts-and-concurrency.md)
+for what happens when the snapshotted state is shared across processes — where
+another process can race between the snapshot and the post-check.
 
 ## Inline checks
 
@@ -472,7 +384,10 @@ where contracts act as the oracle for random inputs — see the
 
 - The [Writing Contracts](writing-contracts.md) guide is the full reference for
   the annotations and the assertion language, and [Invariants](invariants.md)
-  covers module-wide constraints on every instance of a struct.
+  covers module-wide constraints on every instance of a struct — both flavours,
+  struct and process state.
+- The [Cheatsheet](cheatsheet.cheatmd) puts every form on one page, for once you
+  know what you're looking for and just need the syntax.
 - The [Testing Contracts](testing-contracts.md) guide covers the whole
   testing surface — `Bond.Test`'s example-based assertions and
   `Bond.PropertyTest`'s `contract_holds/2`, `probe_contract/2`, and

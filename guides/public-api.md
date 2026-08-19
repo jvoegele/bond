@@ -144,7 +144,7 @@ through the `Bond.` prefix.
     failing element and its index for `forall`; the absence of a witness for
     `exists`) is part of the public surface; the rendered `counterexample:`
     wording is not. A multi-generator or filter form raises a `CompileError`.
-    See [Quantified assertions](getting-started.md#quantified-assertions).
+    See [Quantified assertions](writing-contracts.md#quantified-assertions).
 
 ## `use Bond` options
 
