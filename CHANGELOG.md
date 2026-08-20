@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-08-20
+
+A documentation release. No behaviour change: no public module, function, macro, diagnostic, or
+telemetry field differs from 1.14.0, and the suite passes unchanged.
+
+The substance is a full read-through of the guides in navigation order, as a new reader meets
+them, plus the corrections that turned up. Three of those corrections were factual errors in
+published advice rather than matters of taste, and one of them had been telling readers to depend
+on a module the stability page did not cover.
+
 ### Internal
 
 - **The compile-order anchors are now `Code.ensure_compiled!/1` calls rather than `require`s, and
@@ -64,7 +74,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Documentation
 
-- **A [cheatsheet](guides/cheatsheet.cheatmd)**, listed after Getting Started. Every form Bond
+- **A [cheatsheet](guides/cheatsheet.cheatmd)**, under Reference. Every form Bond
   provides on one scannable page — the annotation and qualified-call syntaxes, operators and
   quantifiers, `where`/`whenever`, both flavours of invariant, named contracts, inheritance and
   refinement, the configuration kinds and modes, the test-side macros, and the error/telemetry
@@ -87,6 +97,70 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   No behaviour change: nothing gained or lost coverage, and the omissions were clerical rather
   than a deliberate exclusion.
+
+- **Three more public modules were missing from the same page**, and the omission mattered more
+  than the last batch. [Public API surface](guides/public-api.md) declares that the set of modules
+  in the published API docs is the source of truth for "public module", then listed 13 where
+  HexDocs publishes 16:
+
+  - `Bond.Config` — the runtime toggle API. The guides reference it 33 times, `Configuring
+    Contracts` is built around it, and the config-key list on that very page names
+    `Bond.Config.enable/1` and `disable/1`. It was documented everywhere except the page defining
+    what you may depend on. It now has its own section; note that `enabled?/1` and `kinds/0` were
+    undocumented outside the moduledoc.
+  - `Bond.Protocol.Impl` — the opt-in for protocol contract refinement, covered in
+    [Contract Inheritance](guides/contract-inheritance.md) and the cheatsheet.
+  - `Bond.PropertyTest.FilterTooRestrictiveError` — raised by `probe_contract/2` and named in
+    [Testing Contracts](guides/testing-contracts.md). Listed under `Bond.PropertyTest` rather than
+    with the contract errors: it is a test-harness error, not a violation, so it neither shares
+    their struct shape nor fires telemetry.
+
+- **The guides were restructured around what each one is for.** Getting Started had grown from a
+  walkthrough into a condensed tour of the whole library, which forced every downstream page to
+  either restate its material or point backwards into the tutorial:
+
+  - `forall`/`exists` and `old/1` now have their reference treatment in
+    [Writing Contracts](guides/writing-contracts.md), which describes itself as the complete
+    reference for the assertion language and previously sent readers back to the tutorial for
+    both. Getting Started keeps the examples and the counterexample output that make the case.
+  - `Bond.Server`'s `@state_invariant`/`@transition_invariant` have one owner.
+    [Invariants](guides/invariants.md) holds the mechanics — its opening previously disclaimed
+    process-state invariants and then documented them 170 lines later — and
+    [Contracts in a Concurrent World](guides/contracts-and-concurrency.md) holds the argument for
+    why a serialized `GenServer` can promise what a shared `Agent` cannot.
+  - The HexDocs sidebar is grouped into **Guides**, **Reference**, and **About**. License and
+    Changelog previously sat between API Reference and Getting Started.
+
+- **Corrections to published advice.** Each of these was wrong, not merely unclear:
+
+  - [Writing Contracts](guides/writing-contracts.md) told readers the concurrency guide "covers
+    the locking pattern that recovers correctness" for `old/1` over shared state. No such pattern
+    is covered there or anywhere; that guide's answer is to extract a pure core.
+  - [Overhead](guides/overhead.md) claimed `false` costs "roughly half" of `true`. Measured, it is
+    7-30% depending on kind — a runtime-disabled `check/1` is 20ns against 264ns enabled.
+  - The overhead guide's reference environment named a version that could not have produced its
+    own compile-time figure. Both benchmarks were re-run and the environment re-stamped.
+
+- **The overhead numbers now rest on repeated measurement.** Runtime figures are medians across
+  five whole-benchmark runs rather than one run; the guide records that `:purge` rows and the
+  struct baseline are bimodal across VM starts (~11ns vs ~18ns for the same cell), and that the
+  measured loop accumulates a 1M-element list, so absolute ns/call carry a cons and GC that
+  cancels out of the delta columns. Compile-time overhead is stated as a range, 30-35 ms per
+  module.
+
+  The guide now also warns against the `Ratio: Nx baseline` line the compile benchmark prints.
+  Sixteen runs on one quiet machine, across revisions with no measurable difference, produced
+  ratios from 14.3x to 19.2x: the Bond half is a ~7s measurement varying ~6%, the baseline half a
+  ~0.4s measurement varying over 20%, so dividing amplifies noise rather than cancelling it.
+  Compare per-module milliseconds instead.
+
+- **Smaller fixes.** The cheatsheet was reachable only from the sidebar — neither the README's
+  otherwise-exhaustive "Where to go from here" nor Getting Started's "Next steps" linked it.
+  [Writing Sound Assertions](guides/writing-sound-assertions.md) alluded to "contract-coverage
+  tooling" five guides before `Bond.Coverage` is introduced, and now links it. `use Bond`'s own
+  docstring omitted `@invariant` and `defcontract`. Two different `Ledger` modules were defined in
+  one page of [Reusable Contracts](guides/reusable-contracts.md). A stale autolink in this file
+  was the last `mix docs` warning; the docs now build clean.
 
 ## [1.14.0] - 2026-08-05
 
