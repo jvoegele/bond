@@ -110,7 +110,7 @@ defmodule Bond.Compiler.Linter do
             rule: :constant_assertion,
             message:
               "Bond assertion linter: `#{Macro.to_string(expression)}` is always " <>
-                "`#{inspect(value)}` — it can never fail and so asserts nothing. Compare values " <>
+                "`#{inspect(value)}` — #{constant_consequence(value)} Compare values " <>
                 "that could actually differ, or remove the assertion."
           }
         ]
@@ -119,6 +119,16 @@ defmodule Bond.Compiler.Linter do
         []
     end
   end
+
+  # The two constants are opposite defects and want opposite descriptions. An always-truthy
+  # assertion can never fail, so it protects nothing while reading as coverage. An always-falsy
+  # one fails on every call instead — the function is unusable rather than unguarded, which is
+  # the reverse of "asserts nothing".
+  defp constant_consequence(value) when value in [false, nil],
+    do: "it fails on every call, so the contract can never be satisfied."
+
+  defp constant_consequence(_truthy),
+    do: "it can never fail and so asserts nothing."
 
   # --- Rule: self comparison ------------------------------------------------------------------
 
@@ -140,7 +150,7 @@ defmodule Bond.Compiler.Linter do
   defp self_comparison_finding({:or, _, [a, b]} = node) do
     cond do
       dominant?(a, b, true) or dominant?(b, a, true) -> dominance_msg(node, true)
-      negation_pair?(a, b) -> tautology_msg(node, true)
+      negation_pair?(a, b) -> negation_pair_msg(node, true)
       true -> nil
     end
   end
@@ -149,7 +159,7 @@ defmodule Bond.Compiler.Linter do
   defp self_comparison_finding({:and, _, [a, b]} = node) do
     cond do
       dominant?(a, b, false) or dominant?(b, a, false) -> dominance_msg(node, false)
-      negation_pair?(a, b) -> tautology_msg(node, false)
+      negation_pair?(a, b) -> negation_pair_msg(node, false)
       true -> nil
     end
   end
@@ -172,18 +182,25 @@ defmodule Bond.Compiler.Linter do
       rule: :self_comparison,
       message:
         "Bond assertion linter: `#{Macro.to_string(node)}` is always `#{value}` — one operand " <>
-          "forces the result regardless of the other, so it asserts nothing."
+          "forces the result regardless of the other, so #{constant_effect(value)}"
     }
   end
 
-  defp tautology_msg(node, value) do
+  # Covers both `p or not p` (always true) and `p and not p` (always false), so it cannot call
+  # either one a tautology.
+  defp negation_pair_msg(node, value) do
     %{
       rule: :self_comparison,
       message:
         "Bond assertion linter: `#{Macro.to_string(node)}` is always `#{value}` (a term " <>
-          "combined with its own negation) — it asserts nothing."
+          "combined with its own negation) — #{constant_effect(value)}"
     }
   end
+
+  # The clause-length form of `constant_consequence/1` above, for messages that have already
+  # explained *why* the expression is constant and only need to say what that costs.
+  defp constant_effect(value) when value in [false, nil], do: "it fails on every call."
+  defp constant_effect(_truthy), do: "it asserts nothing."
 
   # --- Rule: vacuous quantifier ---------------------------------------------------------------
 

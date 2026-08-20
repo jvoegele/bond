@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The assertion linter no longer describes an always-*false* assertion as one that "can never
+  fail".** Three of its messages shared a single template across the always-true and always-false
+  cases, so a contract that fails on *every* call was reported as one that "asserts nothing" — the
+  exact opposite of what it does. The two are opposite defects: an always-truthy assertion accepts
+  every input and protects nothing; an always-falsy one rejects every input and makes the function
+  unusable. Each now says which it is:
+
+  ```
+  # before
+  `:ok == 200` is always `false` — it can never fail and so asserts nothing.
+
+  # after
+  `:ok == 200` is always `false` — it fails on every call, so the contract can never be satisfied.
+  ```
+
+  Affects the constant-assertion rule and both always-false branches of the self-comparison rule
+  (`false and ready?`, `ready? and not ready?`). The always-true wording is unchanged. Diagnostic
+  prose is not part of the public surface (see [Stability](guides/stability.md)), so this is a
+  message change only — which assertions are flagged, and under which `:rule`, is unaffected.
+
 ## [1.14.1] - 2026-08-20
 
 A documentation release. No behaviour change: no public module, function, macro, diagnostic, or

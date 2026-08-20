@@ -31,6 +31,29 @@ defmodule Bond.Compiler.LinterTest do
       assert_finding(quote(do: :ok == 200), :constant_assertion, ["is always `false`"])
     end
 
+    # An always-FALSE assertion fails on every call; an always-TRUE one can never fail. Those are
+    # opposite defects, and a single shared message described both as "can never fail" — telling a
+    # reader of the always-false case the exact opposite of what their contract does.
+    test "describes an always-false assertion as failing on every call" do
+      assert_finding(
+        quote(do: :ok == 200),
+        :constant_assertion,
+        ["fails on every call", "can never be satisfied"]
+      )
+
+      refute Linter.check(quote(do: :ok == 200))
+             |> hd()
+             |> Map.fetch!(:message) =~ "can never fail"
+    end
+
+    test "describes an always-true assertion as never failing" do
+      assert_finding(
+        quote(do: 1 == 1),
+        :constant_assertion,
+        ["can never fail and so asserts nothing"]
+      )
+    end
+
     test "flags a literal `not in` over a list of map literals as always true" do
       assert_finding(
         quote(do: "x" not in [%{a: 1}, %{b: 2}]),
@@ -104,6 +127,28 @@ defmodule Bond.Compiler.LinterTest do
 
       assert_finding(quote(do: ready? or true), :self_comparison, ["always `true`"])
       assert_finding(quote(do: false and ready?), :self_comparison, ["always `false`"])
+    end
+
+    # Same defect as the constant-assertion rule had: the always-true and always-false cases share
+    # a message, and describing an always-false assertion as one that "asserts nothing" is
+    # backwards — it rejects every input rather than accepting every input.
+    test "distinguishes an always-false dominance from an always-true one" do
+      assert_finding(quote(do: false and ready?), :self_comparison, ["fails on every call"])
+      assert_finding(quote(do: true or ready?), :self_comparison, ["asserts nothing"])
+    end
+
+    test "distinguishes an always-false negation pair from an always-true one" do
+      assert_finding(quote(do: ready? and not ready?), :self_comparison, [
+        "always `false`",
+        "own negation",
+        "fails on every call"
+      ])
+
+      assert_finding(quote(do: ready? or not ready?), :self_comparison, [
+        "always `true`",
+        "own negation",
+        "asserts nothing"
+      ])
     end
 
     test "does not double-flag a fully-constant boolean expression (constant-folding's job)" do
