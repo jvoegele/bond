@@ -91,12 +91,12 @@ contract documentation is emitted as fenced code blocks rather than indented one
   records from a short-lived process and asserts from another one after it has exited.
 
 - **`Bond.Server` state and transition invariants now appear in `Bond.Coverage`.**
-  `Bond.Compiler.Assertion.check_call/2` hard-coded the plain runtime helper, while
-  `@pre`/`@post`/`@invariant` went through a path that selects the coverage-recording variant
-  when `config :bond, coverage: true`. So `@state_invariant` and `@transition_invariant` were
-  checked but never recorded. Because `shape_mismatch_call/2` is built on `check_call/2`, the
-  `where`/`whenever` non-match branch was unrecorded for **every** contract kind, not just
-  servers.
+  The shared `check_call` helper in `Bond.Compiler.Assertion` hard-coded the plain runtime
+  helper, while `@pre`/`@post`/`@invariant` went through a path that selects the
+  coverage-recording variant when `config :bond, coverage: true`. So `@state_invariant` and
+  `@transition_invariant` were checked but never recorded. Because the `where`/`whenever`
+  non-match branch is built on that same helper, it was unrecorded for **every** contract kind,
+  not just servers.
 
   This mattered more than a cosmetic gap: a violated state invariant raises inside the server,
   its supervisor restarts it, and callers absorb the error — so a suite can be green while an
