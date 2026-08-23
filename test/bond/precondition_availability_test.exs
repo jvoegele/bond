@@ -78,7 +78,110 @@ defmodule Bond.PreconditionAvailabilityTest do
     end
   end
 
+  describe "fires when a public precondition calls a `@doc false` public predicate (#110)" do
+    test "the basic case" do
+      assert warns?("""
+             defmodule BondTest.AvailScratch.HiddenBasic do
+               use Bond
+               @doc false
+               def ok?(v), do: is_integer(v)
+               @pre valid: ok?(x)
+               def run(x), do: x
+             end
+             """)
+    end
+
+    test "the message says hidden-from-docs, not private" do
+      # The fix differs — a private predicate is made public, a hidden one has its
+      # `@doc false` removed — so the two must not share wording.
+      [%{message: message}] =
+        availability_warnings("""
+        defmodule BondTest.AvailScratch.HiddenMessage do
+          use Bond
+          @doc false
+          def ok?(v), do: is_integer(v)
+          @pre valid: ok?(x)
+          def run(x), do: x
+        end
+        """)
+
+      assert message =~ "`ok?/1`"
+      assert message =~ "public but hidden from the generated docs by `@doc false`"
+      assert message =~ "Remove the `@doc false`"
+      refute message =~ "a private function (`ok?/1`)"
+    end
+
+    test "reports a private and a hidden predicate in one warning, each with its own wording" do
+      [%{message: message}] =
+        availability_warnings("""
+        defmodule BondTest.AvailScratch.HiddenAndPrivate do
+          use Bond
+          @doc false
+          def shown?(v), do: is_integer(v)
+          @pre valid: shown?(x) and secret?(x)
+          def run(x), do: x
+          defp secret?(v), do: v > 0
+        end
+        """)
+
+      assert message =~ "a private function (`secret?/1`)"
+      assert message =~ "(`shown?/1`) that is public but hidden"
+    end
+
+    test "the last @doc wins, matching Elixir" do
+      refute warns?("""
+             defmodule BondTest.AvailScratch.HiddenThenShown do
+               use Bond
+               @doc false
+               @doc "actually documented"
+               def ok?(v), do: is_integer(v)
+               @pre valid: ok?(x)
+               def run(x), do: x
+             end
+             """)
+    end
+  end
+
+  describe "the documentation argument is not applied where nothing is published (#110)" do
+    test "a caller that is itself @doc false publishes no obligation, so hidden is not reported" do
+      refute warns?("""
+             defmodule BondTest.AvailScratch.HiddenCaller do
+               use Bond
+               @doc false
+               def ok?(v), do: is_integer(v)
+               @doc false
+               @pre valid: ok?(x)
+               def run(x), do: x
+             end
+             """)
+    end
+
+    test "but a private call still is — Meyer's rule is about callability, not publication" do
+      assert warns?("""
+             defmodule BondTest.AvailScratch.HiddenCallerPrivateCall do
+               use Bond
+               @doc false
+               @pre valid: ok?(x)
+               def run(x), do: x
+               defp ok?(v), do: is_integer(v)
+             end
+             """)
+    end
+  end
+
   describe "stays silent where the rule does not apply" do
+    test "an undocumented public predicate still appears in the docs" do
+      # Absence of `@doc` is not `@doc false`: ExDoc lists the function either way.
+      refute warns?("""
+             defmodule BondTest.AvailScratch.Undocumented do
+               use Bond
+               def ok?(v), do: is_integer(v)
+               @pre valid: ok?(x)
+               def run(x), do: x
+             end
+             """)
+    end
+
     test "a public predicate is available to callers" do
       refute warns?("""
              defmodule BondTest.AvailScratch.PublicPredicate do

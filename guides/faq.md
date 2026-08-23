@@ -1176,13 +1176,31 @@ admits, this one is statically decidable: Bond knows which functions are
 private. **So Bond warns:**
 
 ```
-warning: the precondition of public function `send_welcome/2` in `Mailer` calls
-a private function (`valid_email?/1`). A precondition is an obligation on the
-caller, so a caller that cannot call `valid_email?/1` cannot check it before
-calling — and Bond renders the assertion into the generated docs, where
-`valid_email?/1` does not appear. Make the predicate public, or inline the
-condition. (Meyer's Precondition Availability rule, OOSC §11.7.)
+warning: the precondition of public function `send_welcome/2` in `Mailer` is
+stated in terms its callers cannot reach. It calls a private function
+(`valid_email?/1`): a precondition is an obligation on the caller, so a caller
+that cannot call `valid_email?/1` cannot check it before calling — and Bond
+renders the assertion into the generated docs, where `valid_email?/1` does not
+appear. Make the predicate public, or inline the condition. (Meyer's
+Precondition Availability rule, OOSC §11.7.)
 ```
+
+### `@doc false` defeats it the same way
+
+`defp` is the strict reading of Meyer's rule — Elixir's only visibility boundary
+is `def` versus `defp`. But the harm above is a *documentation* harm, and a
+**public** function carrying `@doc false` causes it just as surely: it is
+callable, so Meyer's rule is satisfied, yet it does not appear in the docs where
+the obligation is published. A caller reading them cannot discover what they are
+required to satisfy.
+
+Bond warns for that case too, with wording that names it, because the fix is
+different — remove the `@doc false` rather than make the predicate public.
+
+One deliberate exception: if the *contracted* function is itself `@doc false`,
+its precondition is not published either, so nothing is defeated and Bond stays
+quiet. A private call still warns there, since callability does not depend on
+what is documented.
 
 A warning rather than an error, because an app-internal module whose callers
 are all in the same project suffers the documentation harm without the

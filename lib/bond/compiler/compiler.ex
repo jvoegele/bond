@@ -325,9 +325,16 @@ defmodule Bond.Compiler do
     # invariants attached, filtered to those that actually carry a contract. Captured before
     # `apply_contract/2` turns each into override AST so boundary extraction can read their final
     # preconditions and argument names.
+    all_functions = FSM.annotated_functions(fsm(env))
+
+    # Public functions the author hid from the generated docs with `@doc false` (#110). The
+    # Precondition Availability check argues from documentation visibility, so a hidden public
+    # predicate defeats it exactly as a `defp` does. Built from the *unfiltered* set: such a
+    # predicate usually carries no contract of its own, so it never reaches `annotated` below.
+    config = Map.put(config, :hidden_defs, hidden_defs(all_functions))
+
     annotated =
-      fsm(env)
-      |> FSM.annotated_functions()
+      all_functions
       |> Enum.map(&ContractMerge.merge_inherited_contract(&1, inherited))
       |> Enum.map(&ContractMerge.merge_applied_contract(&1, inherited, named))
       |> Enum.map(&AnnotatedFunction.put_invariants(&1, invariants))
@@ -404,6 +411,13 @@ defmodule Bond.Compiler do
   # The table holds only plain numbers, so it escapes directly — no env snapshotting needed.
   # Functions with no literal precondition boundary contribute nothing; a module with none emits
   # no reflection at all.
+  defp hidden_defs(all_functions) do
+    for %AnnotatedFunction{kind: :def, fun: fun, arity: arity} = function <- all_functions,
+        AnnotatedFunction.doc_hidden?(function),
+        into: MapSet.new(),
+        do: {fun, arity}
+  end
+
   defp build_boundaries_reflection(annotated) do
     table =
       annotated
