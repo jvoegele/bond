@@ -38,11 +38,11 @@ end
 ## Norm's generated wrapper clause and still wraps the function via its own `defoverridable`,
 ## composing with Norm's wrapper through `super`.
 ##
-## NOTE: exactly ONE `@contract` is used here. Norm's `@contract` ALSO emits a non-overridable
-## `def __contract__/1` helper clause per contract; two or more `@contract`s in one module
-## therefore produce non-adjacent `__contract__/1` clauses that still trip Bond's clause
-## grouping. That `__contract__` helper is a different artifact from an override clause and is
-## not covered by the override tolerance; `norm_compat_test.exs` documents it.
+## Norm's `@contract` ALSO emits a non-overridable `def __contract__/1` helper clause per
+## contract. Two or more `@contract`s in one module therefore produce non-adjacent
+## `__contract__/1` clauses, which used to trip Bond's clause grouping and capped a Bond module
+## at one `@contract`. Since #105 Bond skips generated `__*__` functions entirely, so those
+## helper clauses are never tracked; `norm_compat_test.exs` covers the multi-contract case.
 defmodule BondTest.NormCompat.Combined do
   @moduledoc false
 
