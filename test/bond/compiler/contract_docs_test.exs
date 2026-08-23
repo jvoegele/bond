@@ -6,6 +6,13 @@ defmodule Bond.Compiler.ContractDocsTest do
   alias Bond.Compiler.Assertion
   alias Bond.Compiler.ContractDocs
 
+  # The text between the opening ```elixir fence and its closing ```. A continuation line that
+  # escaped the block would land outside this, which is the whole point of the #109 fix.
+  defp fenced_body(section) do
+    [_before, body | _] = String.split(section, ~r/^```(elixir)?$/m, parts: 3)
+    String.trim(body)
+  end
+
   describe "moduledoc_invariants_section/3" do
     test "returns nil when the module has no invariants" do
       assert ContractDocs.moduledoc_invariants_section([], MyMod, true) == nil
@@ -56,7 +63,7 @@ defmodule Bond.Compiler.ContractDocsTest do
       assert section =~ ~s|"size is positive": subject.size > 0|
     end
 
-    test "indents each invariant line as a 4-space markdown code block" do
+    test "wraps the invariants in a fenced elixir code block" do
       invariants = [
         assertion(:a, quote(do: subject.a >= 0)),
         assertion(:b, quote(do: subject.b >= 0))
@@ -64,9 +71,35 @@ defmodule Bond.Compiler.ContractDocsTest do
 
       section = ContractDocs.moduledoc_invariants_section(invariants, MyMod, true)
 
-      # Every invariant line begins with 4 spaces (markdown code block).
-      assert section =~ ~r/^\s{4}a: subject\.a >= 0/m
-      assert section =~ ~r/^\s{4}b: subject\.b >= 0/m
+      assert section =~ ~r/^```elixir\na: subject\.a >= 0\nb: subject\.b >= 0\n```$/m
+    end
+
+    test "a wrapped assertion stays inside the code block (#109)" do
+      # `code` is `Macro.to_string/1` output, so it runs the formatter and wraps once it exceeds
+      # the line length. Under the previous 4-space-indented block only the *first* line of an
+      # assertion got the indent, and the continuation — carrying the formatter's own 0 or 2
+      # spaces — fell below Markdown's threshold and ended the block.
+      long =
+        quote do
+          is_nil(subject.refresh_token) or
+            (is_binary(subject.refresh_token) and subject.refresh_token != "")
+        end
+
+      section =
+        ContractDocs.moduledoc_invariants_section(
+          [assertion(:short, quote(do: is_list(subject.scopes))), assertion(:wrapped, long)],
+          MyMod,
+          true
+        )
+
+      rendered = fenced_body(section)
+
+      assert String.contains?(rendered, "\n"), "expected the fixture assertion to wrap"
+
+      # Everything between the fences, continuation lines included.
+      assert rendered =~ "short: is_list(subject.scopes)"
+      assert rendered =~ "wrapped: is_nil(subject.refresh_token) or"
+      assert rendered =~ ~s|(is_binary(subject.refresh_token) and subject.refresh_token != "")|
     end
 
     test "names a nested module correctly" do
