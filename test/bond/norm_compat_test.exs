@@ -103,12 +103,12 @@ defmodule Bond.NormCompatTest do
       :code.delete(BondTest.NormCompat.EscapeHatchScratch)
     end
 
-    # REMAINING LIMITATION: Bond tolerates externally-generated *override* clauses (the
-    # `defoverridable` pattern). Norm's `@contract` ALSO emits a plain `def __contract__/1`
-    # helper clause per contract; two `@contract`s in one module produce non-adjacent
-    # `__contract__/1` clauses that still trip Bond's grouping check. Workaround: at most one
-    # `@contract` per Bond module, or split modules.
-    test "multiple Norm @contracts in one Bond module still conflict (documented)" do
+    # Was a documented limitation until #105. Norm's `@contract` emits a plain
+    # `def __contract__/1` helper clause per contract, and two `@contract`s in one module
+    # produce non-adjacent `__contract__/1` clauses that tripped Bond's clause-grouping check —
+    # so the rule was "at most one `@contract` per Bond module". Bond now skips generated
+    # `__*__` functions outright, so those helper clauses are never tracked and never group.
+    test "multiple Norm @contracts in one Bond module compile and are both enforced" do
       source = """
       defmodule BondTest.NormCompat.MultiContractScratch do
         use Norm
@@ -124,7 +124,21 @@ defmodule Bond.NormCompatTest do
       end
       """
 
-      assert_raise CompileError, fn -> Code.compile_string(source) end
+      try do
+        Code.compile_string(source)
+
+        alias BondTest.NormCompat.MultiContractScratch, as: M
+
+        assert M.triple(2) == 6
+        assert M.quad(2) == 8
+
+        # Both contracts still fire — compiling is not the same as being enforced.
+        assert_raise Norm.MismatchError, fn -> M.triple(-1) end
+        assert_raise Norm.MismatchError, fn -> M.quad(-1) end
+      after
+        :code.purge(BondTest.NormCompat.MultiContractScratch)
+        :code.delete(BondTest.NormCompat.MultiContractScratch)
+      end
     end
   end
 

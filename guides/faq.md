@@ -188,21 +188,14 @@ qualified calls with parentheses (`Bond.pre(x > 0)`); this is why the
 `@pre` form remains the recommended, more readable default for modules
 that don't need to coexist with another `@`-overriding library.
 
-### Limitation: at most one `@contract` per module
-
-Norm's `@contract` does two things: it wraps the contracted function
-(via `defoverridable`), and it emits a small `def __contract__/1` helper
-clause — one per `@contract`. Bond [tolerates the override
-clause](#can-i-use-bond-with-decorator-or-other-libraries-that-wrap-functions),
-but two or more `@contract`s produce non-adjacent `__contract__/1` clauses
-that still trip Bond's clause-grouping check. If you need more than one
-Norm contract alongside Bond, split into separate modules (below) or keep
-the extra contracts in a Norm-only module.
+Any number of `@contract`s can appear in the module. Norm emits a
+`def __contract__/1` helper clause per contract, and Bond skips generated
+`__*__` functions, so those clauses are never tracked as contract candidates.
 
 ### Alternative: split into separate modules
 
 Each library in its own module, one calling the other — always works, and
-sidesteps both the `@` clash and the multiple-`@contract` limit:
+sidesteps the `@` clash entirely:
 
 ```elixir
 defmodule MyApp.Specs do

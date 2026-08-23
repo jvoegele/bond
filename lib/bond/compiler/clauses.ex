@@ -510,19 +510,26 @@ defmodule Bond.Compiler.Clauses do
   defp bind_canonical_at_pos(param, canonical) when is_atom(canonical) do
     case top_level_names([param]) do
       [^canonical] ->
-        # Already binds the canonical name at top level. No rewrite needed.
-        param
+        # Binds the canonical *name* at top level — which is only the same variable as the one
+        # the wrapper body references if it also carries the same hygiene context. See
+        # `bind_canonical/2`.
+        if top_level_context(param) == nil do
+          param
+        else
+          bind_canonical(param, canonical)
+        end
 
       [nil] ->
         # No top-level binding at this position. Add one.
         case param do
           {:_, meta, ctx} when is_atom(ctx) ->
-            # Wildcard `_`: replace with the canonical var.
-            {canonical, meta, ctx}
+            # Wildcard `_`: replace with the canonical var. The original `ctx` is deliberately
+            # dropped rather than carried over — see `bind_canonical/2`.
+            {canonical, meta, nil}
 
           _ ->
             # Destructure / literal / other: wrap as `canonical = <original>`.
-            {:=, [], [Macro.var(canonical, nil), param]}
+            bind_canonical(param, canonical)
         end
 
       [_other_name] ->
@@ -535,9 +542,42 @@ defmodule Bond.Compiler.Clauses do
         #
         # Wrap as `canonical = <original>` so the wrapper binds the canonical
         # name; the user's name still binds too, via the original pattern.
-        {:=, [], [Macro.var(canonical, nil), param]}
+        bind_canonical(param, canonical)
     end
   end
+
+  # Bind `canonical` to whatever the position matches, keeping the user's pattern for dispatch.
+  #
+  # The `nil` hygiene context is load-bearing, not incidental: the wrapper body reaches these
+  # positions as `Macro.var(canonical, nil)` (`super/N` arguments, lifted-assertion defp calls,
+  # invariant statements), and a variable's identity is name *and* context. A clause head built
+  # by a macro with `unquote_splicing/1` carries the `quote`-introduced context (`Elixir`) instead
+  # of `nil` — `Ecto.Schema` generates its `__schema__/1,2` clauses exactly this way — so binding
+  # in the head's own context yields a head that never binds the `bond_arg_<idx>` (or user-named)
+  # variable the body then references, and the module fails to compile with `undefined variable`
+  # (#105). Always binding in `nil` makes the head agree with the body regardless of where the
+  # pattern came from; the user's own variables still bind, in their own context, via `param`.
+  defp bind_canonical(param, canonical) do
+    {:=, [], [Macro.var(canonical, nil), param]}
+  end
+
+  # The hygiene context of the variable `top_level_name/1` reports for `param`, or `:none` when
+  # there is no top-level variable. Mirrors `top_level_name/1`'s clauses, including their order.
+  defp top_level_context({:\\, _meta, [param, _default]}), do: top_level_context(param)
+
+  defp top_level_context({name, _meta, ctx}) when is_atom(name) and is_atom(ctx) do
+    if name == :_, do: :none, else: ctx
+  end
+
+  defp top_level_context({:=, _, [_pattern, {name, _, ctx}]})
+       when is_atom(name) and is_atom(ctx) and name != :_,
+       do: ctx
+
+  defp top_level_context({:=, _, [{name, _, ctx}, _pattern]})
+       when is_atom(name) and is_atom(ctx) and name != :_,
+       do: ctx
+
+  defp top_level_context(_), do: :none
 
   @doc """
   Underscore-prefixes every bound variable in `pattern` whose name isn't in the

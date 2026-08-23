@@ -7,6 +7,8 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
   alias Bond.Compiler.Assertion
   alias Bond.Compiler.FunctionDefinition
 
+  import BondTest.AST, only: [as_source: 1]
+
   @params [{:stack, [line: 80], nil}, {:elem, [line: 80], nil}]
   @guards [{:is_integer, [line: 32], [{:capacity, [line: 32], nil}]}]
   @body [do: {:new, [line: 46], [{:round, [line: 46], [{:capacity, [line: 46], nil}]}]}]
@@ -545,15 +547,19 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
     end)
   end
 
+  # `as_source/1` on everything `quote/2` builds here: the compiler hands Bond source-parsed
+  # AST, whose variables carry the `nil` hygiene context, and the wrapper rewrite distinguishes
+  # that from a macro-introduced context (#105). `@params` above is written with `nil` directly
+  # for the same reason.
   defp setup_function_definitions(_) do
     one_clause_function =
       FunctionDefinition.new(
         __ENV__,
         :def,
         :add,
-        quote(do: [x, y]),
-        quote(do: []),
-        quote(do: x + y)
+        as_source(quote(do: [x, y])),
+        as_source(quote(do: [])),
+        as_source(quote(do: x + y))
       )
 
     # Two clauses for new/1, sharing the canonical top-level name `input`
@@ -564,9 +570,9 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
         __ENV__,
         :def,
         :new,
-        quote(do: [input]),
-        quote(do: [is_list(input)]),
-        quote(do: Map.new(input))
+        as_source(quote(do: [input])),
+        as_source(quote(do: [is_list(input)])),
+        as_source(quote(do: Map.new(input)))
       )
 
     two_clause_function_clause2 =
@@ -574,9 +580,9 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
         __ENV__,
         :def,
         :new,
-        quote(do: [input]),
-        quote(do: [is_map(input)]),
-        quote(do: input)
+        as_source(quote(do: [input])),
+        as_source(quote(do: [is_map(input)])),
+        as_source(quote(do: input))
       )
 
     {:ok,

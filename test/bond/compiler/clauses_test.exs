@@ -464,43 +464,49 @@ defmodule Bond.Compiler.ClausesTest do
   end
 
   describe "rewrite_clause_params/3" do
+    # Params reach the compiler parsed from source, so their variables carry the `nil` hygiene
+    # context. `as_source/1` models that; a bare `quote/2` here would stamp this test module's
+    # context and exercise a shape no real clause head has (#105, covered separately below).
+    defp source_params(ast), do: BondTest.AST.as_source(ast)
+
     test "leaves a bare-var param matching the canonical alone" do
-      params = quote(do: [stack])
+      params = source_params(quote(do: [stack]))
       [result] = Clauses.rewrite_clause_params(params, [:stack])
       assert match?({:stack, _, _}, result)
     end
 
     test "rewrites a wildcard to bind the canonical" do
-      params = quote(do: [_])
+      params = source_params(quote(do: [_]))
       [result] = Clauses.rewrite_clause_params(params, [:capacity])
       assert match?({:capacity, _, _}, result)
     end
 
     test "wraps a destructure-only pattern with `canonical = <pattern>`" do
-      params = quote(do: [%BondTest.Mod{f: x}])
+      params = source_params(quote(do: [%BondTest.Mod{f: x}]))
       [result] = Clauses.rewrite_clause_params(params, [:state])
       source = Macro.to_string(result)
       assert source =~ ~r/state\s*=\s*%BondTest\.Mod\{/
     end
 
     test "wraps a literal pattern with `canonical = <pattern>`" do
-      params = quote(do: [0])
+      params = source_params(quote(do: [0]))
       [result] = Clauses.rewrite_clause_params(params, [:n])
       source = Macro.to_string(result)
       assert source =~ ~r/n\s*=\s*0/
     end
 
     test "leaves `pattern = name` matches alone when name is the canonical" do
-      params = quote(do: [%BondTest.Mod{} = stack])
+      params = source_params(quote(do: [%BondTest.Mod{} = stack]))
       [result] = Clauses.rewrite_clause_params(params, [:stack])
-      source = Macro.to_string(result)
-      assert source =~ "stack"
-      # No double-wrapping like `stack = (%Mod{} = stack)`
-      refute source =~ ~r/stack\s*=\s*\(/
+
+      # Not double-wrapped as `stack = (%Mod{} = stack)`. Asserted structurally: the previous
+      # regex on `Macro.to_string/1` output did not actually catch the double wrap, since the
+      # formatter renders it without the parentheses the pattern looked for.
+      assert {:=, _, [{:%, _, _}, {:stack, _, nil}]} = result
     end
 
     test "underscore-prefixes destructured names other than the canonical" do
-      params = quote(do: [%BondTest.Mod{id: id, name: name} = subject])
+      params = source_params(quote(do: [%BondTest.Mod{id: id, name: name} = subject]))
       [result] = Clauses.rewrite_clause_params(params, [:subject])
       source = Macro.to_string(result)
       assert source =~ "subject"
@@ -509,7 +515,7 @@ defmodule Bond.Compiler.ClausesTest do
     end
 
     test "preserves destructured names that are in the `used` set" do
-      params = quote(do: [%BondTest.Mod{count: current_count} = state])
+      params = source_params(quote(do: [%BondTest.Mod{count: current_count} = state]))
 
       [result] = Clauses.rewrite_clause_params(params, [:state], MapSet.new([:current_count]))
 
@@ -519,7 +525,7 @@ defmodule Bond.Compiler.ClausesTest do
     end
 
     test "handles multiple positions with different canonical names" do
-      params = quote(do: [conn, %BondTest.Mod{} = resource, _])
+      params = source_params(quote(do: [conn, %BondTest.Mod{} = resource, _]))
 
       [a, b, c] = Clauses.rewrite_clause_params(params, [:conn, :resource, :scope])
 
@@ -529,7 +535,7 @@ defmodule Bond.Compiler.ClausesTest do
     end
 
     test "generated canonical name (`bond_arg_<idx>`) binds to a no-name position" do
-      params = quote(do: [0])
+      params = source_params(quote(do: [0]))
       [result] = Clauses.rewrite_clause_params(params, [:bond_arg_0])
       source = Macro.to_string(result)
       assert source =~ "bond_arg_0"
@@ -538,10 +544,45 @@ defmodule Bond.Compiler.ClausesTest do
 
     test "underscore-prefix doesn't touch the canonical even if `used` is empty" do
       # The canonical names are always implicitly "used" — never prefixed.
-      params = quote(do: [stack])
+      params = source_params(quote(do: [stack]))
       [result] = Clauses.rewrite_clause_params(params, [:stack])
       assert match?({:stack, _, _}, result)
       refute match?({:_stack, _, _}, result)
+    end
+  end
+
+  describe "rewrite_clause_params/3 with a macro-introduced hygiene context (#105)" do
+    # A clause head built by a macro with `unquote_splicing/1` — the way `Ecto.Schema` emits
+    # `__schema__/1,2` — carries the `quote`'s context rather than `nil`. The wrapper body
+    # reaches every position as `Macro.var(name, nil)`, so the head must bind *that* variable;
+    # binding one that merely shares its name left the wrapper referencing something the head
+    # never bound, and the module failed to compile with `undefined variable`.
+
+    test "wraps a bare var that binds the canonical name in a foreign context" do
+      [result] = Clauses.rewrite_clause_params([Macro.var(:stack, SomeMacro)], [:stack])
+
+      assert {:=, _, [{:stack, _, nil}, {:stack, _, SomeMacro}]} = result
+    end
+
+    test "binds the canonical in the nil context when replacing a foreign-context wildcard" do
+      [result] = Clauses.rewrite_clause_params([{:_, [], SomeMacro}], [:bond_arg_0])
+
+      assert {:bond_arg_0, _, nil} = result
+    end
+
+    test "wraps a `pattern = name` match whose name carries a foreign context" do
+      param = {:=, [], [quote(do: %BondTest.Mod{}), Macro.var(:stack, SomeMacro)]}
+      [result] = Clauses.rewrite_clause_params([param], [:stack])
+
+      assert {:=, _, [{:stack, _, nil}, {:=, _, [{:%, _, _}, {:stack, _, SomeMacro}]}]} = result
+    end
+
+    test "the original binding survives, so the clause's own guards still resolve" do
+      # The fix wraps rather than rewriting the head variable's context in place, precisely so
+      # a `when` guard reproduced on the wrapper head still refers to a bound variable.
+      [result] = Clauses.rewrite_clause_params([Macro.var(:n, SomeMacro)], [:n])
+
+      assert {:=, _, [_canonical, {:n, _, SomeMacro}]} = result
     end
   end
 

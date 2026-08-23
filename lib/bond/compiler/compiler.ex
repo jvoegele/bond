@@ -38,11 +38,6 @@ defmodule Bond.Compiler do
   alias Bond.Compiler.FunctionDefinition
   alias Bond.Compiler.NamedContracts
 
-  # Functions Elixir auto-generates as a side effect of constructs like `defstruct` and
-  # `defexception`. These show up via `@on_definition` and must not be tracked as user
-  # contract candidates.
-  @generated_functions ~w[__struct__ __exception__ __info__]a
-
   @doc false
   def init(module) do
     # Next link in the chain `Bond.__using__/1` starts: block until the FSM module is on disk
@@ -171,19 +166,44 @@ defmodule Bond.Compiler do
     :ok
   end
 
-  def __on_definition__(_env, _kind, fun, _params, _guards, _body)
-      when fun in @generated_functions do
-    :ok
+  def __on_definition__(env, kind, fun, params, guards, body) when kind in [:def, :defp] do
+    if generated_function?(fun) do
+      :ok
+    else
+      on_user_definition(env, kind, fun, params, guards, body)
+    end
+  end
+
+  # Functions auto-generated as a side effect of a construct rather than written by the module's
+  # author: `defstruct`'s `__struct__`, `defexception`'s `__exception__`, `__info__`, and every
+  # library equivalent — `Ecto.Schema`'s `__schema__/1,2` and `__changeset__/0`, and so on. They
+  # arrive through `@on_definition` like any other `def` and must not be tracked as user contract
+  # candidates.
+  #
+  # Recognised by Elixir's naming convention for generated and introspection functions: a name
+  # wrapped in double underscores. Matching on the convention rather than on a fixed list is what
+  # makes `@invariant` usable on an `Ecto.Schema` module (#105) — the schema module is where a
+  # struct's laws belong, and it is also where the generated-function count is highest.
+  #
+  # Weaving into them is never what an invariant means, since none takes or returns the declaring
+  # struct, and doing it anyway cost twice over: a wrapper clause per generated clause, on
+  # functions Ecto calls while building every query, and a "never mentions the struct" warning
+  # apiece — pointing at the `schema` macro rather than at anything the author wrote, and so
+  # suppressible only with the module-wide option that would also hide genuine skips.
+  defp generated_function?(fun) when is_atom(fun) do
+    name = Atom.to_string(fun)
+
+    byte_size(name) > 4 and String.starts_with?(name, "__") and String.ends_with?(name, "__")
   end
 
   # Bodyless function heads (`def foo(x)` with no `do` block) are used purely to attach
   # docs/specs/contracts to the clauses that follow. They don't produce executable code, so we
   # skip them — the contracts will be picked up by the first body-bearing clause.
-  def __on_definition__(_env, kind, _fun, _params, _guards, nil) when kind in [:def, :defp] do
+  defp on_user_definition(_env, kind, _fun, _params, _guards, nil) when kind in [:def, :defp] do
     :ok
   end
 
-  def __on_definition__(env, kind, fun, params, guards, body) when kind in [:def, :defp] do
+  defp on_user_definition(env, kind, fun, params, guards, body) when kind in [:def, :defp] do
     # Read and consume the per-function `@bond_warn_skipped_invariants` override
     # so it scopes to this single def. The override is a tri-state: nil means
     # "inherit module/global config"; true/false explicitly enables/suppresses
