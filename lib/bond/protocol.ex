@@ -114,6 +114,33 @@ defmodule Bond.Protocol do
     :ok
   end
 
+  # All-inside form — `@post whenever(pat <- result, ok: pat >= 0)` — which `public-api.md`
+  # documents as an alias of the prefix clause above, for inherited contracts as much as for
+  # `use Bond`. The prefix clause matches only a binder call carrying exactly one argument, so
+  # this shape fell through to the bare-expression clause below and was rejected by
+  # `Assertion.reject_nested_binding_form!/2` — with a diagnostic written for a genuinely nested
+  # binder ("may only appear at the start of a contract"), which was doubly misleading because
+  # the binder *was* at the start and none of the three suggested rewrites applied (#106).
+  #
+  # Ordering matters: this must stay below the prefix clause, so that a body-less
+  # `@post where(...)` keeps matching there and is diagnosed by the shared parser.
+  defmacro @{pre_or_post, meta, [{binder, _, [binding | scoped]}]}
+           when pre_or_post in [:pre, :post] and binder in [:where, :whenever] do
+    kind = if pre_or_post == :pre, do: :precondition, else: :postcondition
+
+    InheritedContracts.accumulate_pending_binding_group(
+      ctx(),
+      kind,
+      binder,
+      binding,
+      scoped,
+      __CALLER__,
+      meta
+    )
+
+    :ok
+  end
+
   defmacro @{pre_or_post, meta, [expression]} when pre_or_post in [:pre, :post] do
     kind = if pre_or_post == :pre, do: :precondition, else: :postcondition
     InheritedContracts.accumulate_pending(ctx(), kind, expression, __CALLER__, meta)
