@@ -97,6 +97,72 @@ defmodule Bond.CoverageTest do
     assert Coverage.entries() == []
   end
 
+  describe "table ownership (#104)" do
+    setup do
+      after_suite = Application.fetch_env!(:ex_unit, :after_suite)
+      on_exit(fn -> Application.put_env(:ex_unit, :after_suite, after_suite) end)
+      :ok
+    end
+
+    test "install_reporter/0 creates the table, so recorded evaluations outlive the recorder" do
+      drop_table()
+
+      owner = start_reporter_owner()
+      record_from_short_lived_process(info(1), true)
+
+      # Asserted from a process that is neither the owner nor the recorder. Before #104 the
+      # recording process created — and so owned — the table, and took this row with it when it
+      # finished; asserting from inside the recording process would pass either way.
+      assert [%{assertion_id: 1, checked: 1, failed: 0}] = Coverage.entries()
+      assert :ets.info(:ets.whereis(:bond_coverage), :owner) == owner
+    end
+  end
+
+  # The coverage table is reachable only by name, so a test about its lifetime has to name it.
+  defp drop_table do
+    case :ets.whereis(:bond_coverage) do
+      :undefined -> :ok
+      _ref -> :ets.delete(:bond_coverage)
+    end
+
+    :ok
+  end
+
+  # Stands in for the process running `test/test_helper.exs`: it installs the reporter and then
+  # stays alive for the rest of the test, as that process does for the rest of the suite.
+  defp start_reporter_owner do
+    parent = self()
+
+    owner =
+      spawn(fn ->
+        Coverage.install_reporter()
+        send(parent, :installed)
+
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    receive do
+      :installed -> :ok
+    after
+      1_000 -> flunk("the reporter owner never installed the reporter")
+    end
+
+    on_exit(fn -> send(owner, :stop) end)
+    owner
+  end
+
+  defp record_from_short_lived_process(info, result) do
+    {pid, ref} = spawn_monitor(fn -> Coverage.record(info, result) end)
+
+    receive do
+      {:DOWN, ^ref, :process, ^pid, :normal} -> :ok
+    after
+      1_000 -> flunk("the recording process did not finish")
+    end
+  end
+
   describe "Eval coverage wrappers" do
     test "check_assertion_covered records a pass and returns :ok" do
       assert Eval.check_assertion_covered(true, info(1), fn -> [] end) == :ok

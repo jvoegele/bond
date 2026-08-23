@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **Contract coverage now records anything at all.** `Bond.Coverage` created its ETS table lazily,
+  from whichever process first evaluated a contract — under ExUnit, a *test* process. An ETS table
+  dies with its owner, so the table and every evaluation recorded in it were destroyed when that
+  test finished, long before the `after_suite` reporter ran. Following the documented setup, the
+  report always read `no contracts were evaluated`, even for contracts that demonstrably fired.
+
+  `install_reporter/0` now creates the table, so it is owned by the process running
+  `test/test_helper.exs` — which outlives the suite. No API change, and coverage remains
+  compile-time opt-in.
+
+  The bug hid behind the obvious manual check: reading `entries/0` from inside the same test that
+  recorded works either way, because the creating process is still alive. The regression test
+  records from a short-lived process and asserts from another one after it has exited.
+
 - **The assertion linter no longer describes an always-*false* assertion as one that "can never
   fail".** Three of its messages shared a single template across the always-true and always-false
   cases, so a contract that fails on *every* call was reported as one that "asserts nothing" — the
