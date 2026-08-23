@@ -504,6 +504,12 @@ editors that show function docs on hover (VS Code, Vim's `K`, etc.).
 Auto-generated contract sections appear whether or not you wrote a `@doc`
 yourself — Bond synthesises one when needed.
 
+This is Eiffel's *short form*: the view of a module with implementations stripped
+away and only the specification left. It is what makes it reasonable to treat a
+contract as the published interface rather than an internal test aid, and it means
+most of a contract's value is delivered before anything runs — see
+[What Should a Contract Say?](what-contracts-say.md#a-one-line-implementation-still-deserves-a-specification).
+
 `@invariant`s are documented at the **module** level: a module that declares
 invariants gets a `## Invariants` section appended to its `@moduledoc`, naming the
 struct, explaining the `subject` binding, listing each invariant in the same

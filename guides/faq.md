@@ -7,8 +7,15 @@ verify behaviour on **every call** in the running system. They catch
 violations you didn't think to test for, especially in long-running dev or
 staging environments. Tests and contracts complement each other:
 
-- Tests describe what your code *should* do.
-- Contracts describe what your code *must always be true while doing*.
+- Tests describe what your code *should* do in the cases you chose.
+- Contracts describe what must be true of it on *every* call.
+
+There is also an axis tests structurally cannot cover: a contract is a
+**specification**, and Bond publishes it. Your `@pre`/`@post` are rendered into
+your ExDoc output, so they tell a caller what a function requires and guarantees
+without their reading either the body or your test suite. A test proves a claim;
+it does not state one where anyone will find it. See
+[What Should a Contract Say?](what-contracts-say.md).
 
 For functions that are easy to test and have well-known input shapes,
 tests alone are usually fine. For functions whose preconditions are

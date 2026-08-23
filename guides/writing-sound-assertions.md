@@ -12,6 +12,14 @@ one lies. The goal of this guide is to help you write assertions that *can fail 
 input they are meant to reject* — and to recognise the handful of constructs whose surface
 reading does not match their behaviour.
 
+> #### This guide is the quality check, not the purpose {: .info}
+>
+> Falsifiability is how you check an assertion is *good*. Stating the specification is
+> *why* you write one. Both matter, and they are different tests — applied as though it
+> were the second, the first will talk you out of correct specifications.
+> [What Should a Contract Say?](what-contracts-say.md) covers the other half, and is
+> worth reading first if you have not.
+
 > #### The one habit that prevents most of these {: .tip}
 >
 > For every non-trivial assertion, prove it can fail: feed it an input that *should*
@@ -102,19 +110,15 @@ watching the assertion fail once (see the tip above). The same caution applies t
 comparing a value against a literal of the wrong type (`status == 200` when `status` is
 `:ok`).
 
-## A `@post` that restates the body can only fail if the runtime is broken
+## A `@post` that transcribes the *mechanism* says nothing
 
-A postcondition earns its keep by saying something the body does not already say. One that
-transcribes the implementation asserts that the code does what the code does:
+A postcondition earns its keep by describing what the function guarantees. One that
+transcribes *how* it computes it asserts only that the code does what the code does:
 
 ```elixir
 @post computed: result == a + b        # ❌ fails only if `+` is broken
 def add(a, b), do: a + b
 ```
-
-The test is whether a *plausible* rewrite of the body could violate it. Nothing you could
-sensibly change about `add/2` breaks that assertion without breaking the assertion in the
-same edit, because the two are the same expression.
 
 State the property the implementation must obey instead, and the contract survives a
 rewrite — which is exactly when you want it:
@@ -128,6 +132,25 @@ def transfer(from, to, amount), do: ...
 That one has no opinion about how the transfer is implemented, and it fails the day someone
 adds a fee and takes it out of one side only. A good postcondition is a law the body must
 respect, not a second copy of it.
+
+> #### "Does it restate the body?" is the wrong test {: .warning}
+>
+> The trap is to generalise the `add/2` example into a rule against postconditions that
+> *resemble* their implementation, and then delete real specifications for failing it.
+>
+> ```elixir
+> # Resembles the body. Keep it.
+> @post definition: result == (stack.count == stack.capacity)
+> def full?(%__MODULE__{} = stack), do: stack.count == stack.capacity
+> ```
+>
+> The distinction that holds is **mechanism versus meaning**, not resemblance.
+> `result == Enum.map(xs, &f/1)` beside a body that maps names the algorithm;
+> `result == (count == capacity)` names a property that happens to fit on one line, and
+> still publishes the function's guarantee to every reader of the generated docs.
+> Meyer works through this exact case — the instruction is prescriptive, the assertion
+> descriptive (§11.7, p. 352). See
+> [What Should a Contract Say?](what-contracts-say.md#the-test-is-mechanism-versus-meaning).
 
 ## A `@pre` the guard already enforces can never fail
 
@@ -275,6 +298,9 @@ a value's *type* stays yours; this guide is the checklist for it.
 
 ## See also
 
+  * [What Should a Contract Say?](what-contracts-say.md) — the other half of the
+    question: what an assertion should be *stating*, as distinct from whether it can
+    fail.
   * `Bond.Predicates` — the full reference for `<~`, `~>`, `forall`/`exists`, `xor`, `|||`,
     and friends, including the operator-precedence notes.
   * [Testing Contracts](testing-contracts.md) — proving an assertion fires (and holds) with
