@@ -30,6 +30,14 @@ defmodule Bond.Behaviour do
   implementation's parameters are rebound to them positionally — so the impl is free to name
   its parameters differently.
 
+  > #### Write remote calls fully qualified {: .tip}
+  >
+  > A contract expression is expanded in each **implementing** module, so it resolves in that
+  > module's alias scope — not this one. An `alias` here does not travel with the contract; a
+  > short name that resolves at the declaration site fails in every implementation that does
+  > not happen to alias the same module. Spell remote calls and struct literals out in full.
+  > See the [Contract Inheritance guide](contract-inheritance.md#where-names-resolve-write-remote-calls-fully-qualified).
+
   ## Inheriting verbatim
 
   By default an implementation inherits its callbacks' contracts **verbatim**. Attaching a plain
