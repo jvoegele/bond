@@ -68,6 +68,16 @@ including patch versions:
     (`__bond_preconditions__<fun>__<arity>` etc.), their argument shapes,
     and their internal structure are not stable. Don't pattern-match on
     them in stack traces or runtime introspection.
+  * **Contracts on double-underscore-wrapped function names.** Bond does
+    not weave `@pre`, `@post`, or `@invariant` into a function whose name
+    is wrapped in double underscores (`__struct__`, `Ecto.Schema`'s
+    `__schema__`, Norm's `__contract__`, and so on). That spelling is the
+    Elixir convention for a compiler- or library-generated function, and
+    Bond treats it as reserved rather than as part of the surface the
+    attribute syntax applies to. A contract written on one is discarded
+    with a compile-time warning naming the function, never applied and
+    never silently moved elsewhere. Give a function you want contracts on
+    a name without the leading and trailing underscores.
   * **The `__opaque__/1` and `__truthy__/1` helpers in `Bond.Predicates`.**
     These are called by Bond-generated code, not by users. Their existence
     is stable insofar as the generated code depends on them, but their

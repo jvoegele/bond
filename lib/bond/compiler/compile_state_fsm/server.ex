@@ -134,6 +134,40 @@ defmodule Bond.Compiler.CompileStateFSM.Server do
     {:next_state, :done, clear_pending_contracts(data), {:reply, from, :ok}}
   end
 
+  # Drop the contracts pending for the *next* function without attaching them to one, and report
+  # what was dropped. Used when `Bond.Compiler` declines to weave a generated `__name__` function
+  # (#105): without this the pending contracts stay queued and are absorbed by whatever the module
+  # defines next, silently enforcing them on the wrong function.
+  def handle_event({:call, from}, {:discard_pending_contracts, _line}, state, data)
+      when state in [:no_contracts_pending, :done, :error] do
+    {:keep_state, data, {:reply, from, {[], []}}}
+  end
+
+  def handle_event({:call, from}, {:discard_pending_contracts, line}, _state, data) do
+    # Discard exactly what `handle_new_function_def/3` would have attached to a definition at
+    # this line, and leave the rest pending — the same `split_by_line/2` rule, so the two agree
+    # by construction.
+    #
+    # Selecting by line rather than dropping everything pending is what keeps implicitly
+    # generated functions harmless. `defstruct`'s `__struct__/0` is emitted while the *first*
+    # `%__MODULE__{}` is expanded, which can be inside a `def` that a `@pre` legitimately
+    # precedes — but it carries the `defstruct` line, which is above that contract, so nothing
+    # of that function's is taken. A hand-written `def __custom__(x)` carries its own line,
+    # below the contract written for it, so that contract is taken.
+    {discarded_pre, remaining_pre} = split_by_line(data.precondition_defs, line)
+    {discarded_post, remaining_post} = split_by_line(data.postcondition_defs, line)
+
+    new_data =
+      data
+      |> Map.put(:precondition_defs, remaining_pre)
+      |> Map.put(:postcondition_defs, remaining_post)
+
+    next_state = if has_pending?(new_data), do: :contracts_pending, else: :no_contracts_pending
+    discarded = {Enum.reverse(discarded_pre), Enum.reverse(discarded_post)}
+
+    {:next_state, next_state, new_data, {:reply, from, discarded}}
+  end
+
   def handle_event({:call, from}, :pending_preconditions, :no_contracts_pending, data) do
     {:keep_state, data, {:reply, from, []}}
   end

@@ -44,9 +44,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     that tripped Bond's clause-grouping check. Those helpers are no longer tracked, so a module
     may now carry any number of Norm contracts alongside Bond's. The FAQ's "Limitation: at most
     one `@contract` per module" section is removed.
-  * A `@pre`/`@post` written explicitly on a function named `__like_this__` is now ignored
-    rather than applied. Contracts belong on the functions an author writes, and that spelling
-    is reserved by convention for generated ones.
+  * A `@pre`/`@post` written explicitly on a function named `__like_this__` is no longer
+    applied. Contracts belong on the functions an author writes, and that spelling is reserved
+    by convention for generated ones. **This never happens silently**: the contract is discarded
+    with a compile-time warning naming the function, the number and kind of contracts dropped,
+    and the fix (rename the function). Bond's [stability policy](guides/stability.md) requires
+    that a behaviour change to the intercepted attribute syntax be announced where it happens,
+    not only in a changelog.
+
+    Discarding is also what keeps the change safe. Pending contracts live in the compile-state
+    FSM until a definition absorbs them, so merely declining to weave would leave them queued
+    for whatever the module defined next — and where the parameter names happened to line up,
+    the contract would have been enforced, quietly, against the wrong function. What is
+    discarded is selected by source line, the same rule that decides which contracts a normal
+    definition absorbs, so an implicitly generated function takes nothing that was written for
+    the function around it.
 
 - **Contract coverage now records anything at all.** `Bond.Coverage` created its ETS table lazily,
   from whichever process first evaluated a contract — under ExUnit, a *test* process. An ETS table
