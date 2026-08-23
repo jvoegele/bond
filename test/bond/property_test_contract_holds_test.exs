@@ -61,8 +61,11 @@ defmodule Bond.PropertyTest.ContractHoldsTest do
           contract_holds(&Math.sqrt/1, args: [StreamData.float(min: 0.0)])
         end
 
+      # `function: nil` models the module-level context these macros are actually used in.
+      # Expanding with the test's own env makes `__CALLER__.function` non-nil, which the
+      # macro now rejects with a Bond error (#81).
       expanded =
-        Macro.expand_once(ast, __ENV__)
+        Macro.expand_once(ast, %{__ENV__ | function: nil})
         |> Macro.to_string()
 
       assert expanded =~ ~r"property\b"

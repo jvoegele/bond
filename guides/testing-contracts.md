@@ -152,6 +152,35 @@ keeps the generator inside `sqrt`'s `@pre`. If a generated input violates the
 precondition, `contract_holds/2` treats that as a failure. When you would rather
 generate broadly and let Bond filter, use `probe_contract/2`.
 
+> #### These macros go at the module level {: .warning}
+>
+> `contract_holds/2`, `probe_contract/2`, `invariants_hold/2` and
+> `server_invariants_hold/2` **define** a property. They are not assertions you call
+> inside a `test` block — put one there and Bond stops you with an error saying so.
+>
+> This is the opposite of the `Bond.Test` assertions above, which *are* called inside a
+> `test`. The two live side by side and behave oppositely, so it is worth the glance.
+
+### Naming a property with `:name`
+
+Every one of these macros derives its property name from the target, so two properties
+for the same function or module collide. Give at least one of them a `:name`:
+
+```elixir
+contract_holds &MyApp.Math.sqrt/1,
+  args: [StreamData.float(min: 0.0)],
+  name: "sqrt over all non-negative floats"
+
+contract_holds &MyApp.Math.sqrt/1,
+  args: [StreamData.float(min: 0.0, max: 1.0)],
+  name: "sqrt over the unit interval"
+```
+
+Bond reports the collision at compile time and points at `:name`, rather than letting
+it surface as ExUnit's `DuplicateTestError`. Worth doing even when it is not required:
+a name is what the failure report shows, so distinct names are what tell you *which*
+of two properties failed.
+
 ### `probe_contract/2` — one function, boundary-driven
 
 `probe_contract/2` reads the literal comparisons in a function's `@pre` and mixes the
@@ -487,6 +516,19 @@ what a green suite means. This is a spot-check to skim occasionally for a contra
 suspiciously safe, not a to-do list to drive to zero.
 
 ## Patterns and gotchas
+
+  * **A shrunk counterexample may render a list of small integers as a charlist.**
+    A sequence failure reported as
+
+    ```text
+    Generated: {{:constructor, :new, []}, [{:transformer, :apply_discount, ~c"e"}]}
+    ```
+
+    is showing you `[101]` — the argument list for that operation, which Elixir's
+    inspect renders as `~c"e"` because every element happens to be a printable
+    character code. Nothing is wrong with the counterexample; the rendering comes from
+    ExUnitProperties rather than from Bond, so Bond cannot change it. Read it as a list
+    of integers.
 
   * **Choosing `contract_holds` vs `probe_contract`.** If writing a generator that
     produces only valid inputs is easy (`StreamData.float(min: 0.0)`), `contract_holds/2`

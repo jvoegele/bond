@@ -210,7 +210,10 @@ defmodule Bond.PropertyTest.ProbeContractTest do
           probe_contract(&Account.deposit_fee/1, args: [StreamData.integer()])
         end
 
-      expanded = ast |> Macro.expand_once(__ENV__) |> Macro.to_string()
+      # `function: nil` models the module-level context these macros are actually used in.
+      # Expanding with the test's own env makes `__CALLER__.function` non-nil, which the
+      # macro now rejects with a Bond error (#81).
+      expanded = ast |> Macro.expand_once(%{__ENV__ | function: nil}) |> Macro.to_string()
 
       assert expanded =~ ~r"property\b"
       assert expanded =~ ~r"check\(?\s*all\(?\s*args <- StreamData\.fixed_list"
@@ -224,7 +227,7 @@ defmodule Bond.PropertyTest.ProbeContractTest do
           probe_contract(&Account.deposit_fee/1, args: [StreamData.integer()])
         end
 
-      expanded = ast |> Macro.expand_once(__ENV__) |> Macro.to_string()
+      expanded = ast |> Macro.expand_once(%{__ENV__ | function: nil}) |> Macro.to_string()
 
       assert expanded =~ "StreamData.FilterTooNarrowError"
       assert expanded =~ "__reraise_too_restrictive__"

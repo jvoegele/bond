@@ -106,6 +106,88 @@ defmodule Bond.PropertyTest do
     end
   end
 
+  # Resolves `:name` and rejects a second property for the same target.
+  @doc false
+  def resolve_property_name!(macro, default, opts, %Macro.Env{} = caller) do
+    name = Keyword.get(opts, :name, default)
+    assert_unique_name!(macro, name, caller)
+
+    name
+  end
+
+  # These macros *define* a property — they expand to `property/2`, which expands to `def`.
+  # Called inside a `test` block that fails as `cannot invoke def/2 inside function/macro`,
+  # from `Kernel`, naming a construct that appears nowhere in the user's code and with the
+  # Bond frame at the bottom of the trace (#81).
+  @doc false
+  def assert_module_level!(_macro, %Macro.Env{function: nil}), do: :ok
+
+  def assert_module_level!(macro, caller) do
+    raise CompileError,
+      file: caller.file,
+      line: caller.line,
+      description: """
+      #{macro} defines a property and must be called at the module level, not inside \
+      a test block.
+
+      Move it out of the test:
+
+          defmodule MyTest do
+            use ExUnit.Case
+            use Bond.PropertyTest
+
+            #{macro} &MyModule.my_fun/1, args: [StreamData.integer()]
+          end
+
+      If you wanted an assertion to run *inside* a test, that is `Bond.Test` — \
+      `assert_precondition_error/2` and friends.\
+      """
+  end
+
+  # A second property for the same target is a reasonable thing to want — one narrow
+  # generator set and one broad one. ExUnit reports the collision as `DuplicateTestError`,
+  # which names neither Bond nor the option that fixes it (#81).
+  # The accumulating-attribute form is deliberately not used: `Module.register_attribute/3`
+  # in `__using__`'s quote has not taken effect by the time the first of these macros
+  # expands, so `put_attribute` would store a bare string and the membership test would then
+  # be run against it. Carrying the list explicitly is order-independent.
+  # Only while the module is being compiled. `Macro.expand_once/2` against an already-compiled
+  # module — which is how Bond's own tests inspect the emitted shape — reaches here with a
+  # closed module, where `Module.get_attribute/2` raises.
+  defp assert_unique_name!(_macro, _name, %Macro.Env{module: nil}), do: :ok
+
+  defp assert_unique_name!(macro, name, caller) do
+    if Module.open?(caller.module) do
+      check_unique_name!(macro, name, caller)
+    else
+      :ok
+    end
+  end
+
+  defp check_unique_name!(macro, name, caller) do
+    taken = Module.get_attribute(caller.module, :bond_property_names) || []
+
+    if name in taken do
+      raise CompileError,
+        file: caller.file,
+        line: caller.line,
+        description: """
+        #{macro} would define a second property named "#{name}" in #{inspect(caller.module)}.
+
+        Property names are derived from the target, so two properties for the same target \
+        collide. Give at least one of them a `:name`:
+
+            #{macro} <target>, name: "#{name}, with a narrow generator", ...
+
+        A distinct name is also what makes a failure legible: without one, the report \
+        cannot say which of the two properties failed.\
+        """
+    end
+
+    Module.put_attribute(caller.module, :bond_property_names, [name | taken])
+    :ok
+  end
+
   @doc """
   Generates an ExUnit property that calls a single function with random arguments and
   verifies that Bond's contracts (preconditions, postconditions, `check`s, invariants)
@@ -135,13 +217,21 @@ defmodule Bond.PropertyTest do
   defmacro contract_holds(fun, opts)
 
   defmacro contract_holds({:&, _, _} = fun_ast, opts) do
+    assert_module_level!("contract_holds/2", __CALLER__)
+
     args_gens =
       Keyword.get(opts, :args) ||
         raise ArgumentError,
               "contract_holds for a single function requires an `:args` keyword " <>
                 "with a list of generators (one per function argument)"
 
-    name = Keyword.get(opts, :name, "contract_holds #{Macro.to_string(fun_ast)}")
+    name =
+      resolve_property_name!(
+        "contract_holds/2",
+        "contract_holds #{Macro.to_string(fun_ast)}",
+        opts,
+        __CALLER__
+      )
 
     quote do
       property unquote(name) do
@@ -259,13 +349,21 @@ defmodule Bond.PropertyTest do
              opts
            )
            when is_atom(fun) and is_integer(arity) do
+    assert_module_level!("probe_contract/2", __CALLER__)
+
     args_gens =
       Keyword.get(opts, :args) ||
         raise ArgumentError,
               "probe_contract requires an `:args` keyword with a list of generators " <>
                 "(one per function argument)"
 
-    name = Keyword.get(opts, :name, "probe_contract #{Macro.to_string(fun_ast)}")
+    name =
+      resolve_property_name!(
+        "probe_contract/2",
+        "probe_contract #{Macro.to_string(fun_ast)}",
+        opts,
+        __CALLER__
+      )
 
     quote do
       property unquote(name) do
@@ -495,6 +593,8 @@ defmodule Bond.PropertyTest do
   defmacro invariants_hold(module, opts)
 
   defmacro invariants_hold({:__aliases__, _, _} = module_ast, opts) do
+    assert_module_level!("invariants_hold/2", __CALLER__)
+
     constructors = Keyword.get(opts, :constructors, [])
     transformers = Keyword.get(opts, :transformers, [])
     observers = Keyword.get(opts, :observers, [])
@@ -507,7 +607,13 @@ defmodule Bond.PropertyTest do
               "invariants on a struct module without a way to produce instances."
     end
 
-    name = Keyword.get(opts, :name, "invariants_hold #{Macro.to_string(module_ast)}")
+    name =
+      resolve_property_name!(
+        "invariants_hold/2",
+        "invariants_hold #{Macro.to_string(module_ast)}",
+        opts,
+        __CALLER__
+      )
 
     quote do
       property unquote(name) do
@@ -573,11 +679,20 @@ defmodule Bond.PropertyTest do
   defmacro server_invariants_hold(module, opts)
 
   defmacro server_invariants_hold({:__aliases__, _, _} = module_ast, opts) do
+    assert_module_level!("server_invariants_hold/2", __CALLER__)
+
     init_gen = Keyword.get(opts, :init)
     messages = Keyword.get(opts, :messages, [])
     mode = Keyword.get(opts, :mode, :callbacks)
     max_length = Keyword.get(opts, :max_length, 20)
-    name = Keyword.get(opts, :name, "server_invariants_hold #{Macro.to_string(module_ast)}")
+
+    name =
+      resolve_property_name!(
+        "server_invariants_hold/2",
+        "server_invariants_hold #{Macro.to_string(module_ast)}",
+        opts,
+        __CALLER__
+      )
 
     if init_gen == nil do
       raise ArgumentError,
