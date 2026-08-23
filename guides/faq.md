@@ -801,14 +801,45 @@ def build(opts) do
 end
 ```
 
+Delegation is silent too. A function whose every return path is a call to
+another **public** function of the same module is covered one hop away — the
+sibling enforces the invariant itself — so Bond stays quiet even though the
+struct is never named:
+
+```elixir
+def new(opts), do: %__MODULE__{n: Keyword.fetch!(opts, :n)}
+
+# Silent: every return path is a call to the public builder above.
+def from_map(m), do: new(n: m["n"])
+```
+
+Three things deliberately do *not* count as delegation, because each of them
+leaves the question genuinely open:
+
+  * **Calling a sibling somewhere in the body**, while returning something else.
+    Calling is not delegating.
+  * **Delegating to a `defp`.** Invariants are not woven into private functions,
+    so one hop reaches nothing that enforces them.
+  * **A branch that returns something else.** `if x, do: new(n: 1), else: :nothing`
+    still warns — it is *every* return path, not some.
+
 > #### This warning used to be noisier {: .info}
 >
 > Earlier versions ran this check on a narrow static heuristic — only a
 > literal `%__MODULE__{...}` or `{:ok, %__MODULE__{...}}` return
 > suppressed it — so all three functions above warned even though their
-> invariants demonstrably ran. If you suppressed those with
-> `@bond_warn_skipped_invariants false`, the suppression is now
-> unnecessary and can be removed. It remains harmless.
+> invariants demonstrably ran, and so did the delegation case. If you
+> suppressed any of those with `@bond_warn_skipped_invariants false`, the
+> suppression is now unnecessary and can be removed. It remains harmless.
+
+> #### An unadvertised second use {: .tip}
+>
+> "This module declares an invariant, and here is a public function with nothing
+> to do with its struct" turns out to be a decent smell for a **namespace
+> squatter** — a utility that lives here only because this is where it was first
+> needed, and now has callers elsewhere. That is why delegation is recognised
+> narrowly: broadening it to "calls a sibling anywhere" would silence the smell
+> along with the false positive.
 
 **If the function is supposed to operate on the struct**, the fix is
 usually a missing pattern or guard on the head:
@@ -1176,13 +1207,31 @@ admits, this one is statically decidable: Bond knows which functions are
 private. **So Bond warns:**
 
 ```
-warning: the precondition of public function `send_welcome/2` in `Mailer` calls
-a private function (`valid_email?/1`). A precondition is an obligation on the
-caller, so a caller that cannot call `valid_email?/1` cannot check it before
-calling — and Bond renders the assertion into the generated docs, where
-`valid_email?/1` does not appear. Make the predicate public, or inline the
-condition. (Meyer's Precondition Availability rule, OOSC §11.7.)
+warning: the precondition of public function `send_welcome/2` in `Mailer` is
+stated in terms its callers cannot reach. It calls a private function
+(`valid_email?/1`): a precondition is an obligation on the caller, so a caller
+that cannot call `valid_email?/1` cannot check it before calling — and Bond
+renders the assertion into the generated docs, where `valid_email?/1` does not
+appear. Make the predicate public, or inline the condition. (Meyer's
+Precondition Availability rule, OOSC §11.7.)
 ```
+
+### `@doc false` defeats it the same way
+
+`defp` is the strict reading of Meyer's rule — Elixir's only visibility boundary
+is `def` versus `defp`. But the harm above is a *documentation* harm, and a
+**public** function carrying `@doc false` causes it just as surely: it is
+callable, so Meyer's rule is satisfied, yet it does not appear in the docs where
+the obligation is published. A caller reading them cannot discover what they are
+required to satisfy.
+
+Bond warns for that case too, with wording that names it, because the fix is
+different — remove the `@doc false` rather than make the predicate public.
+
+One deliberate exception: if the *contracted* function is itself `@doc false`,
+its precondition is not published either, so nothing is defeated and Bond stays
+quiet. A private call still warns there, since callability does not depend on
+what is documented.
 
 A warning rather than an error, because an app-internal module whose callers
 are all in the same project suffers the documentation harm without the

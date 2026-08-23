@@ -489,6 +489,121 @@ defmodule Bond.SkippedInvariantsWarningTest do
   # matters regardless: one warning per *uncovered function*, never per clause, per
   # definition, or per compiler hook — across the module shapes where a doubling
   # could plausibly hide.
+  # A function that delegates has no struct in its head and may never name the struct at
+  # all, yet the value it returns has been through a public sibling's own checks one hop
+  # away. Warning there pushes the author to inline the struct literal, duplicating the
+  # normalisation the builder exists to hold in one place.
+  describe "one-hop delegation to a public sibling (#111)" do
+    defp delegation_warnings(source) do
+      source
+      |> capture_diagnostics()
+      |> Enum.filter(&(&1.message =~ "invariant-declaring module"))
+    end
+
+    defp delegation_warns?(source), do: delegation_warnings(source) != []
+
+    test "a body that is a single call to a public builder does not warn" do
+      refute delegation_warns?("""
+             defmodule BondTest.DelegScratch.Simple do
+               use Bond
+               defstruct [:n]
+               @invariant non_negative: subject.n >= 0
+               def new(opts), do: %__MODULE__{n: Keyword.fetch!(opts, :n)}
+               def from_map(m), do: new(n: m["n"])
+             end
+             """)
+    end
+
+    test "delegation from every branch of a case does not warn" do
+      refute delegation_warns?("""
+             defmodule BondTest.DelegScratch.Case do
+               use Bond
+               defstruct [:n]
+               @invariant non_negative: subject.n >= 0
+               def new(opts), do: %__MODULE__{n: Keyword.fetch!(opts, :n)}
+
+               def from_any(x) do
+                 case x do
+                   %{"n" => n} -> new(n: n)
+                   n when is_integer(n) -> new(n: n)
+                 end
+               end
+             end
+             """)
+    end
+
+    test "a function that merely calls a sibling mid-body still warns" do
+      # Calling a sibling is not delegating to it. Keeping this distinction is what
+      # preserves the check's value as a namespace-squatter smell.
+      assert delegation_warns?("""
+             defmodule BondTest.DelegScratch.MidBody do
+               use Bond
+               defstruct [:n]
+               @invariant non_negative: subject.n >= 0
+               def new(opts), do: %__MODULE__{n: Keyword.fetch!(opts, :n)}
+
+               def describe(_x) do
+                 _ = new(n: 1)
+                 "described"
+               end
+             end
+             """)
+    end
+
+    test "a public function unrelated to the struct still warns" do
+      # The namespace-squatter case the check turned out to be good at. It must survive.
+      assert delegation_warns?("""
+             defmodule BondTest.DelegScratch.Squatter do
+               use Bond
+               defstruct [:n]
+               @invariant non_negative: subject.n >= 0
+               def new(opts), do: %__MODULE__{n: Keyword.fetch!(opts, :n)}
+               def normalize_barcode(s), do: String.trim(s)
+             end
+             """)
+    end
+
+    test "delegation to a private function still warns" do
+      # A `defp` has no invariant checks of its own, so one hop reaches nothing that
+      # enforces them.
+      assert delegation_warns?("""
+             defmodule BondTest.DelegScratch.ToPrivate do
+               use Bond
+               defstruct [:n]
+               @invariant non_negative: subject.n >= 0
+               def from_map(m), do: build(m)
+               defp build(m), do: %__MODULE__{n: m["n"]}
+             end
+             """)
+    end
+
+    test "a tail call to the function itself still warns" do
+      assert delegation_warns?("""
+             defmodule BondTest.DelegScratch.SelfCall do
+               use Bond
+               defstruct [:n]
+               @invariant non_negative: subject.n >= 0
+               def new(opts), do: %__MODULE__{n: Keyword.fetch!(opts, :n)}
+               def loop(0), do: :done
+               def loop(k), do: loop(k - 1)
+             end
+             """)
+    end
+
+    test "a branch that does not delegate still warns" do
+      # "Every return path", not "some return path" — `:nothing` is not covered.
+      assert delegation_warns?("""
+             defmodule BondTest.DelegScratch.PartialBranch do
+               use Bond
+               defstruct [:n]
+               @invariant non_negative: subject.n >= 0
+               def new(opts), do: %__MODULE__{n: Keyword.fetch!(opts, :n)}
+               def maybe(x), do: if(x, do: new(n: 1), else: :nothing)
+             end
+             """)
+    end
+  end
+
   describe "emission count across module shapes (#80)" do
     defp skipped_warnings(source) do
       source

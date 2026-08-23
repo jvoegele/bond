@@ -231,6 +231,22 @@ defmodule Bond.Compiler.AnnotatedFunction do
   def has_doc_attributes?(%__MODULE__{doc_attributes: doc_attributes}),
     do: not Enum.empty?(doc_attributes)
 
+  @doc """
+  Whether this function was hidden from the generated documentation with `@doc false`.
+
+  The last `@doc` wins, matching Elixir. A doc value that is not a literal `false` — a
+  string, an interpolated string's AST, a `[since: …]` keyword list — does not hide it, and
+  neither does the absence of any `@doc`: an undocumented public function still appears in
+  ExDoc output.
+  """
+  @spec doc_hidden?(t()) :: boolean()
+  def doc_hidden?(%__MODULE__{doc_attributes: []}), do: false
+
+  def doc_hidden?(%__MODULE__{doc_attributes: doc_attributes}) do
+    {_meta, value} = List.last(doc_attributes)
+    value == false
+  end
+
   def override?(%__MODULE__{} = annotated_function) do
     has_preconditions?(annotated_function) or
       has_postconditions?(annotated_function) or
@@ -301,6 +317,17 @@ defmodule Bond.Compiler.AnnotatedFunction do
           # because this map is what is already threaded down into codegen; used by the
           # Precondition Availability check (#92).
           optional(:private_defs) => MapSet.t(),
+          # The using module's *public* functions carrying `@doc false`, collected at
+          # `__before_compile__` from the FSM's record of every `@doc`. Rides along for the
+          # same reason `:private_defs` does; used by the Precondition Availability check to
+          # catch the case where the rule's documentation rationale is defeated without its
+          # visibility rule being broken (#110).
+          optional(:hidden_defs) => MapSet.t(),
+          # The using module's public functions, from `Module.definitions_in/2` at
+          # `__before_compile__`. Rides along for the same reason `:private_defs` does; used
+          # by the skipped-invariants warning to recognise one-hop delegation to a public
+          # sibling (#111).
+          optional(:public_defs) => MapSet.t(),
           # The using module's alias table, as captured from `env.aliases` at
           # `__before_compile__`. Rides along for the same reason `:at_annotations` does:
           # invariant head detection needs it to resolve a struct named through an alias
@@ -422,7 +449,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
   #   - inv_mode != :purge (user hasn't explicitly opted out)
   #   - resolved warn flag is true (per-function override > module/global config)
   #   - no clause has either a struct in head or a statically-detectable struct
-  #     return, AND no clause mentions the struct anywhere at all (#80)
+  #     return, AND no clause mentions the struct anywhere at all (#80), AND no
+  #     clause delegates every return path to a public sibling (#111)
   #
   # The second condition is the one that keeps this honest. The post-invariant
   # check is emitted unconditionally and matches the return value's shape at
@@ -447,6 +475,11 @@ defmodule Bond.Compiler.AnnotatedFunction do
          not Invariants.any_clause_mentions_struct?(
            annotated_function.clauses,
            struct_module
+         ) and
+         not Invariants.any_clause_delegates?(
+           annotated_function.clauses,
+           Map.get(config, :public_defs, MapSet.new()),
+           {annotated_function.fun, annotated_function.arity}
          ) do
       first_clause = List.first(annotated_function.clauses)
 
@@ -495,11 +528,19 @@ defmodule Bond.Compiler.AnnotatedFunction do
        when pre_mode != :purge do
     private_defs = Map.get(config, :private_defs, MapSet.new())
 
+    # A function that is itself `@doc false` publishes no obligation, so the documentation
+    # argument the `:hidden` reason rests on does not apply to it. `:private` still does —
+    # Meyer's rule is about callability, not publication. See `Bond.Compiler.Availability`.
+    hidden_defs =
+      if doc_hidden?(annotated_function),
+        do: MapSet.new(),
+        else: Map.get(config, :hidden_defs, MapSet.new())
+
     if resolve_warn(annotated_function.clauses, config, :warn_unavailable_preconditions) and
-         MapSet.size(private_defs) > 0 do
+         (MapSet.size(private_defs) > 0 or MapSet.size(hidden_defs) > 0) do
       calls =
         annotated_function.preconditions
-        |> Enum.flat_map(&Availability.private_calls(&1, private_defs))
+        |> Enum.flat_map(&Availability.unavailable_calls(&1, private_defs, hidden_defs))
         |> Enum.uniq()
 
       if calls != [] do
