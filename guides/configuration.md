@@ -122,6 +122,48 @@ about the same as a one-argument one.
 
 For genuinely hot-path code, prefer `:purge`.
 
+### Purging can orphan an import or a helper
+
+Purging removes the assertion, and anything that existed *only* to serve it
+becomes unused. Two shapes, both of which a release built with
+`--warnings-as-errors` will fail on:
+
+```elixir
+defmodule Track do
+  use Bond
+  import Bond.Predicates          # warning: unused import Bond.Predicates
+
+  @pre ok: is_integer(n) ~> (n > 0)
+  def f(n), do: n
+end
+```
+
+```elixir
+@pre ok: positive?(n)
+def f(n), do: n
+
+defp positive?(x), do: x > 0     # warning: function positive?/1 is unused
+```
+
+This is not fixable from inside Bond: purging happens in the `@`-annotation
+macro, which has no way to retract an `import` or a `defp` you wrote. What makes
+it bite is *where* it appears — the purging build is usually production, which
+is the last one compiled and the one most likely to be gated on warnings.
+
+Three ways out, in the order they are usually right:
+
+  * **Use `false` instead of `:purge`.** The assertions stay compiled in and
+    the import stays used. This is the common case: `false` costs one
+    `:persistent_term` read per call per kind, which is affordable in almost
+    any build (see [Overhead](overhead.md)).
+  * **Drop the import.** Write the implication as `not p or q` — `~>` is the
+    only thing most modules import `Bond.Predicates` for.
+  * **Give the helper a second caller**, or inline it into the assertion.
+
+If you do purge, compile that configuration in CI rather than discovering it at
+release time. Bond's own CI does this for the downstream consumer project with a
+`MIX_ENV=purged mix compile --warnings-as-errors` step.
+
 ## Choosing what runs in production
 
 Dev and test almost always want everything on. Production is a real decision, and the
