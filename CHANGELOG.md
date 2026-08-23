@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Precondition Availability check now also catches `@doc false` public functions.**
+  Its own reasoning turns on documentation visibility — "Bond renders the assertion into the
+  generated docs, where `x/1` does not appear" — and a *public* function carrying
+  `@doc false` defeats that exactly as a `defp` does: callable, so Meyer's rule proper is
+  satisfied, but absent from the docs where the obligation is published. Both reasons are
+  reported, with wording that distinguishes them, since the fixes differ.
+
+  One exception: when the contracted function is itself `@doc false`, its precondition is not
+  published either, so nothing is defeated and Bond stays quiet. A private call still warns
+  there — Meyer's rule is about callability, not publication.
+
+- **`warn_skipped_invariants` no longer fires on one-hop delegation.** A public function whose
+  every return path is a call to another **public** function of the same module is covered one
+  hop away: the sibling enforces the invariant itself. Bond could not see that, so it warned —
+  and the lowest-friction way to silence it was to inline the struct literal, duplicating the
+  normalisation the builder exists to hold in one place. That is the linter arguing for a worse
+  design.
+
+  Deliberately narrow, so that what this check turns out to be unexpectedly good at survives:
+  flagging a public function with nothing to do with the module's struct, squatting in its
+  namespace. Calling a sibling *somewhere* in the body is not delegating; delegating to a
+  `defp` reaches nothing that enforces invariants; and a branch returning something else still
+  warns, because it is *every* return path, not some.
+
 ### Documentation
 
 - **A new guide, [What Should a Contract Say?](guides/what-contracts-say.md)**, placed

@@ -222,6 +222,81 @@ defmodule Bond.Compiler.Invariants do
     end)
   end
 
+  @doc """
+  Returns `true` when some clause's every return path is a call to another **public**
+  function of the same module (#111).
+
+  A function that delegates has no struct in its head and may never name the struct at all,
+  so both checks above miss it — while the value it returns has been through the sibling's
+  own entry and exit checks one hop away, and through this function's exit check on the way
+  out. Warning there pushes the author toward inlining the struct literal, duplicating the
+  normalisation the builder exists to hold in one place. That is the linter arguing for a
+  worse design, which is the opposite of its purpose.
+
+  Deliberately narrow in three ways:
+
+    * **Public siblings only.** A call to a public function of an invariant-declaring module
+      reaches something that enforces the invariant itself. A `defp` carries no such
+      guarantee, and invariants are not woven into one.
+    * **Return position only.** A function that merely *calls* a sibling somewhere in its
+      body is not delegating. Keeping the distinction preserves what this warning turns out
+      to be unexpectedly good at: flagging a public function that has nothing to do with the
+      module's struct and is squatting in its namespace.
+    * **Not itself.** A tail call to the same function says nothing about what comes back.
+
+  One hop is enough. Chasing further would need the callee's body, which at
+  `@before_compile` belongs to a function Bond may not have finished processing.
+  """
+  @spec any_clause_delegates?([term()], MapSet.t(), {atom(), non_neg_integer()}) :: boolean()
+  def any_clause_delegates?(clauses, public_defs, self) when is_list(clauses) do
+    Enum.any?(clauses, fn clause ->
+      case clause.body |> clause_body_asts() |> Enum.flat_map(&return_expressions/1) do
+        [] -> false
+        returns -> Enum.all?(returns, &local_public_call?(&1, public_defs, self))
+      end
+    end)
+  end
+
+  # The expressions a body can evaluate to, following the branching forms into their own
+  # return positions. Anything else is its own return expression.
+  defp return_expressions({:__block__, _meta, exprs}) do
+    case List.last(exprs) do
+      nil -> []
+      last -> return_expressions(last)
+    end
+  end
+
+  defp return_expressions({form, _meta, [_subject, branches]})
+       when form in [:if, :unless] and is_list(branches) do
+    Enum.flat_map(branches, fn {_key, ast} -> return_expressions(ast) end)
+  end
+
+  defp return_expressions({form, _meta, args}) when form in [:case, :cond, :with] do
+    case List.last(args) do
+      branches when is_list(branches) ->
+        Enum.flat_map(branches, fn
+          {_key, clauses} when is_list(clauses) -> Enum.flat_map(clauses, &clause_returns/1)
+          {_key, ast} -> return_expressions(ast)
+        end)
+
+      _other ->
+        []
+    end
+  end
+
+  defp return_expressions(other), do: [other]
+
+  defp clause_returns({:->, _meta, [_pattern, body]}), do: return_expressions(body)
+  defp clause_returns(_other), do: []
+
+  defp local_public_call?({name, _meta, args}, public_defs, self)
+       when is_atom(name) and is_list(args) do
+    pair = {name, length(args)}
+    pair != self and MapSet.member?(public_defs, pair)
+  end
+
+  defp local_public_call?(_other, _public_defs, _self), do: false
+
   defp clause_body_asts(body) when is_list(body), do: Enum.map(body, fn {_key, ast} -> ast end)
   defp clause_body_asts(_body), do: []
 

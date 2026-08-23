@@ -323,6 +323,11 @@ defmodule Bond.Compiler.AnnotatedFunction do
           # catch the case where the rule's documentation rationale is defeated without its
           # visibility rule being broken (#110).
           optional(:hidden_defs) => MapSet.t(),
+          # The using module's public functions, from `Module.definitions_in/2` at
+          # `__before_compile__`. Rides along for the same reason `:private_defs` does; used
+          # by the skipped-invariants warning to recognise one-hop delegation to a public
+          # sibling (#111).
+          optional(:public_defs) => MapSet.t(),
           # The using module's alias table, as captured from `env.aliases` at
           # `__before_compile__`. Rides along for the same reason `:at_annotations` does:
           # invariant head detection needs it to resolve a struct named through an alias
@@ -444,7 +449,8 @@ defmodule Bond.Compiler.AnnotatedFunction do
   #   - inv_mode != :purge (user hasn't explicitly opted out)
   #   - resolved warn flag is true (per-function override > module/global config)
   #   - no clause has either a struct in head or a statically-detectable struct
-  #     return, AND no clause mentions the struct anywhere at all (#80)
+  #     return, AND no clause mentions the struct anywhere at all (#80), AND no
+  #     clause delegates every return path to a public sibling (#111)
   #
   # The second condition is the one that keeps this honest. The post-invariant
   # check is emitted unconditionally and matches the return value's shape at
@@ -469,6 +475,11 @@ defmodule Bond.Compiler.AnnotatedFunction do
          not Invariants.any_clause_mentions_struct?(
            annotated_function.clauses,
            struct_module
+         ) and
+         not Invariants.any_clause_delegates?(
+           annotated_function.clauses,
+           Map.get(config, :public_defs, MapSet.new()),
+           {annotated_function.fun, annotated_function.arity}
          ) do
       first_clause = List.first(annotated_function.clauses)
 

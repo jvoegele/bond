@@ -311,6 +311,12 @@ defmodule Bond.Compiler do
     config =
       Map.put(config, :private_defs, MapSet.new(Module.definitions_in(env.module, :defp)))
 
+    # The module's public functions, for the delegation exemption in the skipped-invariants
+    # warning (#111). Same reason as `:private_defs`: `Module.definitions_in/2` needs the
+    # module still open, and once rather than per function.
+    config =
+      Map.put(config, :public_defs, MapSet.new(Module.definitions_in(env.module, :def)))
+
     invariants = FSM.invariants(fsm(env))
     inherited = FSM.inherited_contracts(fsm(env))
 

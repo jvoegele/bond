@@ -801,14 +801,45 @@ def build(opts) do
 end
 ```
 
+Delegation is silent too. A function whose every return path is a call to
+another **public** function of the same module is covered one hop away — the
+sibling enforces the invariant itself — so Bond stays quiet even though the
+struct is never named:
+
+```elixir
+def new(opts), do: %__MODULE__{n: Keyword.fetch!(opts, :n)}
+
+# Silent: every return path is a call to the public builder above.
+def from_map(m), do: new(n: m["n"])
+```
+
+Three things deliberately do *not* count as delegation, because each of them
+leaves the question genuinely open:
+
+  * **Calling a sibling somewhere in the body**, while returning something else.
+    Calling is not delegating.
+  * **Delegating to a `defp`.** Invariants are not woven into private functions,
+    so one hop reaches nothing that enforces them.
+  * **A branch that returns something else.** `if x, do: new(n: 1), else: :nothing`
+    still warns — it is *every* return path, not some.
+
 > #### This warning used to be noisier {: .info}
 >
 > Earlier versions ran this check on a narrow static heuristic — only a
 > literal `%__MODULE__{...}` or `{:ok, %__MODULE__{...}}` return
 > suppressed it — so all three functions above warned even though their
-> invariants demonstrably ran. If you suppressed those with
-> `@bond_warn_skipped_invariants false`, the suppression is now
-> unnecessary and can be removed. It remains harmless.
+> invariants demonstrably ran, and so did the delegation case. If you
+> suppressed any of those with `@bond_warn_skipped_invariants false`, the
+> suppression is now unnecessary and can be removed. It remains harmless.
+
+> #### An unadvertised second use {: .tip}
+>
+> "This module declares an invariant, and here is a public function with nothing
+> to do with its struct" turns out to be a decent smell for a **namespace
+> squatter** — a utility that lives here only because this is where it was first
+> needed, and now has callers elsewhere. That is why delegation is recognised
+> narrowly: broadening it to "calls a sibling anywhere" would silence the smell
+> along with the false positive.
 
 **If the function is supposed to operate on the struct**, the fix is
 usually a missing pattern or guard on the head:
