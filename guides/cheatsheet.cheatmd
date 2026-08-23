@@ -155,8 +155,18 @@ independent of the pre/post/invariant chain.
 | `p \|\|\| q` | **exclusive** or — not both |
 | `pattern <~ expr` | `match?(pattern, expr)` |
 
-Both connectives have a named form that behaves identically: `implies?(p, q)`
-for `~>`, and `xor(p, q)` for `|||`.
+Both connectives have a named form: `implies?(p, q)` for `~>`, and `xor(p, q)`
+for `|||`. Same truth table — but `~>` is a macro and **short-circuits**, while
+`implies?/2` is a function, so both its arguments are evaluated before the call.
+
+```elixir
+false ~> raise("boom")            # true — right side never runs
+implies?(false, raise("boom"))    # ** (RuntimeError) boom
+```
+
+That difference matters in exactly the case implication is most worth reaching
+for: a consequent that is only *meaningful* once the antecedent holds. Reach for
+`~>` there.
 
 ```elixir
 @post no_fee_below_limit: (amount < 100) ~> (result.fee == 0)
@@ -174,6 +184,18 @@ anything about the ones it doesn't apply to.
 
 Imported automatically inside `use Bond`. Outside it, call them on
 `Bond.Predicates` (`~>`/`<~` are macros; the rest are functions).
+
+They also read well in an ordinary function body — a predicate written to serve
+a contract, say. Import just what you need, and scope it:
+
+```elixir
+import Bond.Predicates, only: [~>: 2]
+```
+
+> #### Scope the import {: .warning}
+>
+> `|||` is exclusive or, and a bare `import Bond.Predicates` puts it in scope
+> for every expression in the module.
 
 ### Quantifiers
 
