@@ -66,15 +66,37 @@ defmodule Bond.Coverage do
   check path already carries), classifying it as a failure when `result` is falsy.
 
   Called from the coverage-recording variants of the runtime check helpers, which the compiler
-  emits only when coverage is enabled. Cheap and concurrency-safe: one `:ets.update_counter` keyed
-  by the assertion's stable `:assertion_id`.
+  emits only when coverage is enabled. Cheap and concurrency-safe: one `:ets.update_counter`.
   """
   @spec record(map(), term()) :: :ok
-  def record(%{assertion_id: id} = assertion_info, result) do
+  def record(%{} = assertion_info, result) do
     ensure_table()
     failed = if result in [false, nil], do: 1, else: 0
-    :ets.update_counter(@table, id, [{2, 1}, {3, failed}], {id, 0, 0, assertion_info})
+    key = key(assertion_info)
+    :ets.update_counter(@table, key, [{2, 1}, {3, failed}], {key, 0, 0, assertion_info})
     :ok
+  end
+
+  # One row per assertion *per place it runs*, not per assertion.
+  #
+  # `assertion_id` alone is not an identity for a row. An inherited contract is a single
+  # `Bond.Compiler.Assertion`, created once in the declaring behaviour or protocol, so every
+  # implementing module shares its id; an `@invariant` is one assertion woven into every public
+  # function of its module. Keyed on the id alone, all of those collapse into one row — and since
+  # `assertion_info` is written only as the `update_counter` *default*, the row is attributed to
+  # whichever module or function happened to record first, which under ExUnit depends on the
+  # seed. That made a `✓` readable as "this implementation violated its contract" when the
+  # failure came from a sibling (#108).
+  #
+  # The key therefore carries every field a printed row is identified by, so that each row is
+  # true of everything it names. `kind` and `label` are in it as well as `module` and `function`:
+  # `Bond.Compiler.Assertion.shape_mismatch_call/2` builds the `where`/`whenever` non-match branch
+  # by relabelling its *anchor* assertion's info to `:shape`, so the shape branch and the group's
+  # members share an id, a module and a function, and would otherwise merge into one row under
+  # whichever label recorded first.
+  defp key(info) do
+    {Map.get(info, :assertion_id), Map.get(info, :module), Map.get(info, :function),
+     Map.get(info, :kind), Map.get(info, :label)}
   end
 
   @doc """
@@ -90,7 +112,9 @@ defmodule Bond.Coverage do
         @table
         |> :ets.tab2list()
         |> Enum.map(&to_entry/1)
-        |> Enum.sort_by(&{inspect(&1.module), &1.line || 0, &1.assertion_id})
+        |> Enum.sort_by(
+          &{inspect(&1.module), &1.line || 0, &1.assertion_id, inspect(&1.function)}
+        )
     end
   end
 
@@ -152,7 +176,7 @@ defmodule Bond.Coverage do
 
   # --- internals ------------------------------------------------------------------------------
 
-  defp to_entry({id, checked, failed, info}) do
+  defp to_entry({{id, _module, _function, _kind, _label}, checked, failed, info}) do
     %{
       assertion_id: id,
       kind: Map.get(info, :kind),
@@ -191,6 +215,12 @@ defmodule Bond.Coverage do
   end
 
   defp format_mfa({name, arity}), do: "#{name}/#{arity}"
+
+  # `Bond.Server`'s `@state_invariant` / `@transition_invariant` carry no `:function`: one
+  # declaration is checked around *every* callback, and which callback it ran after is resolved
+  # only on the failure path. Since #107 these are recorded like any other contract, so the group
+  # header needs to say that rather than print a bare `nil`.
+  defp format_mfa(nil), do: "(every callback)"
   defp format_mfa(other), do: inspect(other)
 
   defp pad(n), do: String.pad_leading(Integer.to_string(n), 5)

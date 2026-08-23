@@ -472,6 +472,15 @@ every assertion can fail" habit from the [Writing Sound Assertions](writing-soun
 guide. `Bond.Coverage.entries/0` and `report/0` are also readable directly if you want to
 inspect coverage in a test or write it to a file.
 
+> #### Server invariants deserve the extra attention {: .warning}
+>
+> A violated `@state_invariant` raises *inside* the server. Its supervisor restarts it, and a
+> caller that was not waiting on that exact reply absorbs nothing — so the suite can report all
+> green while an invariant is failing on every message. That makes the coverage row the signal
+> that a failing test would normally be, and it makes `⚠ never failed` on a state invariant worth
+> interrogating rather than skimming past: no caller can put a process into a bad state by hand,
+> so vacuity here is the hardest kind to notice by reading.
+
 Keep expectations modest: in a mature codebase **most** rows will read `⚠ never failed`,
 because most postconditions and invariants over correct code genuinely never fail — that is
 what a green suite means. This is a spot-check to skim occasionally for a contract that looks

@@ -493,10 +493,16 @@ defmodule Bond.Compiler.Assertion do
   #
   # Public so `Bond.Compiler.Server` emits its state/transition-invariant checks through the same
   # path as `@pre`/`@post`/`@invariant`.
+  #
+  # `check_assertion_fun/0`, not a hard-coded `check_assertion`: this path used to bypass the
+  # coverage-recording variant that `@pre`/`@post`/`@invariant` select, so `@state_invariant` and
+  # `@transition_invariant` were checked but never recorded, and — since `shape_mismatch_call/2`
+  # is built on this — neither was the `where`/`whenever` non-match branch of *any* contract kind
+  # (#107).
   @spec check_call(Macro.t(), map()) :: Macro.t()
   def check_call(expression, info) when is_map(info) do
     quote do
-      Bond.Runtime.Eval.check_assertion(
+      Bond.Runtime.Eval.unquote(check_assertion_fun())(
         unquote(expression),
         unquote(Macro.escape(info)),
         fn -> binding() end
