@@ -19,6 +19,23 @@ defmodule Bond.DocPassthroughTest do
   alias BondTest.DocPassthroughNoAtAnnotations
   alias BondTest.DocPassthroughPurged
 
+  describe "a wrapped assertion stays inside its code block (#109)" do
+    test "the continuation line is inside the fence, not loose prose after it" do
+      text = doc(DocPassthrough, :wrapping, 1)
+
+      [_prose, contracts] = String.split(text, "#### Preconditions", parts: 2)
+      [_before, body | _] = String.split(contracts, ~r/^```(elixir)?$/m, parts: 3)
+
+      # The fixture assertion is long enough that the formatter wraps it; if it ever stops
+      # wrapping this test proves nothing, so assert that first.
+      assert String.contains?(String.trim(body), "\n"),
+             "expected the fixture assertion to wrap; it no longer does"
+
+      assert String.trim(body) =~ "wrapping: is_binary(token)"
+      assert String.trim(body) =~ ~s|token != "tok_"|
+    end
+  end
+
   defp doc(module, fun, arity) do
     {:docs_v1, _, _, _, _, _, docs} = Code.fetch_docs(module)
 

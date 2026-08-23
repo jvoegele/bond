@@ -193,7 +193,24 @@ defmodule Bond.Compiler.ContractDocs do
         [%{binding: binding} | _] = group -> binding_group_doc_lines(binding, group)
       end)
 
-    [header | lines] |> Enum.intersperse("\n    ")
+    [header, fenced(lines)]
+  end
+
+  # Wrap rendered assertions in a fenced code block rather than indenting them.
+  #
+  # An indented block was one assertion per line plus four spaces, which held only while every
+  # assertion fitted on one line. `code` is `Macro.to_string/1` output, so it runs the formatter
+  # and *wraps* once it exceeds the line length — and a continuation arrives carrying the
+  # formatter's own indentation, 0 or 2 spaces, below Markdown's 4-space threshold. The code block
+  # ended there: at 2 spaces the continuation rendered as a paragraph and a fresh block opened for
+  # the next assertion; at 0 it was folded into the preceding line with no separator at all, which
+  # looked like a whitespace bug around `~>` rather than a lost newline (#109).
+  #
+  # A fence is immune to indentation, so it removes the class rather than the instance. It also
+  # pins the `elixir` lexer regardless of what the expression contains, and matches how `@spec` is
+  # already rendered on the same page — the contract sections sit directly beneath it.
+  defp fenced(lines) do
+    ["```elixir\n", Enum.intersperse(lines, "\n"), "\n```"]
   end
 
   # One documentation line for an assertion: the rendered `code`, prefixed with `label: ` when
@@ -257,7 +274,6 @@ defmodule Bond.Compiler.ContractDocs do
           header = IO.iodata_to_binary(binding_doc_header(binding))
           [header | Enum.map(group, fn member -> "  " <> format_invariant_line(member) end)]
       end)
-      |> Enum.map(&("    " <> &1))
       |> Enum.join("\n")
 
     """
@@ -267,7 +283,9 @@ defmodule Bond.Compiler.ContractDocs do
     by or passed into this module's public API. Inside each assertion, `subject` refers
     to the value being checked.
 
+    ```elixir
     #{invariant_lines}
+    ```
 
     These invariants are checked automatically on entry to and exit from every public
     function in this module. Private functions are exempt by the Eiffel convention.\

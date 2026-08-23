@@ -32,6 +32,12 @@ defmodule BondTest.DocPassthrough do
   def undocumented_contracted(x), do: x
   @pre pos: x > 0
   def undocumented(x), do: x
+
+  @doc "An assertion long enough that `Macro.to_string/1` wraps it (#109)."
+  @pre wrapping:
+         is_binary(token) and byte_size(token) > 10 and String.starts_with?(token, "tok_") and
+           token != "tok_"
+  def wrapping(token), do: token
 end
 
 defmodule BondTest.DocPassthroughPurged do
