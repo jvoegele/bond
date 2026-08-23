@@ -111,11 +111,12 @@ defmodule Bond.MixProject do
         {"LICENSE", [title: "License"]},
         "CHANGELOG.md",
         # Guides are ordered by the questions a reader asks, in the order they
-        # ask them: learn it, write it, write it well, then the larger features,
-        # then the operational concerns. Reference is for lookup rather than
+        # ask them: learn it, write it, know what to say in it, say it soundly,
+        # then the larger features, then the operational concerns. Reference is for lookup rather than
         # reading, so it sits after the narrative path.
         "guides/getting-started.md",
         "guides/writing-contracts.md",
+        "guides/what-contracts-say.md",
         "guides/writing-sound-assertions.md",
         "guides/invariants.md",
         "guides/reusable-contracts.md",
@@ -136,6 +137,7 @@ defmodule Bond.MixProject do
         Guides: [
           "guides/getting-started.md",
           "guides/writing-contracts.md",
+          "guides/what-contracts-say.md",
           "guides/writing-sound-assertions.md",
           "guides/invariants.md",
           "guides/reusable-contracts.md",

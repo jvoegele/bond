@@ -21,10 +21,18 @@ balance", "result equals balance minus amount", "every operation
 preserves `length(items) <= capacity`". Dialyzer can't reason about
 those.
 
+**To publish a specification, not just check one.** A contract states what a
+function promises, and Bond renders those promises into your ExDoc output as
+`#### Preconditions` and `#### Postconditions` — Eiffel's *short form*, the
+interface with the implementation stripped away. Most of a contract's value is
+delivered before anything runs, to whoever reads the docs.
+
 **To catch bugs sooner than tests would.** Tests cover the scenarios
 you wrote. Contracts run on every call. Long-running dev or staging
 environments routinely surface contract violations on paths the test
-suite never exercised.
+suite never exercised. This is what a specification does when an
+implementation disagrees with it — a consequence worth having, rather
+than the reason to write one.
 
 **Without paying for it in production.** Per-kind configuration
 (`true | false | :purge`) lets you decide, per environment and per module,

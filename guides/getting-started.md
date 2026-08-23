@@ -402,6 +402,11 @@ where contracts act as the oracle for random inputs — see the
   the annotations and the assertion language, and [Invariants](invariants.md)
   covers module-wide constraints on every instance of a struct — both flavours,
   struct and process state.
+- [What Should a Contract Say?](what-contracts-say.md) is about the question the
+  syntax does not answer — what belongs in an assertion, and why a specification is
+  worth writing even when the implementation is one line. [Writing Sound
+  Assertions](writing-sound-assertions.md) then covers making one behave the way it
+  reads.
 - The [Cheatsheet](cheatsheet.cheatmd) puts every form on one page, for once you
   know what you're looking for and just need the syntax.
 - The [Testing Contracts](testing-contracts.md) guide covers the whole
