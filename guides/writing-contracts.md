@@ -60,6 +60,32 @@ to the `result` variable (bound to the function's return value) and
 > `@` alone and you write contracts as the qualified calls `Bond.pre/1`,
 > `Bond.post/1`, and `Bond.invariant/1`. See the FAQ for details.
 
+### Multi-clause functions must agree on parameter names
+
+A contract names its arguments, so every clause of a contracted function has to
+agree on what each position is *called*. Where they disagree at a position a
+contract references, Bond stops with a compile error:
+
+```text
+** (CompileError) Bond requires consistent top-level parameter names across all
+   clauses of needs_refresh?/3 when contracts are attached.
+   Position 1 disagrees: :_skew, :skew_seconds.
+```
+
+Two details make this less restrictive than it first reads:
+
+  * **A leading underscore does not count.** `_now` in one clause and `now` in
+    another agree — Bond strips one leading underscore before comparing. Mark an
+    unused parameter `_skew_seconds`, not `_skew`, and the clause keeps both the
+    warning suppression and the agreed name.
+  * **Only positions a contract actually references matter.** Clauses may
+    disagree freely at a position no assertion mentions; Bond gives it a
+    generated name and moves on.
+
+You will not find this by reading — it is discoverable by hitting it — which is
+why the diagnostic prints each clause's names side by side and says which
+position disagrees.
+
 ## Assertion syntax
 
 An assertion is a boolean (or truthy) Elixir expression, optionally paired

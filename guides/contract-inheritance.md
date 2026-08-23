@@ -216,6 +216,61 @@ outer name, and that reference *is* validated. In
 `({:ok, v} when v > limit) <~ result`, `v` is pattern-bound but `limit` must be
 a declared argument (or `result`), or it is a compile error.
 
+### Where names resolve — write remote calls fully qualified
+
+An inherited contract is stored as an expression and expanded **in each
+implementing module**. Argument names are rebound positionally, but everything
+else — remote calls, struct literals, `__MODULE__` — resolves in the
+*implementer's* alias scope, not the abstraction's.
+
+So an `alias` at the declaration site does not travel with the contract:
+
+```elixir
+defmodule Providers.Adapter do
+  use Bond.Behaviour
+  alias Providers.Tokens
+
+  # `Tokens` resolves here, but the contract is not expanded here.
+  @post fresh: Tokens.fresh?(result)
+  @callback refresh() :: Tokens.t()
+end
+```
+
+Every implementation that does not itself alias `Tokens` gets:
+
+```text
+warning: Tokens.fresh?/1 is undefined (module Tokens is not available or is yet
+to be defined). Did you mean:
+      * Providers.Tokens.fresh?/1
+     └─ lib/providers/tidal.ex:101:58:
+          Providers.Tidal.__bond_postconditions__refresh__1/2
+```
+
+and, at runtime, a `Bond.AssertionEvaluationError` rather than a passing
+contract — the assertion cannot be evaluated, so it is reported rather than
+quietly skipped.
+
+The diagnostic is accurate but lands a long way from the cause: it names a
+generated function, points at a file that does not contain the contract, and
+gives a line and column that are blank in that file. Nothing in it says
+"inherited contract", so the natural first move is to add an `alias` to the
+implementation — which works, and leaves the trap set for the next one.
+
+> #### The rule {: .tip}
+>
+> Anything a contract on a `Bond.Behaviour` callback or `Bond.Protocol`
+> function names must be resolvable from **every** implementing module. Spell
+> remote calls and struct literals out in full at the declaration site:
+>
+> ```elixir
+> @post fresh: Providers.Tokens.fresh?(result)
+> ```
+
+There is a corroborating hint at the declaration site, easy to miss: because
+the contract is stashed rather than expanded there, an alias used *only* inside
+a contract is reported as an `unused alias`. If you see that on a behaviour,
+the short name in the contract is about to fail somewhere else.
+
 ### Inheriting verbatim — and the plain-`@pre`/`@post` rule
 
 By default an implementation inherits its contracts **verbatim**. For a

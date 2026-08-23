@@ -24,6 +24,14 @@ defmodule Bond.Protocol do
   it attaches to in `use Bond`. The contract expressions reference the protocol function's
   declared argument names (`data` above) and, in a `@post`, `result` (the return value).
 
+  > #### Write remote calls fully qualified {: .tip}
+  >
+  > A contract expression is expanded in each **implementing** module, so it resolves in that
+  > module's alias scope — not this one. An `alias` here does not travel with the contract; a
+  > short name that resolves at the declaration site fails in every implementation that does
+  > not happen to alias the same module. Spell remote calls and struct literals out in full.
+  > See the [Contract Inheritance guide](contract-inheritance.md#where-names-resolve-write-remote-calls-fully-qualified).
+
   ## How it works — dispatch-layer wrapping
 
   `defprotocol` generates a *dispatch* function — `Sized.size(data)` calls

@@ -51,6 +51,22 @@ the clause that failed and shows everything that was in scope when it did:
 |   binding: [account: %Account{owner: "ana", balance: 100}, amount: -30]
 ```
 
+> #### If your contracts do nothing, check for `use Bond` {: .warning}
+>
+> Without it, `@pre`/`@post` fall through to `Kernel.@` and become ordinary
+> module attributes. None of the resulting errors mentions Bond, so the cause is
+> not obvious from any of them:
+>
+>   * an assertion that references a parameter — `error: undefined variable "x"`
+>   * a `@post` referencing `result` — `error: undefined variable "result"`
+>   * an assertion referencing **nothing** — compiles, enforces nothing, and
+>     warns only `module attribute @pre was set but never used`
+>
+> The third is the one that can pass unnoticed, though `--warnings-as-errors`
+> catches it and most real assertions name a parameter. If you see any of these
+> around a contract, check the module has `use Bond` before looking anywhere
+> else.
+
 ## Adding a postcondition
 
 A `@post` declares a **postcondition** — what the function guarantees in

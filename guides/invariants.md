@@ -55,6 +55,21 @@ end
 > (*Object-Oriented Software Construction*, 2nd edition, §11.9). Elixir always has that
 > case, because `%Mod{}` is always available — so your `defstruct` defaults are part of
 > the contract whether you meant them to be or not.
+>
+> On recent Elixir the type checker often reaches the same conclusion first, at compile
+> time and without being told. Given a field whose default is `nil` and a function that
+> passes it somewhere requiring a real value, it can prove the default-constructed struct
+> is never a valid argument:
+>
+> ```text
+> warning: incompatible types given to fresh?/2:
+>     fresh?(%Tokens{...}, DateTime.utc_now())
+> given types:
+>     %Tokens{access_token: nil, expires_at: nil}, dynamic(%DateTime{})
+> ```
+>
+> A 1988 design rule and a 2025 type checker agreeing that the defaults are part of the
+> specification.
 
 ### The `subject` binding
 
