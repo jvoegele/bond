@@ -5,7 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.16.0] - 2026-08-23
+
+Diagnostics, and the guide that was missing.
+
+Three of Bond's compile-time messages were telling people things that were not true, or not
+usefully true. Two warnings fired on correct code — a precondition calling a `@doc false`
+predicate was accepted while a `defp` one was not, and a function that delegated to a public
+builder was reported as skipping invariants it demonstrably ran. The property-testing macros
+failed with errors raised by `Kernel` and ExUnit that never mentioned Bond. A warning that
+fires on correct code is worse than no warning, because people learn to suppress the category
+and the true positives go with it.
+
+The documentation half is larger than usual and worth a read even if you skip the rest.
+`writing-sound-assertions.md` offered "does it restate the body?" as the test for a vacuous
+postcondition, which read as a general rule and deleted correct specifications. There is now a
+guide on what a contract should *say*, and the surrounding docs are reframed around it: a
+contract states what a function promises, and catching bugs is what that does when an
+implementation disagrees.
 
 ### Fixed
 
