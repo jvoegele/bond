@@ -31,8 +31,15 @@ defmodule Bond.Coverage do
       Bond.Coverage.install_reporter()
 
   Then `mix test` prints a per-assertion table of how many times each contract was checked and how
-  many of those were failures. Recording itself needs no reporter — `entries/0` and `report/0` can
-  be read at any point.
+  many of those were failures. `entries/0` and `report/0` can also be read directly at any point.
+
+  > #### Install the reporter even if you read `entries/0` yourself {: .warning}
+  >
+  > Coverage accumulates in an ETS table, and an ETS table dies with the process that created it.
+  > `install_reporter/0` creates the table up front from `test/test_helper.exs`, whose process
+  > outlives the suite. Without that call the table is created lazily by whichever *test* process
+  > evaluates the first contract, and every recorded evaluation is discarded when that test
+  > finishes.
   """
 
   @table :bond_coverage
@@ -126,9 +133,16 @@ defmodule Bond.Coverage do
   @doc """
   Installs an `ExUnit.after_suite/1` callback that prints `report/0` once the suite finishes. Call
   this in `test/test_helper.exs` after `ExUnit.start()`.
+
+  Also creates the coverage table, so that it is owned by the process running
+  `test/test_helper.exs` rather than by whichever test process happens to evaluate the first
+  contract. An ETS table dies with its owner, so a table created by a test process takes every
+  recorded evaluation with it when that test finishes — long before this reporter runs.
   """
   @spec install_reporter() :: :ok
   def install_reporter do
+    ensure_table()
+
     ExUnit.after_suite(fn _result ->
       IO.puts("\n" <> report())
     end)
