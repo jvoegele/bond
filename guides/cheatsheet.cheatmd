@@ -22,7 +22,7 @@ stability guarantees.
 
 ```elixir
 def deps do
-  [{:bond, "~> 1.14"}]
+  [{:bond, "~> 1.15"}]
 end
 ```
 
