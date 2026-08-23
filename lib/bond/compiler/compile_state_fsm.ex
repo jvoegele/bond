@@ -188,6 +188,20 @@ defmodule Bond.Compiler.CompileStateFSM do
   end
 
   @doc """
+  Discards the pending contracts that a definition at `line` would have absorbed, and returns
+  them as `{preconditions, postconditions}`. Contracts written below `line` stay pending.
+
+  For the case where a definition arrives that Bond deliberately does not weave: contracts
+  written for it must not survive to be absorbed by the *following* definition, while contracts
+  written for that following definition must not be taken away from it.
+  """
+  @spec discard_pending_contracts(server_ref, non_neg_integer()) ::
+          {list(precondition_def), list(postcondition_def)}
+  def discard_pending_contracts(fsm, line) do
+    :gen_statem.call(fsm, {:discard_pending_contracts, line})
+  end
+
+  @doc """
   Returns a list containing all pending precondition definitions.
   """
   @spec pending_preconditions(server_ref) :: list(precondition_def)

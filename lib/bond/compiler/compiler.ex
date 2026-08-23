@@ -168,10 +168,49 @@ defmodule Bond.Compiler do
 
   def __on_definition__(env, kind, fun, params, guards, body) when kind in [:def, :defp] do
     if generated_function?(fun) do
-      :ok
+      discard_contracts_declared_on(env, fun, length(params))
     else
       on_user_definition(env, kind, fun, params, guards, body)
     end
+  end
+
+  # A generated function is not woven, so any `@pre`/`@post` written immediately above one has
+  # nowhere to go. Dropping it on the floor is not an option: pending contracts live in the FSM
+  # until a definition absorbs them, so leaving them queued means the *next* function silently
+  # acquires a contract its author never wrote on it — which, when the parameter names happen to
+  # line up, enforces quietly against the wrong function rather than failing.
+  #
+  # So the contracts are discarded here, and their loss is reported. Bond's stability policy
+  # treats a behaviour change to the attribute syntax as something that must not happen silently
+  # (see `guides/stability.md`); this is the warning that keeps that promise.
+  defp discard_contracts_declared_on(env, fun, arity) do
+    case FSM.discard_pending_contracts(fsm(env), env.line) do
+      {[], []} ->
+        :ok
+
+      {preconditions, postconditions} ->
+        IO.warn(
+          discarded_contracts_message(fun, arity, preconditions, postconditions),
+          Macro.Env.stacktrace(env)
+        )
+
+        :ok
+    end
+  end
+
+  defp discarded_contracts_message(fun, arity, preconditions, postconditions) do
+    kinds =
+      [{"precondition", preconditions}, {"postcondition", postconditions}]
+      |> Enum.reject(fn {_name, defs} -> defs == [] end)
+      |> Enum.map_join(" and ", fn {name, defs} ->
+        "#{length(defs)} #{name}#{if length(defs) == 1, do: "", else: "s"}"
+      end)
+
+    "Bond: #{kinds} declared on `#{fun}/#{arity}` #{if length(preconditions) + length(postconditions) == 1, do: "was", else: "were"} discarded. " <>
+      "A name wrapped in double underscores is Bond's convention for a compiler- or " <>
+      "library-generated function (`__struct__`, `Ecto.Schema`'s `__schema__`, and so on), and " <>
+      "Bond does not weave contracts into those. If `#{fun}/#{arity}` is a function you wrote " <>
+      "and want contracts on, rename it without the leading and trailing underscores."
   end
 
   # Functions auto-generated as a side effect of a construct rather than written by the module's
