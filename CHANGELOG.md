@@ -5,7 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.15.0] - 2026-08-23
+
+A bug-fix release, from a sweep of the issues raised dogfooding Bond in a real Phoenix
+application. Seven fixes, of which three are worth knowing about before upgrading:
+
+`@invariant` could not be used on an `Ecto.Schema` module at all — the module where a struct's
+laws belong in a Phoenix app, and where the invariants guide sends you. It now can.
+
+Contract coverage recorded nothing. The table was created by whichever test process first
+evaluated a contract and died with it, so anyone who followed the documented setup saw
+`no contracts were evaluated` and reasonably concluded the feature did not work. It does; and
+it now reports server invariants, and attributes each row to the module and function that
+actually ran it.
+
+Two changes are visible rather than merely corrective, and are called out in place below:
+functions whose names are wrapped in double underscores are no longer woven, and generated
+contract documentation is emitted as fenced code blocks rather than indented ones.
 
 ### Fixed
 
