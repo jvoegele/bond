@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+
+- **A new guide, [What Should a Contract Say?](guides/what-contracts-say.md)**, placed
+  between Writing Contracts and Writing Sound Assertions. It covers the question the syntax
+  reference does not answer: what belongs in an assertion.
+
+  The guides were thorough on soundness, testing, inheritance, concurrency and
+  configuration, and had no home for the question Meyer's chapter 11 is mostly about — a
+  contract states what a function promises, and catching bugs is what that does when an
+  implementation disagrees. Falsifiability is how you check an assertion is *good*; stating
+  the specification is *why* you write one.
+
+  The distinction is not academic. `writing-sound-assertions.md` offered "does it restate
+  the body?" as the test for a vacuous postcondition, and read as a general rule that
+  deletes correct specifications — as it did in the project this was found in, for months.
+  Meyer works through the same case directly (§11.7, p. 352): a `full?` whose body is
+  `count = capacity` and whose postcondition is `Result = (count = capacity)` is not
+  redundant, because the instruction is prescriptive and the assertion descriptive. The test
+  that holds is **mechanism versus meaning**, not resemblance.
+
+  That section is rewritten accordingly, and the surrounding docs now carry the
+  specification framing: the FAQ names the axis tests structurally cannot cover, `about.md`
+  lists publishing a specification alongside catching bugs, and `writing-contracts.md`
+  names the generated `#### Preconditions` sections as Eiffel's *short form*.
+
 ## [1.15.0] - 2026-08-23
 
 A bug-fix release, from a sweep of the issues raised dogfooding Bond in a real Phoenix
