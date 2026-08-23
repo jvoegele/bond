@@ -145,10 +145,14 @@ end
 ```
 
 ```elixir
-# in test/roots_test.exs
-use Bond.PropertyTest
+# test/roots_test.exs
+defmodule RootsTest do
+  use ExUnit.Case
+  use Bond.PropertyTest
 
-contract_holds &Roots.sqrt/1, args: [StreamData.float(min: 0.0)]
+  # At the module level, not inside a `test` block: this *defines* a property.
+  contract_holds &Roots.sqrt/1, args: [StreamData.float(min: 0.0)]
+end
 ```
 
 That runs `sqrt/1` against a stream of generated floats and fails if any

@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **The `Bond.PropertyTest` macros now say so when they are misused.** `contract_holds/2`,
+  `probe_contract/2`, `invariants_hold/2` and `server_invariants_hold/2` *define* a property —
+  they expand to `property/2`, which expands to `def`. Both ways of getting that wrong produced
+  an error that never mentioned Bond:
+
+  * **Called inside a `test` block**, the failure was `cannot invoke def/2 inside function/macro`
+    raised by `Kernel`, naming a construct absent from the user's code, with the Bond frame at
+    the bottom of the trace. Each macro now raises a Bond `CompileError` naming the placement,
+    showing the module-level form, and pointing at `Bond.Test` — landing here usually means an
+    assertion was wanted, not a property. The check runs before option validation, so the more
+    fundamental mistake is the one reported.
+  * **Used twice for the same target**, the property names collided and ExUnit reported
+    `DuplicateTestError`, which names neither Bond nor the fix. Bond now reports the collision
+    itself and points at the `:name` option, which all four macros already accepted.
+
+  `guides/testing-contracts.md` gains a section on `:name` — worth setting even when it is not
+  required, since the name is what a failure report shows — and the README's property-testing
+  snippet now shows the enclosing `defmodule`/`use`, so the module-level placement is visible at
+  a glance rather than implied.
+
 - **The Precondition Availability check now also catches `@doc false` public functions.**
   Its own reasoning turns on documentation visibility — "Bond renders the assertion into the
   generated docs, where `x/1` does not appear" — and a *public* function carrying
