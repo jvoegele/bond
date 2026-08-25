@@ -19,6 +19,10 @@ reading does not match their behaviour.
 > were the second, the first will talk you out of correct specifications.
 > [What Should a Contract Say?](what-contracts-say.md) covers the other half, and is
 > worth reading first if you have not.
+>
+> Note also what "can this fail?" does **not** ask: whether today's callers happen to
+> satisfy it. See
+> [Well-behaved callers are not a reason to skip a contract](what-contracts-say.md#well-behaved-callers-are-not-a-reason-to-skip-a-contract).
 
 > #### The one habit that prevents most of these {: .tip}
 >

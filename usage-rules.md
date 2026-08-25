@@ -362,23 +362,40 @@ The first must change whenever the implementation does, because it *is* the impl
 second survives any correct rewrite, and Bond publishes it to every reader of your docs. If you
 cannot describe an assertion without describing how the function works, it is mechanism.
 
-**Do not write:**
+**Do not write** — and each of these is either unsound, unreachable, or not something the
+specification says:
 
-  * **Type checks** — use `@spec`. ExDoc renders it more prominently, Dialyzer checks it, and it
-    costs nothing at runtime. Exception: when violating it produces a confusing crash somewhere
-    else, a `@pre` converts that into a named violation identifying the caller.
+  * **A type check, where the type is the whole of what you would be saying** — use `@spec`.
+    ExDoc renders it more prominently, Dialyzer checks it, and it costs nothing at runtime. But
+    `@spec` is *static* and never runs, so this is a division of labour rather than a ban: where
+    the value arrives at runtime from outside the compiler's view — parsed input, a provider
+    payload, a message from another process — or where violating it produces a confusing crash
+    somewhere else, a `@pre` is the one that actually fires, and it names the caller. A type check
+    carrying a further constraint (`is_integer(n) and n > 0`) was never in question.
   * **A `@pre` a guard already enforces.** Bond reproduces your `when` guards on the wrapper
     clauses, so a failing argument raises `FunctionClauseError` *before* any precondition runs —
-    the assertion is unreachable. A `@pre` **stronger** than the guard is a different matter and
-    worth keeping.
+    the assertion is unreachable. *Which* side to drop is Meyer's **Non-Redundancy Principle**,
+    and it splits three ways: a guard that **selects a clause** is dispatch — keep it, write no
+    `@pre`; a guard **standing in for a type** (`when is_binary(email)`) is Elixir's declared
+    parameter type — keep it, and put the fact in a `@spec`; a guard **stating a domain rule**
+    (`when amount <= account.balance`) is the only redundant case, and there you **pick one** —
+    if a violation is the caller's bug, write the `@pre` and drop the guard, because only the
+    contract names the caller, renders into the docs, and appears in the coverage table. A `@pre`
+    **stronger** than the guard is not redundant at all: it can fail, so keep it as it stands.
   * **Assertions about data from outside your system.** A provider sending nonsense is not a
     programming error, and a `@post` that raises on it converts their bad data into your crash.
     At a parsing boundary, **assert what you emit, never what you received.**
   * **A precondition your caller cannot evaluate.** A public function's `@pre` must not call a
     `defp` — Bond warns, citing Meyer's Precondition Availability rule. `@doc false` on the
     predicate defeats it the same way, because the obligation is published in terms the reader
-    cannot look up. Postconditions are exempt: they are the function's promise, not the caller's
-    obligation.
+    cannot look up. The fix is almost always to **publish the predicate**, not to drop the
+    obligation — if it is fit to demand, it is fit for the caller to read. Postconditions are
+    exempt either way: they are the function's promise, not the caller's obligation.
+
+**Not on that list: "every current caller already gets this right."** A precondition is an
+obligation on every *future* caller, so a contract no existing call site violates is the normal
+case, not a redundant one — that is what a green suite looks like. Decide from the specification,
+not from a census of today's callers.
 
 **Do write** laws that are true of the *meaning*: conservation (`length(result) <= length(input)`,
 or comparing sorted multisets rather than appealing to uniqueness), relationships between two
@@ -416,14 +433,28 @@ config :bond,
 
 ## Where contracts go
 
-| Layer | Contract? |
+Every layer has a specification, so every layer can carry a contract. What changes between them is
+**which kind** the specification warrants — not whether the module deserves one.
+
+| Layer | What the specification usually warrants |
 | --- | --- |
-| Domain structs, parsers | **Yes** — external data lands here, poison values start here |
-| Behaviour `@callback`s | **Yes, declare once** — inherited by every implementation |
-| Pure core / transformation modules | **Yes** — the interesting laws live here |
-| HTTP clients, adapters facing a service you don't control | **No** — they return `{:error, _}`; they are filters, not demanding modules |
-| Persistence contexts | Sparingly — the laws usually belong on the struct |
-| Controllers / LiveViews | **No** — assert in tests; a violation in a request path is a 500 |
+| Domain structs, parsers | All three — external data lands here, poison values start here |
+| Behaviour `@callback`s | All three, **declared once** — inherited by every implementation |
+| Pure core / transformation modules | `@post` above all — the interesting laws live here |
+| HTTP clients, adapters facing a service you don't control | `@post`, rarely `@pre` — assert what you *emit*, stay tolerant about what arrives |
+| Persistence contexts | `@pre` for what a caller must supply; the type's own laws belong on the struct |
+| Controllers / LiveViews | `@post` / `@invariant` over the state you assign — usually the thinnest layer, so there is least to say, not least worth saying |
 
 The seam matters: **the postconditions of your filter modules must match or exceed the
 preconditions of the modules behind them.**
+
+Two things that are *not* reasons to leave a layer uncontracted:
+
+  * **"A violation there would be a 500."** That is a configuration question, and Bond already
+    answers it: ship that kind as `false` and the assertion is compiled in, inert, and switchable
+    from a remote console mid-incident. An *unsound* assertion is a reason not to write one; an
+    expensive failure mode is only a reason to choose where it runs.
+  * **"This layer is a filter, so it should be tolerant."** Tolerance is a statement about `@pre`
+    — whether bad input is the caller's bug or a normal outcome to return. It says nothing about
+    `@post`, and a filter's postconditions are precisely what the demanding domain behind it is
+    relying on.

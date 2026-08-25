@@ -96,6 +96,14 @@ answerable from a remote console instead of a rebuild.
 assertion fires, restore. Two minutes, and it is the only thing that distinguishes
 unbreakable-by-correct-code from unbreakable-because-vacuous.
 
+**"No current caller violates it" is not a fourth row.** All three ask whether the assertion
+*could* be false for an input the specification admits — never whether today's call sites produce
+one. A precondition is a standing obligation on every *future* caller, and callers arrive: the
+value of `@pre positive: amount > 0` is that it holds the line the day someone adds a call site
+that gets it wrong. Well-behaved callers, even carefully contracted ones, are a reason the
+contract will stay green, not a reason to leave it unwritten. Census the call sites to understand
+the function; never to decide whether it deserves a contract.
+
 ## Shapes that pay off
 
 The full catalogue with worked examples is in `references/contract-shapes.md`. In brief, look for:
@@ -162,11 +170,28 @@ Where two genuinely do coincide, keep the stronger one and drop the other.
 
 ## What not to assert
 
-  * **Types.** Use `@spec` — rendered more prominently, checked by Dialyzer, free at runtime.
-    Exception: when violating it produces a *confusing crash somewhere else*, a `@pre` converts
-    that into a named violation identifying the caller.
+Every entry below is here for one of three reasons: the assertion is **unsound** (it can accuse
+correct code), **unreachable** (it cannot run), or **not warranted by the specification**. Nothing
+is on this list because contracting is costly, because the layer feels unimportant, or because
+nothing currently violates it — and if you find yourself declining a contract for a reason that is
+not one of the three, the reason is not good enough.
+
+  * **A type, where the type is all you would be saying.** Use `@spec` — rendered more
+    prominently, checked by Dialyzer, free at runtime. It is a division of labour, not a ban:
+    `@spec` is static and never runs, so where the value arrives from outside the compiler's view
+    (parsed input, a provider payload, a message from another process), or where violating it
+    produces a *confusing crash somewhere else*, a `@pre` is what actually fires and it names the
+    caller. A type check carrying a further constraint is not a type check.
   * **What a guard already enforces.** The guard raises `FunctionClauseError` first, so the
-    assertion is unreachable. A `@pre` *stronger* than the guard can fail and is worth keeping.
+    assertion is unreachable. *Which* side to drop is Meyer's **Non-Redundancy Principle**, and
+    only one of three cases is redundant at all: a guard that **selects a clause** is dispatch
+    (keep it, no `@pre`); a guard **standing in for a type** is Elixir's declared parameter type
+    (keep it, state the fact in `@spec`); a guard **stating a domain rule** —
+    `when amount <= account.balance` — is the redundant one, and there you **pick one**. If a
+    violation is the caller's bug, that is the `@pre`: write it and drop the guard, since only
+    the contract names the caller, reaches the docs, and appears in the coverage table. It is the
+    trade the falsifiability table names — **delete the redundant guard, keep the contract.** A
+    `@pre` *stronger* than the guard is not redundant and stands as it is.
   * **That external data was well formed.** A contract guards *your* logic. A provider sending
     nonsense is not a programming error, and a `@post` that raises on it converts their bad data
     into your crash. **At a parsing boundary, assert what you emit, never what you received.** If
@@ -176,18 +201,19 @@ Where two genuinely do coincide, keep the stronger one and drop the other.
   * **Anything about a lazy stream.** Asserting over one consumes it. Contract the eager thing
     next to it.
   * **Anything about shared mutable state.** See below.
-  * **Anything unfalsifiable in this codebase.** Requiring a `DateTime` be UTC looks principled,
-    but if no call site can construct a non-UTC one, nothing is being checked — and with a
-    timezone database in play the assertion would reject *valid* calls. **Falsifiable is not the
-    same as valuable:** an assertion should reject inputs that are wrong, not merely unconventional.
+  * **Anything the specification does not actually require.** Requiring a `DateTime` be UTC looks
+    principled, but with a timezone database in play a non-UTC value is a perfectly good argument,
+    so the assertion rejects *valid* calls. **Falsifiable is not the same as valuable:** an
+    assertion should reject inputs that are wrong, not merely unconventional. The test is what the
+    specification admits — never whether today's call sites happen to pass it.
   * **Uniqueness, when duplicates are legal in the domain.** A ledger law written as "no track
     reported twice" fires on the first correct input containing a genuine duplicate. Compare
     **multisets** against the input instead — `Enum.sort(out) == Enum.sort(in)` — which is sound,
     strictly stronger, and rejects a drop, a duplication *and* a substitution.
   * **Anything on dead code.** An assertion that never executes is worse than one that never
-    fails: it does not even appear in the coverage table. **Check for callers first** — an
-    uncontracted function nothing calls is a question about the design, and answering it is a
-    prerequisite to contracting it.
+    fails: it does not even appear in the coverage table. A function with **no callers at all** is
+    a question about the design, and answering it is a prerequisite to contracting it. That is the
+    only caller question worth asking here: how many, not what they pass.
 
 ## Shared state: assert only what survives interleaving
 
@@ -261,10 +287,11 @@ and name *that*. Then name the abstraction **for the value, not the guard**: `co
 1. **State what the function or type promises**, in terms a caller can rely on. If you cannot say
    it, you do not understand the thing well enough to contract it yet.
 2. **Meaning or mechanism?** Mechanism goes in the body. "It resembles the body" is not the test.
-3. **Is it a type check?** Then `@spec` — unless violating it crashes confusingly elsewhere.
+3. **Is it *only* a type check?** Then `@spec` — unless the value arrives at runtime from outside
+   the compiler's view, or violating it crashes confusingly elsewhere.
 4. **Is it total?** Lead with a type check; gate partial predicates with `~>`.
 5. **Is it available to the caller?** A `@pre` naming a `defp` (or a `@doc false` function) is one
-   the client cannot discharge.
+   the client cannot discharge — so publish the predicate, rather than dropping the obligation.
 6. **Justifiable from the specification alone**, or only from how you happened to implement it?
 7. **Can it fail?** Write a `Bond.Test` assertion targeting its `label:`. Where no input can
    falsify it, mutate the implementation and confirm it fires.

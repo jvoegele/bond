@@ -468,8 +468,21 @@ The tools above prove a contract *can* fire. `Bond.Coverage` answers the complem
 question across a whole suite: **which assertions ran but were never once false?** An
 assertion checked hundreds of times that has never failed is a candidate for vacuity — the
 runtime counterpart to the compile-time [assertion linter](writing-sound-assertions.md).
-It is a *prompt*, not a verdict: a correct assertion over correct code also never fails, so
-treat `⚠ never failed` as "either write a test that makes this fail, or delete it."
+
+It is a *prompt*, not a verdict. A correct assertion over correct code also never fails, so
+`⚠ never failed` is a question with three answers, and only one of them is "delete it":
+
+| Why it cannot fail | What to do |
+|---|---|
+| It transcribes *how* the body works | Restate it as *what* the function promises |
+| The body guards the property twice | **Delete the redundant guard**, keep the contract |
+| It is a true law of a pure function | Keep it — prove it by **mutation**, not by a test |
+
+The third is the common case for a specification and is not a defect: a pure function's
+postconditions hold over every input the application ever sees, which is the point of writing
+them. Where no input can falsify one, break the implementation deliberately, confirm the
+assertion fires, and restore it — that is what distinguishes unbreakable-by-correct-code from
+unbreakable-because-vacuous.
 
 Coverage is **compile-time opt-in**, so a build that does not enable it is byte-for-byte
 unchanged and pays nothing. Enable it for the test environment and install the end-of-suite

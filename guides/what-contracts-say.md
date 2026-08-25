@@ -100,6 +100,37 @@ delivered before anything runs.
 So "delete it, it can never fail" trades a published specification for nothing. If the
 assertion states meaning rather than mechanism, keep it.
 
+## Well-behaved callers are not a reason to skip a contract
+
+The same mistake has a second form, which looks at the *callers* rather than the body:
+
+> Every caller of `withdraw/2` checks the balance first, and two of them have contracts
+> of their own saying so. A `@pre` here could never fire.
+
+It could never fire *today*. A precondition is not a claim about the call sites that
+happen to exist when you write it — it is a standing obligation on every call site that
+will ever exist:
+
+```elixir
+@pre sufficient_funds: amount <= account.balance
+def withdraw(%Account{} = account, amount)
+```
+
+And call sites arrive: a new feature, a refactor that routes an old path somewhere new, a
+second application once the module ships as a library. Nothing else in the codebase meets
+that eleventh caller. The other ten callers' contracts constrain *them*; they say nothing
+about `withdraw/2`, and they stop covering anything the moment somebody adds a caller
+without reading them.
+
+So the reasoning runs the other way round. Careful callers are why this row will read
+`⚠ never failed` in the coverage table for a year — not a reason to leave it unwritten.
+The day it does fire, it names the caller that got it wrong, at the call, instead of
+letting a negative balance travel somewhere it will be much harder to explain.
+
+The same holds for a supplier: a `@post` is not made redundant by an implementation that
+currently satisfies it. Satisfying it is the normal state. The contract is what tells you
+the day that changes.
+
 ## Three questions
 
 When you are unsure what to write, these are usually enough:
