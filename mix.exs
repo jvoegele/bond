@@ -89,6 +89,13 @@ defmodule Bond.MixProject do
       files: [
         "lib",
         "guides",
+        # Agent-facing rules, consumed by `usage_rules` (https://hex.pm/packages/usage_rules):
+        # `usage-rules.md` is the main file, `usage-rules/*.md` are sub-rules referenced as
+        # `"bond:testing"` / `"bond:inheritance"`, and `usage-rules/skills/` holds a pre-built
+        # skill users pull in with `skills: [package_skills: [:bond]]`. Both paths must be listed
+        # or the files are absent from the tarball and `mix usage_rules.sync` finds nothing.
+        "usage-rules.md",
+        "usage-rules",
         "mix.exs",
         "README.md",
         "LICENSE",

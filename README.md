@@ -245,6 +245,12 @@ organised around the questions that tend to arrive in this order:
     kinds on and off per environment and per module, and removing them entirely.
   * **[Overhead](guides/overhead.md)** — what contracts cost, measured per call.
   * **[Telemetry](guides/telemetry.md)** — the assertion-failure event.
+  * **[Usage rules for AI coding agents](usage-rules.md)** — the same material
+    distilled for an agent working in your codebase: the mechanics, the traps
+    where the obvious guess is wrong, and a `writing-bond-contracts` skill for
+    deciding what a contract should say. Ships in the package, so
+    [`usage_rules`](https://hex.pm/packages/usage_rules) can sync it into your
+    `AGENTS.md` — `usage_rules: :all`, then `mix usage_rules.sync`.
   * **[Stability](guides/stability.md)** and
     **[Public API surface](guides/public-api.md)** — what semver covers.
   * **[About](guides/about.md)** and **[History](guides/history.md)** — Design by
