@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.17.1] - 2026-08-25
+
+Advice that discouraged contracts for reasons other than the specification.
+
+The usage rules shipped in 1.17.0 carried several passages telling a coding agent to skip a
+contract on grounds that have nothing to do with what the function promises: that no current
+caller violates it, that the layer it sits in is a controller or an adapter, that a `@spec`
+could carry the type instead. An agent applying those consistently writes fewer contracts
+than the codebase warrants — and in three places the guides, written for human readers, said
+something different.
+
+This release reconciles the two. No library code changes.
+
+### Fixed
+
+- **A contract is no longer discouraged because its current callers are well behaved.** The
+  "what not to assert" list told an agent to drop an assertion that nothing in the codebase
+  could falsify, illustrated with a call-site census. A precondition is a standing obligation
+  on every *future* caller, and a contract no existing call site violates is the normal case
+  rather than a redundant one. The bullet now tests against what the specification admits;
+  `usage-rules.md` and the skill both state the point explicitly, and
+  `guides/what-contracts-say.md` gains a section on it.
+
+- **No layer is off-limits.** The "Where contracts go" table answered **No** for HTTP clients
+  and adapters ("they are filters, not demanding modules") and for controllers and LiveViews
+  ("a violation in a request path is a 500"). The first contradicted the seam rule printed two
+  lines below it — a filter's postconditions are precisely what the demanding domain behind it
+  relies on — and the second is a configuration question, which `postconditions: false`
+  already answers. The table now says which *kind* of contract each layer's specification
+  warrants, and names both non-reasons as non-reasons.
+
+- **The guard-redundancy rule now matches the guides.** The usage rules gave a two-way split
+  (dispatch versus everything else), which would have argued for replacing
+  `when is_binary(email)` with a `@pre`. The guides give Meyer's Non-Redundancy Principle as
+  three cases — a guard that selects a clause, a guard standing in for a type, and a guard
+  stating a domain rule, which is the only redundant one. Both agent-facing files now carry
+  the three-way division.
+
+- **`@spec` is static and never runs.** "Type checks — use `@spec`" was stated without that
+  qualification, which reads as a ban. Where the value arrives at runtime from outside the
+  compiler's view — parsed input, a provider payload, a message from another process — a
+  `@pre` is the one that actually fires, and it names the caller.
+
+- **`⚠ never failed` had two different meanings in two files.**
+  `guides/testing-contracts.md` told readers to treat the coverage warning as "either write a
+  test that makes this fail, or delete it", contradicting both its own closing paragraph and
+  the three-answer table in `usage-rules/testing.md`. It now carries the same table, including
+  that a true law of a pure function is the common case and is proved by mutation.
+
+- **A precondition naming a `defp` means publish the predicate**, not drop the obligation —
+  which is what `guides/faq.md` has always said. Both agent-facing files now say it too.
+
 ## [1.17.0] - 2026-08-25
 
 Documentation for the readers who don't read documentation.
