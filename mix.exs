@@ -1,7 +1,7 @@
 defmodule Bond.MixProject do
   use Mix.Project
 
-  @version "1.16.0"
+  @version "1.17.0"
   @source_url "https://github.com/jvoegele/bond"
 
   def project do
@@ -135,6 +135,10 @@ defmodule Bond.MixProject do
         "guides/telemetry.md",
         "guides/cheatsheet.cheatmd",
         "guides/faq.md",
+        # Agent-facing, but published here too: the README links to it, and a reader
+        # browsing HexDocs should be able to find what their agent is being told.
+        # Only the main file — the sub-rules and the skill are synced, not browsed.
+        "usage-rules.md",
         "guides/public-api.md",
         "guides/stability.md",
         "guides/about.md",
@@ -158,6 +162,7 @@ defmodule Bond.MixProject do
         Reference: [
           "guides/cheatsheet.cheatmd",
           "guides/faq.md",
+          "usage-rules.md",
           "guides/public-api.md",
           "guides/stability.md"
         ],
