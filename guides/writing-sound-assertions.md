@@ -110,6 +110,33 @@ watching the assertion fail once (see the tip above). The same caution applies t
 comparing a value against a literal of the wrong type (`status == 200` when `status` is
 `:ok`).
 
+### An unparenthesised `~>` consequent is the commonest way to write one by accident
+
+`~>` is an **arrow** operator, so it binds *tighter* than every comparison operator. A
+consequent that is a comparison therefore gets swallowed:
+
+```elixir
+is_binary(x) ~> String.length(x) <= 10        # parses as (is_binary(x) ~> String.length(x)) <= 10
+is_binary(x) ~> (String.length(x) <= 10)      # ✅ what you meant
+```
+
+The first compares the implication's *result* — a boolean, or whatever the consequent
+returned — against `10`. Elixir compares across all types, so it silently answers
+something, and which way it lands depends on the operands: `p ~> q >= 0` is **always
+true** (an atom sorts above every number), while `p ~> q <= 10` is **always false**. Both
+are constants, and neither is what was written.
+
+Recent Elixir will often tell you, if you read past the wall of generated code:
+
+```text
+warning: comparison between distinct types found
+    given types: dynamic(boolean()) >= integer()
+```
+
+**Parenthesise both sides of a `~>` whenever either is anything but a bare call.** The same
+goes for `<~`, which shares `~>`'s precedence and left-associates — `A ~> pattern <~ B`
+parses as `(A ~> pattern) <~ B`.
+
 ## A `@post` that transcribes the *mechanism* says nothing
 
 A postcondition earns its keep by describing what the function guarantees. One that
@@ -254,7 +281,7 @@ To assert a property of *only* the elements of a given shape while **ignoring** 
 vacuously:
 
 ```elixir
-forall(entry <- entries, match?(%{retry: _}, entry) ~> entry.retry >= 0)
+forall(entry <- entries, match?(%{retry: _}, entry) ~> (entry.retry >= 0))
 ```
 
 This is the same discipline as shape-dependent predicates in multi-clause contracts: when a

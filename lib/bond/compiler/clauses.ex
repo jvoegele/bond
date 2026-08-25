@@ -461,7 +461,8 @@ defmodule Bond.Compiler.Clauses do
 
     Fix: rename each clause to use one consistent name at position #{idx} (and any other \
     disagreeing positions). For shape-dependent contracts, use the `~>` implication \
-    operator — e.g. `@pre is_binary(resource) ~> String.length(resource) <= 10`.
+    operator — e.g. `@pre is_binary(resource) ~> (String.length(resource) <= 10)`. \
+    Parenthesise the consequent: `~>` binds tighter than every comparison operator.
 
     Per-clause contracts may be added in a future Bond release. If this restriction \
     bites real code, please open an issue.\
