@@ -15,7 +15,7 @@ Sub-rules: `bond:testing` (proving contracts fire, property testing, coverage) a
 
 ```elixir
 # mix.exs
-{:bond, "~> 1.16"},
+{:bond, "~> 1.17"},
 {:stream_data, "~> 1.0", only: [:dev, :test]}   # only if you want Bond.PropertyTest
 ```
 
