@@ -250,7 +250,10 @@ defmodule Bond.Predicates do
   >
   > To assert a property of *only* the elements of a given shape while **ignoring** the rest
   > (comprehension-style filtering), guard the predicate with `~>` so non-matching elements pass
-  > vacuously: `forall(entry <- entries, match?(%{retry: _}, entry) ~> entry.retry >= 0)`.
+  > vacuously: `forall(entry <- entries, match?(%{retry: _}, entry) ~> (entry.retry >= 0))`.
+  > **Parenthesise the consequent.** `~>` is an arrow operator and binds tighter than every
+  > comparison, so without the parens this parses as `(match?(...) ~> entry.retry) >= 0` — which
+  > compares a boolean against an integer and is *always true*.
 
   `forall`/`exists` return ordinary booleans, so they compose with `and`, `or`, `not`, `~>`,
   and `|||`. When several quantifiers appear in one assertion (including nested ones), the

@@ -5,6 +5,78 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] - 2026-08-25
+
+Documentation for the readers who don't read documentation.
+
+Bond's guides are written for a person reading them start to finish. An AI coding agent
+working in your codebase reads nothing unless it is in context, and what it needs is
+different in kind: not the tour, but the places where the obvious guess is wrong — that a
+`forall` generator binds and asserts shape rather than filtering, that `|||` is exclusive
+or, that a partial assertion makes a purged build behave differently from a contracted one.
+
+This release ships that material in the package, in the layout
+[`usage_rules`](https://hex.pm/packages/usage_rules) expects. Nothing about the library
+changes.
+
+Writing it also found a bug in Bond's own documentation, described under Fixed below.
+
+### Added
+
+- **Usage rules for AI coding agents**, shipped in the package and syncable with
+  `mix usage_rules.sync`:
+
+  * `usage-rules.md` — the main file. Setup, the syntax, and the traps: quantifier
+    generators, `|||`, `~>` precedence, assertion totality and purity, why rescuing a Bond
+    error changes what a purged build returns, the three surprising consequences of the
+    Assertion Evaluation rule, which invariant heads and return shapes are actually
+    checked, and `old/1` under concurrency.
+  * `usage-rules/testing.md` and `usage-rules/inheritance.md` — sub-rules, referenced as
+    `"bond:testing"` and `"bond:inheritance"`.
+  * `usage-rules/skills/writing-bond-contracts/` — a pre-built skill for deciding what a
+    contract should *say*, which matters while authoring one and not in every session.
+    Includes a `references/contract-shapes.md` catalogue of the assertion shapes that
+    repeatedly earn their place.
+
+  Consumers who use `usage_rules` get these with `usage_rules: :all` in their `mix.exs`
+  project config. Everyone else can read them in `deps/bond/usage-rules.md`; they are
+  plain Markdown at a predictable path. The main file is also published to HexDocs.
+
+### Fixed
+
+- **The `~>` consequent is now parenthesised everywhere Bond suggests one.** `~>` is in
+  Elixir's arrow operator group, so it binds tighter than every comparison operator, and a
+  consequent that is a comparison gets swallowed:
+
+  ```elixir
+  is_binary(x) ~> String.length(x) <= 10     # (is_binary(x) ~> String.length(x)) <= 10
+  is_binary(x) ~> (String.length(x) <= 10)   # what was meant
+  ```
+
+  Elixir compares across all types, so the broken form quietly answers something — and
+  which constant it lands on depends on the operator, because atoms sort above every
+  number. `p ~> q >= 0` is **always true**; `p ~> q <= 10` is **always false**.
+
+  Bond shipped this in three places:
+
+  * `guides/writing-sound-assertions.md`, in the recommended comprehension-filter idiom —
+    always true, so it asserted nothing. A vacuous assertion in the guide about vacuous
+    assertions.
+  * The `forall`/`exists` moduledoc in `Bond.Predicates`, with the same idiom.
+  * The multi-clause naming `CompileError`'s suggested fix — always false for every input,
+    so anyone copying Bond's own diagnostic got a contract that rejected everything.
+
+  All three are corrected, and `writing-sound-assertions.md` gains a subsection on the
+  precedence trap under "Comparisons that are silently constant", which is exactly what it
+  is. If you have written `~>` with an unparenthesised comparison on either side, check it:
+  recent Elixir reports `warning: comparison between distinct types found`, though it is
+  buried in generated wrapper code. Catching this in the assertion linter is
+  [#133](https://github.com/jvoegele/bond/issues/133).
+
+  Only documentation and one diagnostic string changed; no library behaviour is affected.
+  Diagnostic prose is excluded from the stability contract — see
+  [Stability](guides/stability.md).
+
 ## [1.16.0] - 2026-08-23
 
 Diagnostics, and the guide that was missing.

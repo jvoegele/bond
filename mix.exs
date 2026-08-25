@@ -1,7 +1,7 @@
 defmodule Bond.MixProject do
   use Mix.Project
 
-  @version "1.16.0"
+  @version "1.17.0"
   @source_url "https://github.com/jvoegele/bond"
 
   def project do
@@ -89,6 +89,13 @@ defmodule Bond.MixProject do
       files: [
         "lib",
         "guides",
+        # Agent-facing rules, consumed by `usage_rules` (https://hex.pm/packages/usage_rules):
+        # `usage-rules.md` is the main file, `usage-rules/*.md` are sub-rules referenced as
+        # `"bond:testing"` / `"bond:inheritance"`, and `usage-rules/skills/` holds a pre-built
+        # skill users pull in with `skills: [package_skills: [:bond]]`. Both paths must be listed
+        # or the files are absent from the tarball and `mix usage_rules.sync` finds nothing.
+        "usage-rules.md",
+        "usage-rules",
         "mix.exs",
         "README.md",
         "LICENSE",
@@ -128,6 +135,10 @@ defmodule Bond.MixProject do
         "guides/telemetry.md",
         "guides/cheatsheet.cheatmd",
         "guides/faq.md",
+        # Agent-facing, but published here too: the README links to it, and a reader
+        # browsing HexDocs should be able to find what their agent is being told.
+        # Only the main file — the sub-rules and the skill are synced, not browsed.
+        "usage-rules.md",
         "guides/public-api.md",
         "guides/stability.md",
         "guides/about.md",
@@ -151,6 +162,7 @@ defmodule Bond.MixProject do
         Reference: [
           "guides/cheatsheet.cheatmd",
           "guides/faq.md",
+          "usage-rules.md",
           "guides/public-api.md",
           "guides/stability.md"
         ],
