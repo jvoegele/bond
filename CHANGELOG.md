@@ -5,6 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.17.2] - 2026-08-25
+
+How to run a mutation.
+
+The rules have told agents to prove a contract by mutation since contract coverage landed, and
+never said how. This adds the methodology, from a dogfood audit of roughly 30 postconditions
+across domain structs, parsers, HTTP clients, an Oban pipeline, LiveViews and auth plugs — every
+one proven to fire. Five traps came out of it. Each produced a confident wrong conclusion before
+it was caught, and one of them deleted a correct contract.
+
+It also corrects a row of the `⚠ never failed` table that was right for one case and wrong for
+its neighbour. No library code changes.
+
+### Added
+
+- **`## Running a mutation`** in `usage-rules/testing.md`, and the same material in
+  `guides/testing-contracts.md`:
+
+  * **Aim the mutation at the function the contract is on.** It misses in both directions —
+    mutating a collaborator too far out leaves the contract true where it is written, and
+    mutating too far in fires the *callee's* postcondition first, so the outer contract never
+    sees the bad value and looks decorative. **A surviving mutation is evidence about the
+    mutation until you have checked that it is evidence about the contract.**
+  * **Run a null control first.** The coverage table prints every label on every run, so a
+    grep-based harness reports a hit for every mutation including the ones that changed nothing.
+    A violation is `label: :name` inside a raised `Bond.*Error`, or a coverage row whose
+    **failed** count is non-zero. Includes a detector worth copying.
+  * **Give each assertion a mutation its neighbours survive.** Assertions on one function fail
+    fast in execution order, so a mutation breaking the first pre-empts the second, which then
+    looks unfalsifiable under everything you try. Across *function* boundaries the same
+    pre-emption is a real signal instead — the test that separates them is whether a bug exists
+    that the inner assertion cannot see.
+  * **Mutate toward wrong values, not toward no values.** `forall` over an empty enumerable is
+    vacuously true, so a mutation that makes a collection absent rather than wrong proves
+    nothing. When the only realistic mutation empties it, the missing piece is usually a fixture.
+
+- **A delegating body still owes its caller the guarantee**, in the `writing-bond-contracts`
+  skill and in `guides/what-contracts-say.md`. A function whose body hands the work to a
+  collaborator that already guarantees a property still has to state it: the delegation is an
+  implementation fact a refactor can retire, while the guarantee renders into *that* function's
+  ExDoc, where its callers read it. Meyer's prescriptive/descriptive split one altitude up.
+
+### Fixed
+
+- **The `⚠ never failed` table conflated accidental duplication with defence in depth.** "The
+  body guards the property twice → delete the redundant guard" is right when the second guard is
+  an accident and wrong when both are deliberate. Measured case: an application-level
+  `where user_id == ^user_id` and Postgres row-level security underneath it — drop either alone
+  and the other still filters, so the scoping postcondition above them fires only when **both**
+  go, which is exactly the refactor it exists to notice. Reading that row the other way deletes
+  the contract that would have caught it. The row is now split in all three places the table
+  appears, with the ordinal references after it updated to match.
+
+- **`guides/testing-contracts.md` was missing the fixture-gap cases** that `usage-rules/testing.md`
+  has carried since 1.17.0 — the three real mutations that survived because the fixtures did not
+  contain the case the contract describes. Both audiences now have them.
+
+### Known issues
+
+- **A `@post` on an arity-1 function will not compile in a module that `use`s
+  `Phoenix.Component`**, failing with a `MatchError` on a Bond-internal tuple
+  ([#134](https://github.com/jvoegele/bond/issues/134)). Reproduced on
+  phoenix_live_view 1.2.10. `@pre` and `check/1` on arity-1 functions are unaffected, as are
+  postconditions at every other arity. Arity 1 is the natural shape for LiveView socket
+  helpers, so this bites where contracts are most wanted in that layer.
+
 ## [1.17.1] - 2026-08-25
 
 Advice that discouraged contracts for reasons other than the specification.
