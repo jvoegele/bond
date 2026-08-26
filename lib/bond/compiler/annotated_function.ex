@@ -762,10 +762,69 @@ defmodule Bond.Compiler.AnnotatedFunction do
     first_clause.params
     |> ClauseWrapper.strip_default_args()
     |> Clauses.bind_referenced_canonical_names(referenced_param_names(annotated_function))
+    |> underscore_conditionally_shadowed(annotated_function)
   end
 
-  defp lifted_defp_params(_annotated_function, canonical_names, _first_clause) do
-    Enum.map(canonical_names, &Macro.var(&1, nil))
+  defp lifted_defp_params(annotated_function, canonical_names, _first_clause) do
+    canonical_names
+    |> Enum.map(&Macro.var(&1, nil))
+    |> underscore_conditionally_shadowed(annotated_function)
+  end
+
+  # A `whenever` group's `case` rebinds the names its pattern binds, shadowing any parameter of
+  # the same name. The parameter is then never read — the matching branch sees the shadowing
+  # binding, and the non-match branch of a `:conditional` group is a bare `:ok` — so Elixir warns
+  # "variable is unused" against a Bond-generated defp, at the `defmodule` line, suggesting a fix
+  # the author cannot apply (#122).
+  #
+  # `where` does not warn, but only by accident: its non-match branch carries a deferred
+  # `binding()` snapshot, which reads every variable in scope and so keeps the parameter alive.
+  # That snapshot is also why this rewrite is confined to `:conditional` groups — underscoring a
+  # parameter an `:assert` group's `binding()` reads would report it as `_name` in the violation's
+  # `:binding`, degrading the error to silence a warning that is not being emitted.
+  defp underscore_conditionally_shadowed(params, %__MODULE__{} = annotated_function) do
+    shadowed = shadowed_only_by_conditional_groups(annotated_function)
+
+    if MapSet.size(shadowed) == 0 do
+      params
+    else
+      Enum.map(params, fn param ->
+        keep = MapSet.difference(Clauses.pattern_binding_names(param), shadowed)
+        Clauses.underscore_prefix_unused(param, keep)
+      end)
+    end
+  end
+
+  # Names bound by a `whenever` pattern that nothing else in the contract reads. A name an
+  # assertion references outside its own group, or one an `:assert` (`where`) group also binds,
+  # is excluded — it is genuinely used, and underscoring it would break compilation or the
+  # reported binding.
+  defp shadowed_only_by_conditional_groups(%__MODULE__{} = annotated_function) do
+    assertions =
+      annotated_function.preconditions ++
+        annotated_function.postconditions ++ annotated_function.invariants
+
+    conditional = binding_pattern_names(assertions, :conditional)
+    asserted = binding_pattern_names(assertions, :assert)
+
+    referenced =
+      Enum.reduce(assertions, MapSet.new(), fn assertion, acc ->
+        MapSet.union(acc, Clauses.assertion_referenced_names(assertion))
+      end)
+
+    conditional
+    |> MapSet.difference(asserted)
+    |> MapSet.difference(referenced)
+  end
+
+  defp binding_pattern_names(assertions, mode) do
+    Enum.reduce(assertions, MapSet.new(), fn
+      %{binding: %{pattern: pattern, mode: ^mode}}, acc ->
+        MapSet.union(acc, Clauses.pattern_binding_names(pattern))
+
+      _assertion, acc ->
+        acc
+    end)
   end
 
   defp build_assertion_defs(annotated_function, postconditions, defp_params, wrapper_context, env) do

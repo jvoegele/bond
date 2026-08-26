@@ -369,4 +369,85 @@ defmodule Bond.WhereWheneverTest do
       assert_raise Bond.CheckError, fn -> Checked.maybe_ok({:ok, -1}) end
     end
   end
+
+  describe "a bound name that shadows a parameter (#122)" do
+    # The `case` a `whenever` group compiles to rebinds the names its pattern binds, shadowing
+    # any parameter of the same name. The parameter was then never read — the matching branch
+    # sees the shadowing binding and the non-match branch is a bare `:ok` — so Elixir warned
+    # against a Bond-generated defp, at the `defmodule` line, suggesting a fix (`_n`) that the
+    # author has nothing to apply it to.
+    #
+    # `BondTest.Diagnostics` rather than a stderr capture: this module is async (#86).
+
+    defp unused_warnings(source) do
+      source
+      |> BondTest.Diagnostics.warnings()
+      |> String.split("\n")
+      |> Enum.filter(&(&1 =~ "is unused"))
+    end
+
+    test "whenever on a single-clause function does not warn" do
+      assert unused_warnings("""
+             defmodule ShadowSingle do
+               use Bond
+               @post whenever({:ok, n} <- result), non_neg: n >= 0
+               def compute(n), do: {:ok, n}
+             end
+             """) == []
+    end
+
+    test "whenever on a multi-clause function does not warn" do
+      assert unused_warnings("""
+             defmodule ShadowMulti do
+               use Bond
+               @post whenever({:ok, n} <- result), non_neg: n >= 0
+               def compute(n) when is_integer(n), do: {:ok, n}
+               def compute(n), do: {:ok, n}
+             end
+             """) == []
+    end
+
+    test "where with the same collision stays silent, as it always did" do
+      assert unused_warnings("""
+             defmodule ShadowWhere do
+               use Bond
+               @post where({:ok, n} = result), non_neg: n >= 0
+               def compute(n), do: {:ok, n}
+             end
+             """) == []
+    end
+
+    test "a shadowed name another assertion reads is left bound" do
+      # Underscoring here would fail to compile: the second assertion resolves `n` to the
+      # parameter, outside the group's `case`.
+      assert unused_warnings("""
+             defmodule ShadowAlsoRead do
+               use Bond
+               @post whenever({:ok, n} <- result), non_neg: n >= 0
+               @post an_integer: is_integer(n)
+               def compute(n), do: {:ok, n}
+             end
+             """) == []
+
+      # `apply/3` because the module comes from compiling a string, so the compiler cannot know
+      # it exists and would warn on a direct call.
+      assert apply(ShadowAlsoRead, :compute, [3]) == {:ok, 3}
+      assert_raise Bond.PostconditionError, fn -> apply(ShadowAlsoRead, :compute, [-1]) end
+    end
+
+    test "the contract still fires, and reports the bound name" do
+      defmodule StillFires do
+        use Bond
+
+        @post whenever({:ok, n} <- result), non_neg: n >= 0
+        def compute(n), do: {:ok, n}
+      end
+
+      assert StillFires.compute(3) == {:ok, 3}
+
+      error = assert_raise Bond.PostconditionError, fn -> StillFires.compute(-1) end
+      assert error.label == :non_neg
+      assert error.binding[:n] == -1
+    end
+  end
 end
