@@ -224,6 +224,48 @@ defmodule Bond.Behaviour do
       @doc false
       def __bond_contracts__, do: unquote(Macro.escape(contracts))
       unquote_splicing(named_contracts_ast)
+      unquote(moduledoc_implementer_note_ast(contracts))
+    end
+  end
+
+  # An implementing module has to opt in with `use Bond, behaviours: [...]`. A bare
+  # `@behaviour TheBehaviour` compiles and inherits **nothing**, silently — the easier of the two
+  # mistakes to make, because `@behaviour` is what Elixir itself asks for and the result is an
+  # uncontracted implementation rather than an error (#132).
+  #
+  # Bond cannot warn from the implementing module: nothing there tells it the behaviour carries
+  # contracts it is declining to inherit. What it can do is put the instruction in the generated
+  # docs of the behaviour, which is what somebody writing an implementation is reading.
+  #
+  # Only for a behaviour that actually declares contracts — there is nothing to opt into
+  # otherwise — and never over `@moduledoc false`, matching how the `## Invariants` section
+  # behaves.
+  defp moduledoc_implementer_note_ast(contracts) when map_size(contracts) == 0, do: nil
+
+  defp moduledoc_implementer_note_ast(_contracts) do
+    quote do
+      note = """
+      ## Implementing this behaviour
+
+      Contracts declared on this behaviour's callbacks are inherited only by an implementation
+      that opts in:
+
+          use Bond, behaviours: [#{inspect(__MODULE__)}]
+
+      That emits `@behaviour #{inspect(__MODULE__)}` for you. A bare
+      `@behaviour #{inspect(__MODULE__)}` compiles and inherits no contracts.
+      """
+
+      case Module.get_attribute(__MODULE__, :moduledoc) do
+        {line, existing} when is_binary(existing) ->
+          Module.put_attribute(__MODULE__, :moduledoc, {line, existing <> "\n\n" <> note})
+
+        {_line, false} ->
+          :ok
+
+        _ ->
+          Module.put_attribute(__MODULE__, :moduledoc, {1, note})
+      end
     end
   end
 
