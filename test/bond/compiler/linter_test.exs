@@ -217,6 +217,66 @@ defmodule Bond.Compiler.LinterTest do
   test "an ordinary, meaningful assertion produces no findings" do
     refute_findings(quote(do: is_integer(n) and n >= 0))
     refute_findings(quote(do: String.starts_with?(s, "prefix")))
-    refute_findings(quote(do: Map.has_key?(m, :id) ~> m.id > 0))
+
+    # Parenthesised deliberately. This line read `Map.has_key?(m, :id) ~> m.id > 0` until the
+    # `:implication_precedence` rule flagged it (#133): `~>` binds tighter than `>`, so it parsed
+    # as `(Map.has_key?(m, :id) ~> m.id) > 0` — always true, asserting nothing, in a test whose
+    # name calls it meaningful. A fourth place Bond shipped this mistake, after the guide, the
+    # `Bond.Predicates` moduledoc and a compile error's suggested fix.
+    refute_findings(quote(do: Map.has_key?(m, :id) ~> (m.id > 0)))
+  end
+
+  describe "implication precedence (#133)" do
+    test "flags an ordering comparison whose operand is an implication" do
+      assert [%{rule: :implication_precedence}] =
+               Linter.check(quote(do: is_binary(x) ~> String.length(x) <= 10))
+    end
+
+    test "names the parse, the constant it folds to, and the fix" do
+      [%{message: message}] = Linter.check(quote(do: is_binary(x) ~> String.length(x) <= 10))
+
+      assert message =~ "parses as `(is_binary(x) ~> String.length(x)) <= 10`"
+      assert message =~ "always `false`"
+      assert message =~ "fails on every call"
+      assert message =~ "`is_binary(x) ~> (String.length(x) <= 10)`"
+    end
+
+    test "the >= form is always true and says so" do
+      [%{message: message}] = Linter.check(quote(do: is_binary(x) ~> String.length(x) >= 0))
+
+      assert message =~ "always `true`"
+      assert message =~ "asserts nothing"
+    end
+
+    test "omits the constant claim when the other operand is not a literal" do
+      [%{message: message}] = Linter.check(quote(do: is_binary(x) ~> String.length(x) <= limit))
+
+      refute message =~ "always"
+      assert message =~ "Parenthesise the consequent"
+    end
+
+    test "fires when the implication is on the right of the comparison" do
+      assert [%{rule: :implication_precedence}] =
+               Linter.check(quote(do: 0 <= is_binary(x) ~> String.length(x)))
+    end
+
+    test "finds it inside a quantifier predicate" do
+      assert [%{rule: :implication_precedence}] =
+               Linter.check(quote(do: forall(e <- es, match?(%{retry: _}, e) ~> e.retry >= 0)))
+    end
+
+    test "stays silent on the parenthesised form" do
+      refute_findings(quote(do: is_binary(x) ~> (String.length(x) <= 10)))
+      refute_findings(quote(do: forall(e <- es, match?(%{retry: _}, e) ~> (e.retry >= 0))))
+    end
+
+    test "stays silent on a comparison with no implication" do
+      refute_findings(quote(do: String.length(x) <= 10))
+    end
+
+    test "stays silent on equality against an implication, which could be deliberate" do
+      refute_findings(quote(do: is_binary(x) ~> y == true))
+      refute_findings(quote(do: is_binary(x) ~> y != false))
+    end
   end
 end

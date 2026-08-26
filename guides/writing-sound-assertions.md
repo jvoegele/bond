@@ -254,9 +254,17 @@ you the moment you compile:
 - **Self-comparisons** — `x == x` (always true), `x != x` (always false), `p or not p`.
 - **Vacuous quantifiers** — a `forall`/`exists` with a bare-variable generator and a predicate
   that is constant or never mentions the element: `forall(x <- items, true)`.
+- **Implication precedence** — an ordering comparison one of whose operands is a `~>`, which is
+  the precedence trap above: `p ~> q >= 0` parses as `(p ~> q) >= 0`. The warning names the
+  parse, the constant it folds to when that is determinable, and the parenthesised form you
+  meant. Equality against an implication is left alone — `(p ~> q) == true` is odd but could be
+  deliberate.
 
-It is deliberately narrow: it only warns when it can *prove* the assertion is constant, because
-a noisy contract linter gets turned off wholesale. In particular it **cannot** catch the
+It is deliberately narrow: it only warns on shapes that are wrong by construction, because a
+noisy contract linter gets turned off wholesale. The precedence rule is the one that does not
+need to prove a *value* — the mistake is visible in the parse tree, so it fires even where the
+other operand is a variable and the resulting constant cannot be named. In particular it
+**cannot** catch the
 type-disjoint comparison above (`key not in remaining_keys`) — knowing `remaining_keys` holds
 maps requires type inference Bond does not do without Dialyzer. Nor can it catch a precondition
 made unreachable by a guard, which needs the same reasoning about what the guard admits. Those
