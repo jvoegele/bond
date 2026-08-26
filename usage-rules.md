@@ -329,8 +329,9 @@ contract. That silences Elixir's unused-variable warning without breaking the co
 **On exit**, the return value is checked only when it is `%__MODULE__{}` or
 `{:ok, %__MODULE__{}}`. A struct returned in **any other tuple shape is not checked** —
 `{batch, struct}` is a common Elixir shape and silently skips the exit check, so the *last* call
-of a sequence (the value the caller keeps) is never validated. Verified against 1.16.0. If your
-function returns the struct under a different wrapper, restate the law as a `@post`:
+of a sequence (the value the caller keeps) is never validated. Bond warns where it can see this
+statically, under `:warn_skipped_invariants`. If your function returns the struct under a
+different wrapper, restate the law as a `@post`:
 
 ```elixir
 @post whenever({_batch, updated} <- result, partitioned: partitioned?(updated))

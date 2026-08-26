@@ -121,6 +121,32 @@ The post-check on exit matches both `%__MODULE__{}` and `{:ok,
 integers, etc.) fall through with no check. If your function returns the
 struct under a different wrapper, add an explicit `@post`.
 
+> #### A struct inside any other tuple is not checked {: .warning}
+>
+> This matters more than the rule sounds, because `{something, struct}` is an
+> ordinary Elixir return and the exit check does not look inside it:
+>
+> ```elixir
+> # The batch is what the caller broadcasts; the struct is what it carries forward.
+> def add(%__MODULE__{} = progress, event), do: {batch, updated}
+> ```
+>
+> `updated` is validated only if some *later* call happens to take it as an argument
+> and trip the entry check — and the last call of a sequence has none, so the value
+> the caller keeps is exactly the one that escapes. Bond warns when it can see this
+> statically (a tuple literal holding a `%__MODULE__{}` or a `%{var | ...}` update of
+> a struct parameter), under the same `:warn_skipped_invariants` switch.
+>
+> Restate the law as a postcondition that destructures the result:
+>
+> ```elixir
+> @post whenever({_batch, updated} <- result, partitioned: partitioned?(updated))
+> ```
+>
+> Holding the value differently — returning the struct and making the caller ask for
+> the batch separately — trades a real API for a contract mechanism, and is usually
+> the wrong trade.
+
 Multiple struct parameters in the same head (e.g. `def
 merge(%__MODULE__{} = a, %__MODULE__{} = b)`) are all checked in
 left-to-right order; `subject` rebinds to each in turn.

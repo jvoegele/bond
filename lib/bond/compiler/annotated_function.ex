@@ -488,9 +488,38 @@ defmodule Bond.Compiler.AnnotatedFunction do
         first_clause.env
       )
     end
+
+    maybe_warn_unchecked_struct_in_tuple(annotated_function, struct_module, config, warn?)
   end
 
   defp maybe_warn_skipped_invariants(_annotated_function, _inv_mode, _config), do: :ok
+
+  # The exit check extracts a subject from `%Struct{}` or `{:ok, %Struct{}}` and lets every other
+  # shape through. `{batch, struct}` is an ordinary Elixir return, so the struct the caller keeps
+  # is never validated — and because the *last* call of a run has no next call, the value a
+  # caller ends up holding is exactly the one that escapes (#131).
+  #
+  # Reuses the `:warn_skipped_invariants` switch rather than adding a key: it is the same family
+  # of footgun, and anyone who has already suppressed invariant warnings should stay suppressed.
+  defp maybe_warn_unchecked_struct_in_tuple(_annotated_function, _struct_module, _config, false),
+    do: :ok
+
+  defp maybe_warn_unchecked_struct_in_tuple(annotated_function, struct_module, config, true) do
+    case Invariants.clauses_returning_unchecked_struct(
+           annotated_function.clauses,
+           struct_module,
+           Map.get(config, :aliases, [])
+         ) do
+      [] ->
+        :ok
+
+      [clause | _] ->
+        IO.warn(
+          unchecked_struct_in_tuple_warning_message(annotated_function),
+          clause.env
+        )
+    end
+  end
 
   # A purged contract is discarded before its AST reaches the BEAM, taking with it the
   # only read of any module attribute it mentioned (#79). Read those attributes here so
@@ -597,6 +626,25 @@ defmodule Bond.Compiler.AnnotatedFunction do
       "still fires if this function returns a `%#{inspect(module)}{}` at " <>
       "runtime.) If intentional, suppress with " <>
       "`@bond_warn_skipped_invariants false` (per function), " <>
+      "`use Bond, warn_skipped_invariants: false` (per module), or " <>
+      "`config :bond, warn_skipped_invariants: false` (globally)."
+  end
+
+  defp unchecked_struct_in_tuple_warning_message(%__MODULE__{
+         module: module,
+         fun: fun,
+         arity: arity
+       }) do
+    struct_ref = "%#{inspect(module)}{}"
+
+    "public function `#{fun}/#{arity}` in invariant-declaring module `#{inspect(module)}` " <>
+      "returns a `#{struct_ref}` inside a tuple, and the exit check will not see it. " <>
+      "Invariants are checked on a return value of `#{struct_ref}` or `{:ok, #{struct_ref}}`; " <>
+      "any other tuple shape passes through unchecked, so the struct this returns is validated " <>
+      "only if some later call happens to take it as an argument — and the last call of a " <>
+      "sequence has none. State the law as a postcondition that destructures the result:\n\n" <>
+      "    @post whenever({_other, updated} <- result, ok: ...)\n\n" <>
+      "If intentional, suppress with `@bond_warn_skipped_invariants false` (per function), " <>
       "`use Bond, warn_skipped_invariants: false` (per module), or " <>
       "`config :bond, warn_skipped_invariants: false` (globally)."
   end
