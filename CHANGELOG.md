@@ -15,8 +15,10 @@ across domain structs, parsers, HTTP clients, an Oban pipeline, LiveViews and au
 one proven to fire. Five traps came out of it. Each produced a confident wrong conclusion before
 it was caught, and one of them deleted a correct contract.
 
-It also corrects a row of the `⚠ never failed` table that was right for one case and wrong for
-its neighbour. No library code changes.
+It also corrects two pieces of advice that were right for one case and wrong for its neighbour —
+a row of the `⚠ never failed` table, and the guard/precondition split added in 1.17.1. Both are
+the same mistake: treating "these two checks say the same thing" as an observation when it is a
+conclusion. No library code changes.
 
 ### Added
 
@@ -41,6 +43,24 @@ its neighbour. No library code changes.
     vacuously true, so a mutation that makes a collection absent rather than wrong proves
     nothing. When the only realistic mutation empties it, the missing piece is usually a fixture.
 
+- **The purge test, for converting existing code into a contract** — in `usage-rules.md`, the
+  `writing-bond-contracts` skill, and `guides/faq.md`. Screening what to write from scratch and
+  screening what to *convert* are different jobs, and only the first was covered:
+
+  > Under `:purge`, would this change what the program **does**, or only what it **notices**?
+
+  Only what it notices → a contract. What it does → ordinary code, unconditional in every build.
+  Worked from a real near-miss: a `true = Enum.any?(...)` membership check on a value taken from
+  a form has every outward sign of a precondition — caller obligation, violated only by a bad
+  argument, already raising, useless diagnostic — and converting it means a purged build accepts
+  a **forged request**. The tell is not how the check is written but what happens if it is not
+  there. This is the inverse of *never rescue a Bond error to decide what your program does*,
+  which was stated in one direction only.
+
+  Includes the pattern to reach for when a load-bearing check cannot become a `@pre`: keep the
+  refusal as ordinary code with a diagnostic that names the rule, and put a `@post` beside it
+  claiming something purging cannot weaken.
+
 - **A delegating body still owes its caller the guarantee**, in the `writing-bond-contracts`
   skill and in `guides/what-contracts-say.md`. A function whose body hands the work to a
   collaborator that already guarantees a property still has to state it: the delegation is an
@@ -57,6 +77,18 @@ its neighbour. No library code changes.
   go, which is exactly the refactor it exists to notice. Reading that row the other way deletes
   the contract that would have caught it. The row is now split in all three places the table
   appears, with the ordinal references after it updated to match.
+
+- **The guard/precondition split shipped in 1.17.1 could talk you into deleting a security
+  check.** Its third case — a guard stating a domain rule — said to pick one, and "if a violation
+  is the caller's bug, write the `@pre` and drop the guard". That is right until the value did not
+  come from a caller of yours at all, when nobody is at fault in the sense the question means, the
+  guard is load-bearing, and a `@pre` cannot replace it because a `@pre` is compiled out. All
+  three statements of the split now route through the purge test first.
+
+  `guides/faq.md` already held both halves of this — the "whose fault is a violation?" test, and
+  "if a condition has to hold in a build with contracts compiled out, it was never a
+  precondition" — but under separate headings that never met at the decision point. They are now
+  connected, and the "whose fault?" question has its missing third answer.
 
 - **`guides/testing-contracts.md` was missing the fixture-gap cases** that `usage-rules/testing.md`
   has carried since 1.17.0 — the three real mutations that survived because the fixtures did not

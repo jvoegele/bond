@@ -307,6 +307,11 @@ This is the `⚠ never failed` row easiest to misread. Accidental double-guardin
 and keep the contract; defence in depth means **keep both and mutate both together**. Concluding
 "vacuous, delete it" removes the one thing that would notice a later refactor taking out both.
 
+**"Redundant" is a conclusion, not an observation.** Establish it by removing the check and asking
+what stops being true, in every build you ship — never by noticing that two things say the same
+words. The other half of this trap is the purge test in the main `bond` rules: a guard whose
+absence changes what the program *does* cannot be replaced by a `@pre`, which is compiled out.
+
 ### Mutate toward wrong values, not toward no values
 
 `forall` over an empty enumerable is vacuously true, so a mutation making a collection *absent*

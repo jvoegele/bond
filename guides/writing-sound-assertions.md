@@ -211,6 +211,15 @@ def credit(balance, amount) when is_integer(amount), do: ...
 The guard admits `3`; the precondition rejects it. "There is a guard" is not by itself a
 reason to drop a precondition — "the guard already rejects everything this rejects" is.
 
+> #### Deleting the *guard* instead needs one more check {: .warning}
+>
+> Where the redundancy is real, the FAQ's three-way split says a domain rule can go either way:
+> keep the guard, or write the `@pre` and drop it. Before dropping it, ask what happens under
+> `preconditions: :purge`. A guard whose absence changes what the program **does** — a refusal
+> against data from outside your system, say — is load-bearing, and a `@pre` cannot replace it,
+> because a `@pre` is compiled out and the guard was not. See
+> [Before you drop the guard, check that it isn't load-bearing](faq.md#before-you-drop-the-guard-check-that-it-isn-t-load-bearing).
+
 ### But the contract documents the function and the guard doesn't
 
 True, and it is the strongest argument for keeping both — but it points at `@spec` rather

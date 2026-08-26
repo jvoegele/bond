@@ -98,7 +98,8 @@ Treat "this cannot fail" as a question with three answers, only one of which is 
 The two middle rows look identical from the coverage table and want opposite treatment. Defence
 in depth — an application-level scope *and* row-level security under it — is falsifiable only by
 removing both, which is the refactor the contract exists to notice. See `bond:testing` for how to
-mutate one.
+mutate one. It is the same trap as the purge test below, in a different costume: **"redundant" is
+a conclusion, not an observation.**
 
 The accidental case is easy to misread. One real case: a `no_empty_names` postcondition would not fire
 under any single edit, because the body both passed `trim: true` *and* ran an explicit
@@ -209,9 +210,10 @@ not one of the three, the reason is not good enough.
     (keep it, state the fact in `@spec`); a guard **stating a domain rule** —
     `when amount <= account.balance` — is the redundant one, and there you **pick one**. If a
     violation is the caller's bug, that is the `@pre`: write it and drop the guard, since only
-    the contract names the caller, reaches the docs, and appears in the coverage table. It is the
-    trade the falsifiability table names — **delete the redundant guard, keep the contract.** A
-    `@pre` *stronger* than the guard is not redundant and stands as it is.
+    the contract names the caller, reaches the docs, and appears in the coverage table — but
+    **apply the purge test first**, because a load-bearing guard cannot be replaced by a `@pre`.
+    It is otherwise the trade the falsifiability table names — **delete the redundant guard, keep
+    the contract.** A `@pre` *stronger* than the guard is not redundant and stands as it is.
   * **That external data was well formed.** A contract guards *your* logic. A provider sending
     nonsense is not a programming error, and a `@post` that raises on it converts their bad data
     into your crash. **At a parsing boundary, assert what you emit, never what you received.** If
@@ -234,6 +236,51 @@ not one of the three, the reason is not good enough.
     fails: it does not even appear in the coverage table. A function with **no callers at all** is
     a question about the design, and answering it is a prerequisite to contracting it. That is the
     only caller question worth asking here: how many, not what they pass.
+
+## Converting existing code: the purge test
+
+Everything above screens what to write **from scratch**. Converting a check that is already there
+is a different move with its own failure mode, and it is the move you make constantly while
+sweeping a codebase. One question screens it, and it is a fourth question rather than a fourth
+reason to decline:
+
+> Under `:purge`, would this change what the program **does**, or only what it **notices**?
+
+Only what it notices → a contract. What it does → ordinary code, unconditional in every build.
+`@pre`, `@post`, `@invariant` and `check/1` are all purgeable; a refusal the program must always
+perform is not one of them.
+
+```elixir
+defp provider!(socket, provider) do
+  atom = String.to_existing_atom(provider)
+  true = Enum.any?(socket.assigns.connections, &(&1.provider == atom))
+  atom
+end
+```
+
+Every signal of shape says precondition: a caller obligation, violated only by a bad argument,
+already raising, with a diagnostic that names neither the value nor the rule. Convert it and a
+purged build accepts a **forged request** — the provider came from a form.
+
+**The tell is not how the check is written, it is what happens if it is not there.** A `true = …`
+match has no `case`, no `{:error, _}`, nothing shaped like control flow, which is exactly why a
+sweep reads it as a contract written before Bond existed. Provenance settles it: data from outside
+your system has no caller of yours to blame, so refusing it is behaviour, not diagnosis.
+
+This is the inverse of *never rescue a Bond error to decide what your program does*, and the
+direction that bites during an audit — **don't convert what the program does into something it
+merely notices.**
+
+When a load-bearing check cannot become a `@pre`, look for a `@post` beside it that purging cannot
+weaken. Keep the refusal as ordinary code with a diagnostic naming the rule, then assert what the
+function *returns* where the body validates what it *looked up* — the same value today, not
+necessarily tomorrow, so a cross-check rather than a mirror.
+
+> **Non-Redundancy assumes the two checks are the same check.** Before deleting either side of an
+> apparent duplicate, remove it and ask what stops being true — in *every build you ship*.
+> "Redundant" is a conclusion, not an observation: two checks that read alike may be an accident,
+> a deliberate second line of defence, or a purgeable thing standing in front of one that is not.
+> Only the first is redundancy in Meyer's sense.
 
 ## Shared state: assert only what survives interleaving
 
@@ -313,6 +360,8 @@ and name *that*. Then name the abstraction **for the value, not the guard**: `co
 5. **Is it available to the caller?** A `@pre` naming a `defp` (or a `@doc false` function) is one
    the client cannot discharge — so publish the predicate, rather than dropping the obligation.
 6. **Justifiable from the specification alone**, or only from how you happened to implement it?
+   And if you are *converting* an existing check: under `:purge`, would removing it change what
+   the program **does** or only what it **notices**?
 7. **Can it fail?** Write a `Bond.Test` assertion targeting its `label:`. Where no input can
    falsify it, mutate the implementation and confirm it fires.
 8. **Read the coverage table.** `⚠ never failed` is a question with three answers.

@@ -380,8 +380,10 @@ specification says:
     parameter type — keep it, and put the fact in a `@spec`; a guard **stating a domain rule**
     (`when amount <= account.balance`) is the only redundant case, and there you **pick one** —
     if a violation is the caller's bug, write the `@pre` and drop the guard, because only the
-    contract names the caller, renders into the docs, and appears in the coverage table. A `@pre`
-    **stronger** than the guard is not redundant at all: it can fail, so keep it as it stands.
+    contract names the caller, renders into the docs, and appears in the coverage table. **Apply
+    the purge test below before dropping anything**: a guard whose absence changes what the
+    program *does* is load-bearing, and a `@pre` cannot replace it. A `@pre` **stronger** than the
+    guard is not redundant at all: it can fail, so keep it as it stands.
   * **Assertions about data from outside your system.** A provider sending nonsense is not a
     programming error, and a `@post` that raises on it converts their bad data into your crash.
     At a parsing boundary, **assert what you emit, never what you received.**
@@ -396,6 +398,46 @@ specification says:
 obligation on every *future* caller, so a contract no existing call site violates is the normal
 case, not a redundant one — that is what a green suite looks like. Decide from the specification,
 not from a census of today's callers.
+
+### The purge test, before converting existing code into a contract
+
+Everything above is about what to write from scratch. **Converting a check that already exists is
+a different move with a different failure mode**, and it is the one you make constantly while
+sweeping a codebase. One question settles it:
+
+> Under `:purge`, would this change what the program **does**, or only what it **notices**?
+
+Only what it notices → contract. What it does → ordinary code, unconditional in every build.
+`@pre`, `@post`, `@invariant` and `check/1` are all purgeable; a refusal your program must always
+perform is not one of them.
+
+```elixir
+# The provider comes from a form. A mismatch is a FORGED REQUEST, not a caller's bug.
+true = Enum.any?(socket.assigns.connections, &(&1.provider == atom))
+
+@pre connected_to_that_provider: ...   # ❌ purged, and the forgery is accepted
+```
+
+**The tell is not how the check is written — it is what happens if it is not there.**
+`true = Enum.any?(...)` has no `case`, no `{:error, _}`, nothing shaped like control flow, so a
+sweep reads it as a contract someone wrote before they had Bond. What settles it is where the
+value came from: data from outside your system has no caller of yours to blame, so refusing it is
+behaviour, not diagnosis.
+
+This is the inverse of *never rescue a Bond error to decide what your program does*, and the
+direction that bites during an audit: **don't convert what the program does into something it
+merely notices.**
+
+When a load-bearing check cannot become a `@pre`, there is often still a `@post` worth having
+beside it — keep the refusal as ordinary code with a diagnostic that names the rule, and let the
+contract claim something purging cannot weaken (what the function *returns*, where the body
+validates what it *looked up*).
+
+**Non-Redundancy assumes the two checks are the same check.** Before deleting either side of an
+apparent duplicate, remove it and ask what stops being true, in *every build you ship*.
+"Redundant" is a conclusion, not an observation: two checks that read alike may be an accident,
+a deliberate second line of defence (`bond:testing`), or a purgeable thing standing in front of
+one that is not. Only the first is redundancy.
 
 **Do write** laws that are true of the *meaning*: conservation (`length(result) <= length(input)`,
 or comparing sorted multisets rather than appealing to uniqueness), relationships between two

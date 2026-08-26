@@ -383,6 +383,13 @@ amount over the balance is the caller's mistake, that is a precondition — writ
 function is meant to cope with it, it isn't a precondition at all: handle it in
 the body and return `{:error, :insufficient_funds}`.
 
+There is a third answer, and it is the one that costs you if you miss it: **the
+value did not come from a caller of yours at all.** Then nobody is at fault in
+the sense the question means, the check is not a precondition, and the guard is
+load-bearing — see
+[Before you drop the guard, check that it isn't load-bearing](#before-you-drop-the-guard-check-that-it-isn-t-load-bearing)
+below, which is the case where "pick one" gives the wrong answer outright.
+
 ### Why not keep both, just in case?
 
 Because a `@pre` that restates a guard can never fire. Bond reproduces your
@@ -435,6 +442,83 @@ has to hold in a build with contracts compiled out, it was never a precondition:
   * **A condition you do trust callers to meet** is a precondition, and purging
     it in production is the trade you chose when you purged — the same trade as
     switching off any other assertion.
+
+### Before you drop the guard, check that it isn't load-bearing
+
+The table above tells you to pick one for a domain rule, and there is a case
+where picking the `@pre` is a regression rather than a tidy-up. It arrives most
+often during a sweep — reading existing code and converting what looks like a
+contract someone wrote before they had Bond.
+
+```elixir
+defp provider!(socket, provider) do
+  atom = String.to_existing_atom(provider)
+  true = Enum.any?(socket.assigns.connections, &(&1.provider == atom))
+  atom
+end
+```
+
+Everything about the shape says precondition. It is a caller obligation, it is
+violated only by a bad argument, it already raises, and its diagnostic
+(`MatchError: no match of right hand side value: false`) names neither the value
+nor the rule — exactly the improvement a `@pre` makes. Convert it, drop the bare
+match, and under `preconditions: :purge` a forged provider is accepted and
+assigned. The check did not get faster; it stopped existing.
+
+Ask one question before moving any check into a contract:
+
+> Under `:purge`, would this change what the program **does**, or only what it
+> **notices**?
+
+Only what it notices, and it is a contract. What it does, and it is ordinary
+code that belongs in every build unconditionally. `@pre`, `@post`, `@invariant`
+and `check/1` are all purgeable; a refusal your program must always perform is
+not one of them.
+
+**The tell is not how the check is written — it is what happens if it is not
+there.** `true = Enum.any?(...)` has no `case`, no `{:error, _}`, nothing shaped
+like control flow, which is why a sweep reads it as an assertion. What settles it
+is where the value came from: a form submission is
+[data from outside the system](#but-contracts-can-be-purged-isn-t-the-guard-my-safety-net),
+so a mismatch is a forged request rather than a caller's bug, and refusing it is
+behaviour.
+
+When a load-bearing check cannot become a `@pre`, there is often still a `@post`
+worth having beside it. Keep the refusal as ordinary code with a diagnostic that
+names the rule, and let the contract claim something purging cannot weaken:
+
+```elixir
+@post returns_a_connected_provider: result in provider_atoms(socket)
+defp provider!(socket, provider) do
+  atom = String.to_existing_atom(provider)
+
+  unless Enum.any?(socket.assigns.connections, &(&1.provider == atom)) do
+    raise ArgumentError,
+          "refused a forged destination: #{inspect(atom)} is not among this user's connections"
+  end
+
+  atom
+end
+```
+
+The body validates what it *looked up*; the postcondition constrains what it
+*returns*. Those are the same value today and need not stay that way, which is
+what makes it a cross-check rather than a mirror — and it fires if the membership
+branch is ever deleted.
+
+> #### Non-Redundancy assumes the two checks are the same check {: .warning}
+>
+> Meyer's principle governs a condition tested in two places *that do the same
+> work*. Before applying it, establish that they do: remove the one you plan to
+> drop, and ask what stops being true — in **every build you ship**, not just the
+> one you are running.
+>
+> "Redundant" is a conclusion, not an observation. Two checks that read alike may
+> be an accident, a deliberate second line of defence, or a purgeable thing
+> standing in front of one that is not. Only the first is redundancy in Meyer's
+> sense. The other two are covered under
+> [Running a mutation](testing-contracts.md#running-a-mutation) and in this
+> section respectively.
 
 ### Consequence for tests
 
