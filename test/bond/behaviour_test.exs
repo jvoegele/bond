@@ -147,6 +147,122 @@ defmodule Bond.BehaviourTest do
     assert %{arg_names: [:bond_arg_0]} = mod.__bond_contracts__()[{:f, 1}]
   end
 
+  describe "a contract written after its @callback (#132)" do
+    # `Bond.Behaviour` attaches a contract to the *following* `@callback`. Written underneath, it
+    # is absorbed by the NEXT one and guards the wrong function. Two of the three shapes this can
+    # take already fail loudly; these pin that, because the failure mode when they don't is a
+    # contract quietly enforcing against a function nobody wrote it on.
+
+    test "a contract after the final @callback is a compile error" do
+      assert_raise CompileError, ~r/do not precede an @callback/, fn ->
+        Code.compile_string("""
+        defmodule Bond.BehaviourTest.TrailingContract do
+          use Bond.Behaviour
+          @callback parse(binary()) :: {:ok, list()}
+          @post ok: is_list(result)
+        end
+        """)
+      end
+    end
+
+    test "a contract absorbed by the next @callback fails when it names an argument that callback lacks" do
+      assert_raise CompileError, ~r/references `tracks`, which is not a callback argument/, fn ->
+        Code.compile_string("""
+        defmodule Bond.BehaviourTest.AbsorbedBadRef do
+          use Bond.Behaviour
+          @callback parse(input :: binary()) :: {:ok, list()}
+          @post ok: is_list(tracks)
+          @callback render(other :: list(), opts :: keyword()) :: iodata()
+        end
+        """)
+      end
+    end
+  end
+
+  describe "the generated moduledoc note for implementers (#132)" do
+    # A bare `@behaviour TheBehaviour` compiles and inherits nothing, silently. Bond cannot warn
+    # from the implementing module — nothing there says the behaviour has contracts it is
+    # declining — so the instruction goes where an implementer is already reading.
+
+    defp moduledoc_of(source, module) do
+      Code.put_compiler_option(:docs, true)
+
+      [{^module, bytecode} | _] =
+        source |> Code.compile_string() |> Enum.filter(&(elem(&1, 0) == module))
+
+      # Read the Docs chunk straight out of the bytecode: `Code.fetch_docs/1` wants a module name
+      # or a path, and these modules only ever exist in memory.
+      {:ok, {_module, [{~c"Docs", chunk}]}} = :beam_lib.chunks(bytecode, [~c"Docs"])
+      {:docs_v1, _, _, _, moduledoc, _, _} = :erlang.binary_to_term(chunk)
+      moduledoc
+    end
+
+    test "is appended to an existing @moduledoc" do
+      doc =
+        moduledoc_of(
+          """
+          defmodule Bond.BehaviourTest.NotedWithDoc do
+            @moduledoc "A ledger."
+            use Bond.Behaviour
+            @pre positive: amount > 0
+            @callback withdraw(balance :: integer, amount :: integer) :: integer
+          end
+          """,
+          Bond.BehaviourTest.NotedWithDoc
+        )
+
+      assert doc["en"] =~ "A ledger."
+      assert doc["en"] =~ "## Implementing this behaviour"
+      assert doc["en"] =~ "use Bond, behaviours: [Bond.BehaviourTest.NotedWithDoc]"
+    end
+
+    test "is synthesised when the behaviour has no @moduledoc" do
+      doc =
+        moduledoc_of(
+          """
+          defmodule Bond.BehaviourTest.NotedNoDoc do
+            use Bond.Behaviour
+            @pre positive: amount > 0
+            @callback withdraw(balance :: integer, amount :: integer) :: integer
+          end
+          """,
+          Bond.BehaviourTest.NotedNoDoc
+        )
+
+      assert doc["en"] =~ "## Implementing this behaviour"
+    end
+
+    test "@moduledoc false is respected" do
+      assert moduledoc_of(
+               """
+               defmodule Bond.BehaviourTest.NotedHidden do
+                 @moduledoc false
+                 use Bond.Behaviour
+                 @pre positive: amount > 0
+                 @callback withdraw(balance :: integer, amount :: integer) :: integer
+               end
+               """,
+               Bond.BehaviourTest.NotedHidden
+             ) == :hidden
+    end
+
+    test "a behaviour declaring no contracts gets no note — there is nothing to opt into" do
+      doc =
+        moduledoc_of(
+          """
+          defmodule Bond.BehaviourTest.NotedNoContracts do
+            @moduledoc "Plain."
+            use Bond.Behaviour
+            @callback plain() :: :ok
+          end
+          """,
+          Bond.BehaviourTest.NotedNoContracts
+        )
+
+      assert doc["en"] == "Plain."
+    end
+  end
+
   describe "contract reference validation (issue #13, open question 2)" do
     test "a contract referencing a name the callback doesn't bind is a compile error" do
       assert_raise CompileError, ~r/references `total`, which is not a callback argument/, fn ->
