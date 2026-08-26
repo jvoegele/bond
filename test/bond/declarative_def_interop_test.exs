@@ -88,6 +88,31 @@ defmodule Bond.DeclarativeDefInteropTest do
       assert DestructuringArityOne.id_of(%{id: 7}) == 7
     end
 
+    test "a doc set by the library, not the user, does not collide with Bond's (#136)" do
+      # `Phoenix.Component` documents a component from its `attr` declarations. Bond then appends
+      # its `#### Postconditions` section by re-emitting `@doc`, and the two collided: Bond's
+      # bodiless-head mitigation (#71) was gated on Bond having seen the user write a `@doc`, and
+      # a doc set by another library is not one it has any record of.
+      warnings =
+        BondTest.Diagnostics.warnings("""
+        defmodule LibraryDocumented do
+          use BondTest.DeclarativeDef
+          use Bond
+
+          BondTest.DeclarativeDef.documented_by_the_library("A badge.")
+
+          @post a_map: is_map(result)
+          def badge(assigns), do: assigns
+        end
+        """)
+
+      refute warnings =~ "redefining @doc"
+
+      # `apply/3` because the module is defined by compiling a string, so the compiler has no way
+      # to know it exists and would warn on a direct call.
+      assert apply(LibraryDocumented, :badge, [%{}]) == %{}
+    end
+
     test "the foreign macro expands once per user function, never inside generated code" do
       Process.delete(DeclarativeDef)
 

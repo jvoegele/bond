@@ -175,15 +175,20 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
       assert length(params) == annotated_function.arity
     end
 
-    test "emits no bodiless head when the user supplied no @doc",
+    test "still emits the bodiless head when the user supplied no @doc",
          %{one_clause_annotated_function: annotated_function} do
-      # Nothing to override — the only doc is the one Bond synthesises for the contract
-      # sections — so no head is needed.
+      # Bond is not the only thing that can have set a doc for this function. `Phoenix.Component`
+      # documents a component from its `attr` declarations, so a contracted component with no
+      # hand-written `@doc` used to collide with a doc Bond had no record of, and warn (#136).
+      # Elixir exposes no way to ask whether a doc is already attached mid-compile, so the head
+      # accompanies every emitted doc rather than only the ones Bond knows are overriding.
       ast =
         %{annotated_function | doc_attributes: []}
         |> AnnotatedFunction.apply_contract()
 
-      assert doc_override_heads(ast) == []
+      assert [{:def, _, [{:add, _, params}]}] = doc_override_heads(ast)
+      assert length(params) == annotated_function.arity
+
       assert [{_line, doc}] = doc_put_attribute_clauses(ast)
       assert doc =~ ~r"#### Preconditions"
     end
