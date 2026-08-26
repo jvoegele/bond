@@ -17,6 +17,14 @@ implementation disagrees with it — a consequence worth having, not the purpose
 This is not academic. It changes which contracts get written, because the two frames disagree
 about a whole class of them, and the bug-catching frame deletes correct specifications.
 
+**And it changes how many.** Aim for a contract on every non-trivial function. This skill is a
+quality bar on the assertion you are writing, not a gate to argue past before writing one —
+almost nothing in it is a reason to leave a function bare. The failure mode is one-sided: a
+codebase with too few contracts looks exactly like one that never needed them, so careful
+screening under-contracts by default and nobody notices. Measured on an application contracted
+with these rules, reaching a density its author was happy with took **five passes**, each earlier
+one having stopped too soon. Start from "what does this promise?" and write what you can state.
+
 ## The test is mechanism versus meaning
 
 Not "does it restate the body". For a short function the answer is often yes and the contract is
@@ -348,6 +356,41 @@ beside it is the one to go back to.
 Don't extract it to whichever caller seems closer — ask what boundary both callers are standing at
 and name *that*. Then name the abstraction **for the value, not the guard**: `count/1`, not
 `non_negative_integer/1`. The postcondition can carry the check without the name repeating it.
+
+**A map that travels between modules is a struct waiting to happen.** A bare map has nowhere to
+put a law: no invariant can attach to it, so whatever is true of it is re-asserted at each use, or
+more often nowhere. Lifting it gives the law one home that holds for every instance however
+constructed, including ones built in fixtures.
+
+```elixir
+# Was a map of comparison scores passed between four modules.
+defmodule Signals do
+  use Bond
+  defstruct title: nil, artists: nil, album: nil, duration: nil
+
+  @invariant similarities_are_proportions:
+               forall(s <- [subject.title, subject.artists, subject.album, subject.duration],
+                 is_nil(s) or (is_float(s) and s >= 0.0 and s <= 1.0))
+end
+```
+
+Two conditions make the lift pay, and they are the same condition twice:
+
+  * **Move the operations in with it.** An `@invariant` is checked around the **public functions
+    of its own module**, so a struct module with no operations is a struct whose invariant fires
+    nowhere. If the functions that build and read the map are scattered as private helpers across
+    the modules that use it, gathering them is most of the win — it removes the duplication *and*
+    makes the invariant reachable. Before lifting, ask where the invariant would fire; if the
+    answer is "at functions this module does not have", write those functions or don't lift.
+  * **Give `defstruct` defaults that satisfy the invariant.** `%Signals{}` is valid syntax for
+    anyone. With `nil` defaults under a stricter law, the first invariant to touch a bare struct
+    raises `Bond.AssertionEvaluationError` instead of reporting a violation. Choose defaults that
+    are the "nothing to say" value *and* legal — that is Meyer's base-case rule, and it is usually
+    a better default than `nil` regardless.
+
+The payoff compounds: once the map is a struct with a module, every function in that module is a
+candidate for a `@pre`/`@post` of its own, and they are usually the pure, law-bearing functions
+where contracts are worth the most.
 
 ## Checklist for a new contract
 

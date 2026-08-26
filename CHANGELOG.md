@@ -22,6 +22,36 @@ conclusion. No library code changes.
 
 ### Added
 
+- **A stated default posture: contract every non-trivial function.** The rules were a careful
+  screening process with no answer to "how many contracts should this codebase have", so an agent
+  reading them inferred *few, chosen carefully* — and under-contracted. That failure mode is
+  invisible from the outside: a codebase with too few contracts looks exactly like one that never
+  needed them. `usage-rules.md`, the `writing-bond-contracts` skill and
+  `guides/what-contracts-say.md` now open on the presumption — contract it unless one of the
+  stated reasons applies — while saying plainly that the quality bar is unchanged.
+
+  With calibration from a Phoenix application contracted with these rules: 67 of its 126 source
+  files `use Bond`, carrying 136 postconditions, 28 preconditions and 13 struct invariants across
+  12 struct modules, reached over five passes. The **near five-to-one ratio of postconditions to
+  preconditions** is the part worth internalising: most functions have something to promise and
+  far fewer have something to demand, so coming up empty looking for a `@pre` is the normal case
+  rather than a signal to move on.
+
+- **Lifting a plain map to a struct so it can carry a law**, in the skill and
+  `guides/invariants.md`. A bare map has no module, so no invariant can attach to it and whatever
+  is true of it gets re-asserted at each use, or nowhere. Stated with the two conditions that make
+  the lift pay — **move the operations in with it** (an invariant is checked around its own
+  module's public functions, so a struct module with no operations has an invariant that fires
+  nowhere) and **give `defstruct` defaults that satisfy the invariant**. The payoff compounds:
+  every function in the new module is then a candidate for a contract of its own.
+
+- **How much to test**, in `usage-rules/testing.md` and `guides/testing-contracts.md`. A contract
+  you have never seen fail is a claim, not a check. Includes the measured ratio — about one proof
+  per two contracts — and singles out `invariants_hold/2` as the most under-used macro in the
+  library: a struct module that already has an `@invariant` needs only constructors, transformers
+  and observers to get random operation sequences checked against it, with no generator design
+  and no new assertions.
+
 - **`## Running a mutation`** in `usage-rules/testing.md`, and the same material in
   `guides/testing-contracts.md`:
 

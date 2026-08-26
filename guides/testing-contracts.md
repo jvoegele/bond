@@ -16,6 +16,31 @@ Bond gives you two complementary ways to do that:
     random inputs through the already-instrumented code, letting the contracts be
     the oracle across inputs you would never have enumerated by hand.
 
+## How much to test
+
+**A contract you have never seen fail is a claim, not a check.** Every non-trivial contract is
+worth a `Bond.Test` assertion proving it fires on the input it exists to reject, and every
+contract stating a *law* — rather than a bound — is worth a `contract_holds/2` over inputs you
+could not enumerate by hand.
+
+For calibration, from a Phoenix application contracted with these guides: 27
+`assert_precondition_violation`, 27 `assert_invariant_violation`, 12
+`assert_postcondition_violation` and 22 `contract_holds`, against roughly 180 contracts. That is
+about one proof for every two contracts, concentrated on the ones carrying real laws — a floor
+worth beating rather than a target.
+
+Property testing is the part most often left on the table, and `contract_holds/2` is cheap once a
+generator exists: it turns an assertion you checked against four fixtures into one checked
+against hundreds of inputs, using the contract you already wrote as the oracle, so there is no
+second assertion to keep in step. The best candidates are pure functions whose `@post` states a
+relationship — conservation, ordering, idempotence, agreement between two spellings of one input.
+
+`invariants_hold/2` is cheaper still and the most under-used macro here: a struct module that
+already has an `@invariant` needs only a list of constructors, transformers and observers to get
+random operation sequences checked against it, with no generator design and no new assertions. If
+a module has an invariant and no property, that is usually the least work for the most coverage
+available to you.
+
 ## Which tool when
 
 | You want to check… | Use | Module |

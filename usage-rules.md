@@ -11,6 +11,38 @@ contracts get written, so lead with it.
 Sub-rules: `bond:testing` (proving contracts fire, property testing, coverage) and
 `bond:inheritance` (behaviours, protocols, `defcontract`).
 
+## The default is yes
+
+**Aim for a contract on every non-trivial function.** Everything else in these rules constrains
+*what* to write; almost none of it is a reason to write *nothing*. Read the "do not write" list
+as a quality bar on the assertion you are about to write, not as a gate you have to argue your
+way through first.
+
+This needs saying because the failure mode is one-sided. A codebase with too few contracts looks
+exactly like a codebase that did not need them — nothing is missing, nothing is red, and the
+functions that quietly promise nothing are invisible. Under-contracting is the default outcome of
+careful screening, and it is the one nobody notices.
+
+Measured on a Phoenix application contracted with these rules: **67 of its 126 source files**
+`use Bond`, carrying 136 postconditions, 28 preconditions and 13 struct invariants across 12
+struct modules. Its author's judgement was that reaching that density took five passes, because
+every earlier pass had stopped too early.
+
+Two things follow from that ratio of nearly **five postconditions to every precondition**:
+
+  * **Most functions have something to promise; far fewer have something to demand.** If you are
+    looking for a `@pre` and not finding one, that is normal — ask what the function *returns*
+    instead, which is where the interesting laws are.
+  * **Start from the promise, not from the screening.** Ask "what does this guarantee?" first. If
+    you can state it, write it. If you genuinely cannot, that is a finding about the function —
+    usually that it does two things, or that its result has no describable shape — and it is worth
+    a moment's thought rather than a shrug.
+
+The bar does not move. A contract that restates mechanism, cannot be evaluated, or accuses correct
+code is worse than nothing, and none of what follows is suspended by this section. What changes is
+the presumption: **contract it unless one of the stated reasons applies**, rather than contract it
+only where the case is overwhelming.
+
 ## Setup
 
 ```elixir

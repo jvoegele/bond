@@ -183,6 +183,51 @@ same line ("a secret feature is not affected by the invariant"). If a helper nee
 a half-built struct, that is a statement about who owns the intermediate state, and `defp`
 is how you say it.
 
+### Lifting a map to a struct so it can carry a law
+
+The commonest reason a law has nowhere to live is that the value it constrains is a
+bare map. A map has no module, so no invariant can attach to it — whatever is true
+of it gets re-asserted at each use, or, more often, nowhere at all. Lifting it gives
+the law one home that holds for **every** instance however constructed, fixtures
+included:
+
+```elixir
+# Was a map of comparison scores, passed between four modules.
+defmodule Signals do
+  use Bond
+
+  defstruct title: nil, artists: nil, album: nil, duration: nil
+
+  @invariant similarities_are_proportions:
+               forall(
+                 s <- [subject.title, subject.artists, subject.album, subject.duration],
+                 is_nil(s) or (is_float(s) and s >= 0.0 and s <= 1.0)
+               )
+end
+```
+
+This is worth reaching for routinely, with two conditions that are really the same
+condition twice.
+
+**Move the operations in with it.** An invariant is checked around the public
+functions of its *own* module, so a struct module with no operations is a struct
+whose invariant fires nowhere. When the functions that build and read the map are
+scattered as private helpers across the modules that use it, gathering them is most
+of the win — it removes the duplication *and* makes the invariant reachable. Ask
+where the invariant would fire before lifting; if the answer is "at functions this
+module does not have", write those functions or leave the map alone.
+
+**Give `defstruct` defaults that satisfy the invariant.** `%Signals{}` is valid
+syntax for anyone, so under a stricter law a bare struct with `nil` fields makes the
+first invariant to touch it raise `Bond.AssertionEvaluationError` rather than report
+a violation. Pick defaults that are both the "nothing to say" value and legal — the
+base-case rule from earlier in this guide, and usually a better default than `nil`
+regardless.
+
+The payoff compounds. Once the map is a struct with a module, every function in that
+module becomes a candidate for a `@pre` or `@post` of its own, and those tend to be
+the pure, law-bearing functions where contracts are worth the most.
+
 ### What's not supported
 
 Invariants are scoped to the **struct's own defining module**. External

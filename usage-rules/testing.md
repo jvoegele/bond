@@ -13,6 +13,27 @@ Two tools, and they behave oppositely, so keep them straight:
 
 Putting a `contract_holds/2` inside a `test` block is an error, and Bond says so.
 
+**Use both, widely.** A contract you have never seen fail is a claim, not a check, so every
+non-trivial contract deserves a `Bond.Test` assertion that proves it fires — and every contract
+stating a *law* over an input space you cannot enumerate deserves a `contract_holds/2` alongside
+it. Measured on an application contracted with these rules: 27 `assert_precondition_violation`,
+27 `assert_invariant_violation`, 12 `assert_postcondition_violation` and 22 `contract_holds`,
+against roughly 180 contracts — about **one proof for every two contracts**, concentrated on the
+ones carrying real laws. That is a floor worth beating, not a ceiling.
+
+**Reach for property testing whenever the contract states a law rather than a bound.**
+`contract_holds/2` costs three lines once the generator exists, and it turns an assertion you
+checked on four fixtures into one checked on hundreds of inputs — using the contract you already
+wrote as the oracle, so there is no second assertion to keep in step. The best candidates are pure
+functions with a `@post` describing a relationship: conservation, ordering, idempotence, agreement
+between two spellings of one input.
+
+**`invariants_hold/2` is the most under-used macro in the library.** A struct module that already
+has an `@invariant` needs only a list of constructors, transformers and observers to get random
+operation sequences checked against it — no generator design, no new assertions, and it explores
+orderings you would not have thought to write down. If a module has an invariant and no property,
+that is usually the cheapest coverage available to you.
+
 ## Proving a contract fires
 
 ```elixir

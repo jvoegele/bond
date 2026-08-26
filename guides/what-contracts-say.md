@@ -8,7 +8,34 @@ The short answer: a contract states what a function promises. Catching bugs is w
 that does when an implementation disagrees with its promise, which is a consequence
 worth having but not the purpose.
 
-That distinction sounds academic and is not. It changes which contracts get written.
+That distinction sounds academic and is not. It changes which contracts get written, and how
+many.
+
+## How much to contract
+
+**The default is yes.** Aim for a contract on every non-trivial function, and read the rest of
+this guide — and the [soundness](writing-sound-assertions.md) one — as a quality bar on the
+assertion you are about to write rather than as a gate to argue past before writing one.
+
+That needs saying, because the failure mode here is one-sided and invisible. A codebase with too
+few contracts looks exactly like a codebase that never needed them: nothing is missing, nothing
+is red, and the functions that quietly promise nothing look the same as the functions that have
+nothing to promise. Careful screening under-contracts by default, and the shortfall never
+announces itself.
+
+One measurement, from a Phoenix application contracted with these guides: 67 of its 126 source
+files `use Bond`, between them carrying 136 postconditions, 28 preconditions and 13 struct
+invariants across 12 struct modules — and its author's assessment was that reaching that point
+took five passes, because every earlier one stopped too early.
+
+The **near five-to-one** ratio of postconditions to preconditions is the part worth internalising.
+Most functions have something to promise; far fewer have something to demand. If you go looking
+for a `@pre` and come up empty, that is the normal case, not a signal to move on — ask what the
+function *returns* instead, which is where the interesting laws live.
+
+None of this lowers the bar. An assertion that restates mechanism, cannot be evaluated, or
+accuses correct code is worse than none, and everything that follows still applies. What changes
+is the presumption: contract it unless one of the stated reasons applies.
 
 ## The instruction is prescriptive; the assertion is descriptive
 
