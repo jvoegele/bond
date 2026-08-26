@@ -82,7 +82,7 @@ defmodule Bond.Compiler.ContractDocs do
 
     [
       quote do
-        def unquote(fun)(unquote_splicing(params))
+        Kernel.def(unquote(fun)(unquote_splicing(params)))
       end
     ]
   end

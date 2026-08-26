@@ -476,8 +476,18 @@ defmodule Bond.Compiler.AnnotatedFunctionTest do
   defp first_block_clause({:__block__, _, [first | _]}), do: first
   defp first_block_clause(ast), do: ast
 
-  defp block_clauses({:__block__, _, clauses}), do: clauses
-  defp block_clauses(ast), do: [ast]
+  defp block_clauses({:__block__, _, clauses}), do: Enum.map(clauses, &normalize_definition/1)
+  defp block_clauses(ast), do: [normalize_definition(ast)]
+
+  # Bond emits every definition as `Kernel.def` / `Kernel.defp` so that a module which has
+  # overridden `def`/`defp` — `Phoenix.Component` does, for every arity-1 head (#134) — never sees
+  # generated code. The assertions below are about what is defined, not how it is spelled, so both
+  # forms are normalised to the bare one here.
+  defp normalize_definition({{:., meta, [{:__aliases__, _, [:Kernel]}, kind]}, _, args})
+       when kind in [:def, :defp],
+       do: {kind, meta, args}
+
+  defp normalize_definition(other), do: other
 
   defp doc_put_attribute_clauses(ast) do
     ast

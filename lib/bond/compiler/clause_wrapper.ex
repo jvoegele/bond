@@ -187,7 +187,7 @@ defmodule Bond.Compiler.ClauseWrapper do
 
     wrapper =
       quote do
-        unquote(kind)(unquote(guarded_head)) do
+        Kernel.unquote(kind)(unquote(guarded_head)) do
           (unquote_splicing(body_stmts))
         end
       end
