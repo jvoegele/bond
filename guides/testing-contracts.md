@@ -470,15 +470,22 @@ assertion checked hundreds of times that has never failed is a candidate for vac
 runtime counterpart to the compile-time [assertion linter](writing-sound-assertions.md).
 
 It is a *prompt*, not a verdict. A correct assertion over correct code also never fails, so
-`⚠ never failed` is a question with three answers, and only one of them is "delete it":
+`⚠ never failed` is a question with four answers, and only one of them is "delete it":
 
 | Why it cannot fail | What to do |
 |---|---|
 | It transcribes *how* the body works | Restate it as *what* the function promises |
-| The body guards the property twice | **Delete the redundant guard**, keep the contract |
+| The body guards the property twice **by accident** | **Delete the redundant guard**, keep the contract |
+| Two guards are **independently sufficient** by design | Keep both — and mutate them *together* |
 | It is a true law of a pure function | Keep it — prove it by **mutation**, not by a test |
 
-The third is the common case for a specification and is not a defect: a pure function's
+The two middle rows look identical from the table and want opposite treatment. An accidental
+double-guard is one check too many. Defence in depth — an application-level scope *and* row-level
+security underneath it — is falsifiable only by removing **both**, which is precisely the refactor
+the contract above them exists to notice. See
+[Running a mutation](#running-a-mutation) below.
+
+The last is the common case for a specification and is not a defect: a pure function's
 postconditions hold over every input the application ever sees, which is the point of writing
 them. Where no input can falsify one, break the implementation deliberately, confirm the
 assertion fires, and restore it — that is what distinguishes unbreakable-by-correct-code from
@@ -527,6 +534,126 @@ Keep expectations modest: in a mature codebase **most** rows will read `⚠ neve
 because most postconditions and invariants over correct code genuinely never fail — that is
 what a green suite means. This is a spot-check to skim occasionally for a contract that looks
 suspiciously safe, not a to-do list to drive to zero.
+
+## Running a mutation
+
+Mutation is the proof for the last row of that table, and the only thing that separates
+unbreakable-by-correct-code from unbreakable-because-vacuous: break the implementation
+deliberately, confirm the assertion fires, restore. One mutation at a time, reverted before the
+next.
+
+It is also easy to do in a way that reports a confident wrong answer. Five traps, each of which
+has cost real time in a real audit — the last of them deleted a correct contract.
+
+### Aim the mutation at the function the contract is on
+
+**A surviving mutation is evidence about the mutation until you have checked that it is evidence
+about the contract.** The aim misses in both directions.
+
+*Too far out.* `ordered_best_first` is a `@post` on `rank/3`. Mutating `match/3` to return
+`List.last/1` leaves `rank/3`'s own result correctly ordered: the contract holds because it is
+still true there, and the mutation tested nothing.
+
+*Too far in.* A `@post` on `Client.playlist_item_references/3` promises that every returned
+reference has both halves usable. Mutate the mapper it delegates to and the *mapper's* own
+postcondition raises first, one call inward — the outer contract never sees the bad value, and
+looks unfalsifiable. It is not. Corrupt the way the client assembles pages instead: the mapper
+stays satisfied on every individual page, and the outer contract fires at once.
+
+That second case invites a conclusion that sounds right and is wrong — *the collaborator already
+guarantees this, so the outer contract is redundant*:
+
+> **A function whose body delegates to a collaborator that already guarantees a property still
+> owes that property to its own caller.**
+
+The delegation is an implementation fact, and a refactor can retire that collaborator tomorrow.
+The guarantee is the specification: it renders into *this* function's generated docs, and its
+callers read it there without any reason to know the collaborator exists. It is the same
+distinction as `full?` — the delegation is prescriptive, the assertion descriptive.
+
+### Run a null control first
+
+The coverage table prints every label on every run, so a harness that greps the output for a
+label matches whether or not anything failed. Written the obvious way, it reports a hit for every
+mutation you try, including the ones that changed nothing.
+
+Two things actually indicate a violation: `label: :the_name` inside a raised `Bond.*Error`, or a
+coverage row for that label whose **failed** count is non-zero.
+
+```elixir
+defp fired?(output, label) do
+  String.contains?(output, "label: :#{label}") or
+    ~r/:#{label}\s+checked\s+[\d,]+×\s+failed\s+([\d,]+)×/
+    |> Regex.run(output)
+    |> case do
+      [_, count] -> String.replace(count, ",", "") != "0"
+      nil -> false
+    end
+end
+```
+
+Then **run the harness once with no mutation applied**. If anything reports a hit, what you have
+found is a broken detector, not a broken contract.
+
+### Give each assertion a mutation its neighbours survive
+
+Assertions on one function fail fast in execution order, so a mutation that breaks the first
+raises before the second is ever evaluated — and the second appears unfalsifiable under every
+mutation you try. The
+[layered-contract ordering](#patterns-and-gotchas) noted below for tests is a mutation-testing
+trap as well, and a quieter one.
+
+Real case: `from_the_archive` and `names_the_album_asked_about`, both on a cover-art lookup.
+Returning a redirect target fires the first and pre-empts the second. Proving the second needs a
+mutation that keeps the host intact and changes the album — then it fires immediately.
+
+Across *function* boundaries the same pre-emption is a genuine signal rather than a trap: a law
+restated at two altitudes, where the inner assertion always raises first, is redundant, and the
+outer one should go. The coverage table cannot tell the two readings apart. What separates them
+is **whether a bug exists that the inner assertion cannot see** — a paging bug is invisible to
+the mapper in the client example above, so that outer contract earns its place; where no such bug
+exists, it does not.
+
+### Two independently sufficient guards need mutating together
+
+Where a property is enforced twice *by design*, no single mutation can falsify a contract above
+it, and the row reads `⚠ never failed` for a contract that is doing real work.
+
+Measured case: an application-level `where user_id == ^user_id` and Postgres row-level security
+underneath it. Drop the `where` and RLS still filters; drop the RLS scope and the `where` still
+does. The scoping postcondition fires only when **both** go — which is the only way the law is
+genuinely breakable, and exactly the refactor you want something to notice.
+
+This is the row of the table above that is easiest to misread, and reading it wrong deletes the
+contract that would have caught the refactor. Accidental double-guarding means remove one guard
+and keep the contract; defence in depth means keep both guards and mutate them together.
+
+### Mutate toward wrong values, not toward no values
+
+A `forall` over an empty enumerable is vacuously true, so any mutation that makes a collection
+*absent* rather than *wrong* leaves the contract satisfied and tells you nothing.
+
+Real case: a scoping law over the connections a page lists. The obvious mutation — read them for
+a random user id — returns `[]`, and the law holds. Proving it required a mutation that returned
+*another user's* rows, which in turn required a second user in the fixtures. When the only
+realistic mutation empties the collection, the missing piece is usually a fixture rather than a
+contract.
+
+### When a mutation survives, suspect the fixtures first
+
+Once the four traps above are ruled out, a surviving mutation more often indicts the *tests* than
+the contract. Three real cases where the contract turned out to be fine:
+
+  * Every fixture happened to give every artist a name, so a filter's postcondition never saw the
+    shape it guards.
+  * Every test refreshed an already-clean connection, so "clears failure state" looked identical
+    to clearing nothing.
+  * A test named "a gap does not shift positions" passed under a rewrite that counted by index —
+    because on the captured album, track number happened to equal list position for all fourteen
+    items. A multi-volume release, where disc 2 restarts at track 1, is the discriminating case.
+
+A real fixture is not automatically a *discriminating* one, and when a test's name states a
+distinction, it is worth checking that the data actually exhibits it.
 
 ## Patterns and gotchas
 

@@ -53,6 +53,20 @@ an algorithm for computing square roots. That is the normal case; `full?` is the
 restatement but as **degenerate**: for `add/2`, `+` genuinely is the meaning, and the `@spec` and
 the name already carry it. Leave it out — but not because it looks like the body.
 
+**Delegation is mechanism too.** A function whose body hands the work to a collaborator that
+already guarantees a property still owes that property to *its own* caller:
+
+```elixir
+# The mapper's @post guarantees this. State it here anyway.
+@post both_halves_usable: forall(r <- result, usable?(r))
+def playlist_item_references(client, id, opts), do: Mapper.references(fetch_pages(client, id, opts))
+```
+
+"The callee already checks it" describes how this function is built today, and a refactor can
+retire that callee without touching this function's promise. The guarantee renders into *this*
+function's ExDoc, and its callers read it there — they have no reason to know the mapper exists.
+The same reasoning as `full?`: the delegation is prescriptive, the assertion descriptive.
+
 ## The three questions
 
 **What must the caller guarantee for this call to make sense?** → `@pre`. Not "what would crash
@@ -77,15 +91,21 @@ Treat "this cannot fail" as a question with three answers, only one of which is 
 | Why it cannot fail | What to do |
 | --- | --- |
 | It transcribes *how* the body works | Restate it as *what* the function promises |
-| The body guards the property twice | **Delete the redundant guard**, keep the contract |
+| The body guards the property twice **by accident** | **Delete the redundant guard**, keep the contract |
+| Two guards are **independently sufficient** by design | Keep both — mutate them *together* |
 | It is a true law of a pure function, unfalsifiable by data | Keep it — prove it by mutation |
 
-The second is easy to misread. One real case: a `no_empty_names` postcondition would not fire
+The two middle rows look identical from the coverage table and want opposite treatment. Defence
+in depth — an application-level scope *and* row-level security under it — is falsifiable only by
+removing both, which is the refactor the contract exists to notice. See `bond:testing` for how to
+mutate one.
+
+The accidental case is easy to misread. One real case: a `no_empty_names` postcondition would not fire
 under any single edit, because the body both passed `trim: true` *and* ran an explicit
 `Enum.reject(&(&1 == ""))`. Only a double mutation could falsify it. The fix was deleting the
 redundant guard, not weakening the contract — after which a single plausible edit failed loudly.
 
-The third is the common case for specifications and is **not** a defect. A pure function's
+The last row is the common case for specifications and is **not** a defect. A pure function's
 postconditions are *production* assertions: they hold over every input the application ever sees,
 which is the point. Measured on one normalization function: 128,992 codepoints, ~387,000 inputs,
 **zero violations** — and the contract still earns its place, because it is the single point every
@@ -96,9 +116,9 @@ answerable from a remote console instead of a rebuild.
 assertion fires, restore. Two minutes, and it is the only thing that distinguishes
 unbreakable-by-correct-code from unbreakable-because-vacuous.
 
-**"No current caller violates it" is not a fourth row.** All three ask whether the assertion
-*could* be false for an input the specification admits — never whether today's call sites produce
-one. A precondition is a standing obligation on every *future* caller, and callers arrive: the
+**"No current caller violates it" is not a row in that table.** Every row asks whether the
+assertion *could* be false for an input the specification admits — never whether today's call
+sites produce one. A precondition is a standing obligation on every *future* caller, and callers arrive: the
 value of `@pre positive: amount > 0` is that it holds the line the day someone adds a call site
 that gets it wrong. Well-behaved callers, even carefully contracted ones, are a reason the
 contract will stay green, not a reason to leave it unwritten. Census the call sites to understand

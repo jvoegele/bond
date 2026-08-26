@@ -100,6 +100,30 @@ delivered before anything runs.
 So "delete it, it can never fail" trades a published specification for nothing. If the
 assertion states meaning rather than mechanism, keep it.
 
+## A delegating body still owes its caller the guarantee
+
+The same trap has a third form, one altitude up. A function whose body hands the work to a
+collaborator that *already* guarantees a property looks like it has nothing left to promise:
+
+```elixir
+# The mapper's own @post already guarantees this. State it here anyway.
+@post both_halves_usable: forall(ref <- result, usable?(ref))
+def playlist_item_references(client, id, opts) do
+  client |> fetch_pages(id, opts) |> Mapper.references()
+end
+```
+
+"The mapper already checks it" describes how this function is built *today*. It is mechanism —
+and a refactor can retire that mapper next month without touching what this function promises.
+The guarantee is the specification: it renders into **this** function's generated docs, and its
+callers read it there, with no reason to know the mapper exists.
+
+It shows up while mutation testing, wearing a disguise: mutate the mapper and the mapper's own
+postcondition raises first, one call inward, so the outer contract never sees the bad value and
+looks unfalsifiable. It isn't — see
+[Running a mutation](testing-contracts.md#running-a-mutation) for how to aim at the right
+function.
+
 ## Well-behaved callers are not a reason to skip a contract
 
 The same mistake has a second form, which looks at the *callers* rather than the body:
