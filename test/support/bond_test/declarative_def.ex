@@ -60,6 +60,19 @@ defmodule BondTest.DeclarativeDef do
     arg
   end
 
+  @doc """
+  Documents the *next* definition, the way `Phoenix.Component`'s `attr/3` ends up documenting a
+  component from its declarations.
+
+  The point for #136 is that this doc is set by a library rather than written by the user, so
+  Bond has no record of it at `@on_definition` and cannot tell it is about to collide.
+  """
+  defmacro documented_by_the_library(text) do
+    quote do
+      @doc unquote(text)
+    end
+  end
+
   defp annotate_def(kind, expr) do
     case expr do
       {:when, meta, [left, right]} -> {:when, meta, [annotate_call(kind, left), right]}

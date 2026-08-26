@@ -70,12 +70,20 @@ defmodule Bond.Compiler.ContractDocs do
 
   Elixir's own remedy, named in that warning, is to attach the replacement to a function head —
   a signature with no `do` block. Emitting one between the doc attribute and the wrapper clauses
-  makes the override silent. Returns `[]` when the user supplied no `@doc` (nothing to override,
-  so no head is needed) or for `defp` (which carries no documentation at all).
+  makes the override silent.
+
+  The head accompanies **every** emitted doc, not only one overriding a `@doc` Bond saw the user
+  write. Bond is not the only thing that can have set a doc for the function: `Phoenix.Component`
+  documents a component from its `attr` declarations, so a contracted component with no
+  hand-written `@doc` collided with a doc Bond had no record of and warned anyway (#136).
+  Emitting the head unconditionally costs one bodiless signature and needs no way of asking
+  whether a doc is already attached — which Elixir does not expose mid-compile.
+
+  Returns `[]` only for `defp`, which carries no documentation at all. The caller skips it
+  anyway whenever no doc is emitted (`at_annotations: false`).
   """
   @spec doc_override_head(AnnotatedFunction.t(), [atom()]) :: [Macro.t()]
   def doc_override_head(%AnnotatedFunction{kind: :defp}, _canonical_names), do: []
-  def doc_override_head(%AnnotatedFunction{doc_attributes: []}, _canonical_names), do: []
 
   def doc_override_head(%AnnotatedFunction{fun: fun}, canonical_names) do
     params = Enum.map(canonical_names, &Macro.var(&1, nil))
