@@ -47,7 +47,7 @@ only where the case is overwhelming.
 
 ```elixir
 # mix.exs
-{:bond, "~> 1.17"},
+{:bond, "~> 1.18"},
 {:stream_data, "~> 1.0", only: [:dev, :test]}   # only if you want Bond.PropertyTest
 ```
 
