@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.17.4] - 2026-08-26
+
+Composing with `Phoenix.Component`.
+
+Contracts on arity-1 functions did not work in a module that `use`s `Phoenix.Component` — which
+is the natural shape for the functions worth contracting in a LiveView, since every socket helper
+is `socket -> socket`. Both fixes are about Bond coexisting with a library that overrides `def`
+and `defp`; neither changes the contract language.
+
+### Fixed
+
+- **A `@post` on an arity-1 function no longer fails to compile in a `Phoenix.Component` module**
+  ([#134](https://github.com/jvoegele/bond/issues/134)). It raised a `MatchError` on a
+  Bond-internal tuple that named neither Bond nor arity:
+
+  ```
+  ** (MatchError) no match of right hand side value:
+      {:__bond_postconditions__stop__1, 2}
+      (phoenix_live_view) expanding macro: Phoenix.Component.Declarative.__pattern__!/2
+  ```
+
+  `Phoenix.Component` imports its own `def`/`defp` and rewrites **arity-1 heads only**, wrapping
+  the parameter in a macro that asserts it is expanding inside an arity-1 function.
+  `@on_definition` hands Bond the head *after* that rewrite, so the parameters Bond captures
+  carry a foreign macro call — and Bond replays captured parameters in generated definitions. In
+  the wrapper the arity still matched; in the lifted `__bond_postconditions__<fun>__<arity>`
+  defp, which takes the arguments **plus `result`**, it did not.
+
+  Bond now emits every generated definition through `Kernel.def` / `Kernel.defp`, so a module
+  that has overridden `def`/`defp` never sees generated code, and strips foreign calls from
+  captured parameters rather than replaying them. Expanding them instead is not an option: these
+  macros have compile-time side effects, and re-running Phoenix's duplicates a component's attr
+  docs.
+
+  Contracts on arity 0, 2 and above were unaffected. A `@pre` alone on an arity-1 function
+  appeared to work and did not: its lifted defp is also arity 1, so the assertion held while
+  silently registering a Bond helper as a function component.
+
+- **A contracted function component with `attr` and no hand-written `@doc` no longer warns
+  `redefining @doc attribute`** ([#136](https://github.com/jvoegele/bond/issues/136)). Phoenix
+  documents a component from its `attr` declarations; Bond then appends its
+  `#### Postconditions` section by re-emitting `@doc`, and the two collided.
+
+  Bond's existing mitigation — the bodiless `def fun(args)` head that lets a re-emitted `@doc`
+  override an earlier one silently — was gated on Bond having buffered a `@doc` the *user* wrote,
+  and a doc set by another library is not one Bond has any record of. The head now accompanies
+  every emitted doc. Rendered signatures, default arguments, `@doc false` and `@impl true` are
+  unchanged; the cost is one bodiless signature per contracted public function.
+
+### Internal
+
+- `BondTest.DeclarativeDef` reproduces `Phoenix.Component.Declarative`'s `def`/`defp` override in
+  about 80 lines, so this interop is covered by the suite without Bond taking a
+  `phoenix_live_view` dependency. Both fixes are also verified against the real library.
+
 ## [1.17.3] - 2026-08-26
 
 How to run a mutation.
