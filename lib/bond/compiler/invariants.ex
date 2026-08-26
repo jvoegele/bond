@@ -412,6 +412,82 @@ defmodule Bond.Compiler.Invariants do
   defp expression_returns_struct?(_expr, _struct_module, _aliases), do: false
 
   @doc """
+  Returns the clauses whose body statically returns a **tuple** carrying the struct in a position
+  the exit check will not look at (#131).
+
+  `Bond.Runtime.Eval.check_struct_invariant/3` extracts a subject from `%Struct{}` or
+  `{:ok, %Struct{}}` and lets every other shape through unchecked. `{batch, struct}` is an
+  ordinary Elixir return, so the value the caller keeps — often from the *last* call of a run,
+  which has no next call to catch it on entry — is never validated.
+
+  Detection is deliberately narrow, because the bias for this family of warnings is silence (see
+  `any_clause_mentions_struct?/2`): a tuple **literal**, not the `{:ok, _}` shape, with at least
+  one element that is unmistakably this struct — a `%Struct{}` literal, or a `%{var | ...}`
+  update of a variable the head bound as a struct parameter. A tuple built by a function call, or
+  holding a struct arrived at some other way, is not reported.
+
+  Making the check itself fire on these shapes is a behaviour change, and `guides/stability.md`
+  puts that in the next major with a warning in a minor first. This is that warning.
+  """
+  @spec clauses_returning_unchecked_struct([term()], module(), keyword()) :: [term()]
+  def clauses_returning_unchecked_struct(clauses, struct_module, aliases \\ [])
+      when is_list(clauses) do
+    Enum.filter(clauses, fn clause ->
+      bound = struct_param_vars(clause, struct_module, aliases)
+      body_returns_unchecked_tuple?(clause.body, struct_module, aliases, bound)
+    end)
+  end
+
+  defp struct_param_vars(clause, struct_module, aliases) do
+    clause.params
+    |> Kernel.||([])
+    |> detect_struct_params(clause.guards || [], struct_module, aliases)
+    |> Enum.flat_map(fn
+      {:bound, var, _idx} -> [var]
+      _other -> []
+    end)
+    |> MapSet.new()
+  end
+
+  defp body_returns_unchecked_tuple?([{:do, expr} | _], struct_module, aliases, bound) do
+    expr
+    |> last_expression()
+    |> unchecked_tuple?(struct_module, aliases, bound)
+  end
+
+  defp body_returns_unchecked_tuple?(_body, _struct_module, _aliases, _bound), do: false
+
+  defp last_expression({:__block__, _, statements}),
+    do: statements |> List.last() |> last_expression()
+
+  defp last_expression(expr), do: expr
+
+  # `{:ok, x}` is the shape the exit check already handles; anything else two-element is a bare
+  # AST tuple, and larger tuples arrive as `{:{}, _, elements}`.
+  defp unchecked_tuple?({:ok, _inner}, _struct_module, _aliases, _bound), do: false
+
+  defp unchecked_tuple?({:{}, _, elements}, struct_module, aliases, bound) do
+    Enum.any?(elements, &confident_struct?(&1, struct_module, aliases, bound))
+  end
+
+  defp unchecked_tuple?({left, right}, struct_module, aliases, bound) do
+    confident_struct?(left, struct_module, aliases, bound) or
+      confident_struct?(right, struct_module, aliases, bound)
+  end
+
+  defp unchecked_tuple?(_expr, _struct_module, _aliases, _bound), do: false
+
+  defp confident_struct?({:%, _, [name, _]}, struct_module, aliases, _bound),
+    do: same_module?(name, struct_module, aliases)
+
+  # `%{p | field: v}` where `p` is a parameter the head matched as this struct.
+  defp confident_struct?({:%{}, _, [{:|, _, [{var, _, ctx}, _updates]}]}, _sm, _aliases, bound)
+       when is_atom(var) and is_atom(ctx),
+       do: MapSet.member?(bound, var)
+
+  defp confident_struct?(_expr, _struct_module, _aliases, _bound), do: false
+
+  @doc """
   Emits one pre-invariant statement per detected struct parameter, in left-to-right
   order. Each statement calls the lifted invariants defp with the appropriate variable:
 

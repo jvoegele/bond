@@ -706,6 +706,111 @@ defmodule Bond.SkippedInvariantsWarningTest do
     end
   end
 
+  describe "a struct returned inside a tuple the exit check will not see (#131)" do
+    # `check_struct_invariant/3` extracts a subject from `%Struct{}` or `{:ok, %Struct{}}` and
+    # lets every other shape through. `{batch, struct}` is an ordinary Elixir return, so the
+    # struct the caller keeps goes unchecked — and the *last* call of a sequence has no next call
+    # to catch it on entry, which is exactly the value a caller ends up holding.
+    #
+    # Making the check fire on those shapes is a behaviour change, which `guides/stability.md`
+    # puts in the next major after a minor that warns. This is that warning.
+
+    defp warns_unchecked_tuple?(source) do
+      source
+      |> capture_diagnostics()
+      |> Enum.any?(&(&1.severity == :warning and String.contains?(&1.message, "inside a tuple")))
+    end
+
+    defp progress_module(name, body) do
+      """
+      defmodule BondTest.UncheckedTuple.#{name} do
+        use Bond
+        defstruct resolved: 0, matched: 0
+        @invariant partitioned: subject.matched <= subject.resolved
+        #{body}
+      end
+      """
+    end
+
+    test "fires for {batch, struct}" do
+      assert warns_unchecked_tuple?(
+               progress_module(
+                 "Batch",
+                 "def add(%__MODULE__{} = p), do: {:batch, %{p | resolved: p.resolved + 1}}"
+               )
+             )
+    end
+
+    test "fires for a struct literal in a larger tuple" do
+      assert warns_unchecked_tuple?(
+               progress_module("Three", "def new3, do: {:a, :b, %__MODULE__{}}")
+             )
+    end
+
+    test "stays quiet for {:ok, struct}, which the exit check already handles" do
+      refute warns_unchecked_tuple?(
+               progress_module(
+                 "OkTuple",
+                 "def add(%__MODULE__{} = p), do: {:ok, %{p | resolved: p.resolved + 1}}"
+               )
+             )
+    end
+
+    test "stays quiet for a bare struct return" do
+      refute warns_unchecked_tuple?(
+               progress_module(
+                 "Bare",
+                 "def add(%__MODULE__{} = p), do: %{p | resolved: p.resolved + 1}"
+               )
+             )
+    end
+
+    test "stays quiet for a tuple carrying no struct" do
+      refute warns_unchecked_tuple?(
+               progress_module(
+                 "NoStruct",
+                 "def size(%__MODULE__{} = p), do: {:count, p.resolved}"
+               )
+             )
+    end
+
+    test "stays quiet when the tuple is built by a call — detection is deliberately narrow" do
+      # Erring toward silence: a false warning costs trust in every warning, a missed one costs a
+      # single unchecked function. Same bias as `any_clause_mentions_struct?/2`.
+      refute warns_unchecked_tuple?(
+               progress_module("ViaCall", """
+               defp mk(p), do: p
+               def add(%__MODULE__{} = p), do: {:batch, mk(p)}
+               """)
+             )
+    end
+
+    test "is suppressed by @bond_warn_skipped_invariants false" do
+      refute warns_unchecked_tuple?(
+               progress_module("Suppressed", """
+               @bond_warn_skipped_invariants false
+               def add(%__MODULE__{} = p), do: {:batch, %{p | resolved: p.resolved + 1}}
+               """)
+             )
+    end
+
+    test "the message names the function and points at the @post workaround" do
+      [message] =
+        progress_module(
+          "Message",
+          "def add(%__MODULE__{} = p), do: {:batch, %{p | resolved: p.resolved + 1}}"
+        )
+        |> capture_diagnostics()
+        |> Enum.filter(&String.contains?(&1.message, "inside a tuple"))
+        |> Enum.map(& &1.message)
+
+      assert message =~ "add/1"
+      assert message =~ "BondTest.UncheckedTuple.Message"
+      assert message =~ "@post whenever("
+      assert message =~ "warn_skipped_invariants"
+    end
+  end
+
   # try/rescue so an error-emitting source doesn't abort the test before the
   # diagnostics can be inspected.
   defp capture_diagnostics(source) do
