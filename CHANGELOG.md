@@ -5,6 +5,109 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-08-26
+
+Three things Bond should have told you, and one it shouldn't have.
+
+Every change here is a diagnostic. Three cases where a contract was quietly not doing what its
+author believed now say so at compile time; one warning that fired on correct code, from a
+function nobody wrote, no longer does. No contract semantics change, and nothing that compiled
+before stops compiling.
+
+Minor rather than patch because new compile-time warnings can appear in code that was previously
+silent. All three are opt-out — the invariant one through the existing
+`:warn_skipped_invariants` switch, the linter through `:lint_assertions`.
+
+### Added
+
+- **The assertion linter catches an unparenthesised `~>` consequent**
+  ([#133](https://github.com/jvoegele/bond/issues/133)). `~>` is in Elixir's arrow operator
+  group, so it binds tighter than every comparison and swallows the consequent:
+
+  ```elixir
+  is_binary(x) ~> String.length(x) <= 10     # (is_binary(x) ~> String.length(x)) <= 10
+  ```
+
+  Elixir compares across all types, so the broken form quietly answers something, and which
+  constant it lands on depends on the operator — an atom sorts above every number, making
+  `p ~> q >= 0` always **true** (asserting nothing) and `p ~> q <= 10` always **false**
+  (rejecting every call). Both compile and pass, which is what makes this worse than the sibling
+  `<~` mistake that fails outright.
+
+  The new `:implication_precedence` rule needs no type inference — the mistake is an AST shape,
+  an ordering comparison one of whose operands is a `~>` node. It reports where the parentheses
+  actually land, the constant it folds to when that is computable, and the form you meant.
+  Equality against an implication is left alone: `(p ~> q) == true` is odd but could be
+  deliberate.
+
+  This is the first rule that proves a constant *parse* rather than a constant *value*, so it
+  fires even where the other operand is a variable and the resulting constant cannot be named.
+  The linter's documented bar is worded accordingly now.
+
+  Enabling it found a fourth instance in Bond's own suite, after the three the issue lists: a
+  test asserting `Map.has_key?(m, :id) ~> m.id > 0` produced no findings, under the name "an
+  ordinary, meaningful assertion". It parsed as `(Map.has_key?(m, :id) ~> m.id) > 0` — always
+  true.
+
+- **A warning when a struct is returned inside a tuple the exit check will not see**
+  ([#131](https://github.com/jvoegele/bond/issues/131)). Invariants are checked on a return value
+  of `%Struct{}` or `{:ok, %Struct{}}`; any other tuple shape passes through unchecked. But
+  `{batch, struct}` is an ordinary Elixir return, and because the *last* call of a sequence has
+  no next call to catch the value on entry, the struct a caller ends up holding is exactly the
+  one that escapes.
+
+  Detection is deliberately narrow, following the bias established in #80 — a tuple **literal**,
+  not the `{:ok, _}` shape, holding a `%Struct{}` literal or a `%{var | ...}` update of a struct
+  parameter. A tuple built by a function call is not reported. Reuses the
+  `:warn_skipped_invariants` switch rather than adding a key, so anyone who has already
+  suppressed invariant warnings does not acquire a new one on upgrade.
+
+  Making the check itself find a struct in an arbitrary tuple is a behaviour change, which
+  [Stability](guides/stability.md) puts in the next major after a minor that warns. This is that
+  minor; #131 stays open to track the 2.0 work.
+
+- **Behaviours tell implementers how to inherit their contracts**
+  ([#132](https://github.com/jvoegele/bond/issues/132)). A behaviour that declares contracts now
+  appends an `## Implementing this behaviour` section to its generated `@moduledoc`, naming
+  `use Bond, behaviours: [...]`. A bare `@behaviour TheBehaviour` compiles and inherits
+  **nothing**, silently — the easier of the two mistakes to make, since `@behaviour` is what
+  Elixir itself asks for. Bond cannot warn from the implementing module, because nothing there
+  says the behaviour carries contracts it is declining, so the instruction goes where somebody
+  writing an implementation is already reading.
+
+  Follows the same rules as the generated `## Invariants` section: appended to an existing
+  `@moduledoc`, synthesised when there is none, skipped over `@moduledoc false`, and skipped for
+  a behaviour with no contracts.
+
+### Fixed
+
+- **A `whenever` binding that shadows a parameter no longer warns**
+  ([#122](https://github.com/jvoegele/bond/issues/122)). It produced
+
+  ```
+  warning: variable "n" is unused
+  └─ collide.exs:1: Fires.__bond_postconditions__compute__1/2
+  ```
+
+  — unattributable in every direction: a function the author never wrote, the `defmodule` line,
+  and a suggested fix (`_n`) with nothing to apply it to. The `case` a group compiles to rebinds
+  the pattern's names, shadowing the parameter, and a `:conditional` group's non-match branch is
+  a bare `:ok`, so the parameter was never read.
+
+  The lifted defp head now underscore-prefixes such a parameter. Confined to `whenever`: `where`
+  escapes the warning only because its non-match branch carries a deferred `binding()` snapshot,
+  and underscoring a parameter that snapshot reads would report it as `_name` in the violation's
+  `:binding` — degrading a real error to silence a warning that was not being emitted.
+
+### Internal
+
+- `BondTest.DeclarativeDef` (added in 1.17.4) gains a macro that documents the *next* definition
+  the way a library does rather than the way a user does, which is the distinction #132's
+  moduledoc note turns on.
+- Regression tests pinning the two behaviour-contract diagnostics that already worked and had
+  none: a contract after the final `@callback`, and an absorbed contract naming an argument the
+  absorbing callback lacks.
+
 ## [1.17.4] - 2026-08-26
 
 Composing with `Phoenix.Component`.
