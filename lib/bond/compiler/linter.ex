@@ -17,8 +17,10 @@ defmodule Bond.Compiler.Linter do
 
   ## Ruleset
 
-  Every rule is *structural* (no type inference) and fires only on provably-constant shapes —
-  when in doubt, it stays silent, because a noisy contract linter gets disabled wholesale.
+  Every rule is *structural* (no type inference) and fires only where the shape is wrong by
+  construction — when in doubt, it stays silent, because a noisy contract linter gets disabled
+  wholesale. Most rules prove a constant *value*; the precedence rule proves a constant *parse*,
+  which is why it can fire where the resulting constant cannot be named.
 
     * **Constant assertion** — the whole expression folds to a constant over literals and pure
       comparison/boolean/arithmetic operators (`:ok == 200`, `"x" not in [%{...}]`, `1 == 1`).
@@ -30,6 +32,10 @@ defmodule Bond.Compiler.Linter do
       whose predicate is either constant or ignores the bound variable, so the quantifier only
       tests whether the enumerable is empty. A *structural* generator is never flagged: since
       #55 it asserts the shape of every element, which is a real check.
+    * **Implication precedence** — an ordering comparison (`<`, `>`, `<=`, `>=`) one of whose
+      operands is a `~>`. `~>` is in Elixir's arrow group and binds tighter than every
+      comparison, so `p ~> q >= 0` parses as `(p ~> q) >= 0` and is constant. Equality operators
+      are excluded: `(p ~> q) == true` is odd but could be deliberate.
   """
 
   @typedoc """
@@ -37,7 +43,11 @@ defmodule Bond.Compiler.Linter do
   diagnostic (already including the offending code).
   """
   @type finding :: %{
-          rule: :constant_assertion | :self_comparison | :vacuous_quantifier,
+          rule:
+            :constant_assertion
+            | :self_comparison
+            | :vacuous_quantifier
+            | :implication_precedence,
           message: String.t()
         }
 
@@ -71,6 +81,10 @@ defmodule Bond.Compiler.Linter do
 
   @quantifiers [:forall, :exists]
 
+  # Ordering comparisons only. `==`/`!=`/`===`/`!==` against an implication are odd but could be
+  # deliberate, and this rule's bar is no false positives (#133).
+  @ordering_comparisons [:<, :>, :<=, :>=]
+
   @doc """
   Analyses an assertion `expression` and returns a (possibly empty) list of `t:finding/0`.
 
@@ -81,7 +95,8 @@ defmodule Bond.Compiler.Linter do
     Enum.concat([
       constant_assertion(expression),
       self_comparisons(expression),
-      vacuous_quantifiers(expression)
+      vacuous_quantifiers(expression),
+      implication_precedence(expression)
     ])
   end
 
@@ -379,6 +394,101 @@ defmodule Bond.Compiler.Linter do
 
     not found?
   end
+
+  # --- Rule: implication precedence -----------------------------------------------------------
+
+  # `~>` is in Elixir's *arrow* operator group, which binds tighter than every comparison. So an
+  # unparenthesised comparison consequent gets swallowed:
+  #
+  #     is_binary(x) ~> String.length(x) <= 10     # (is_binary(x) ~> String.length(x)) <= 10
+  #
+  # `~>` yields a boolean, and Elixir compares across all types, so the result is a constant whose
+  # value depends on the operator: an atom sorts above every number, making `p ~> q >= 0` always
+  # true and `p ~> q <= 10` always false. Both are silent — the first asserts nothing, the second
+  # rejects every call.
+  #
+  # No type inference is needed: the rule is the AST shape "an ordering comparison one of whose
+  # operands is a `~>` node", which is why this belongs in the compiler lane rather than Credo
+  # (#133). Equality operators are excluded — `(p ~> q) == true` is odd but could be deliberate,
+  # and the bar here is no false positives.
+  #
+  # Bond shipped this mistake in its own guide, the `Bond.Predicates` moduledoc and a compile
+  # error's suggested fix, which is the argument that it is in user code too.
+  defp implication_precedence(expression) do
+    expression
+    |> collect(&implication_precedence_finding/1)
+    |> Enum.reverse()
+  end
+
+  defp implication_precedence_finding({op, _, [left, right]} = node)
+       when op in @ordering_comparisons do
+    cond do
+      implication?(left) -> implication_precedence_msg(node, op, left, right)
+      implication?(right) -> implication_precedence_msg(node, op, left, right)
+      true -> nil
+    end
+  end
+
+  defp implication_precedence_finding(_node), do: nil
+
+  defp implication?({:~>, _, [_antecedent, _consequent]}), do: true
+  defp implication?(_ast), do: false
+
+  defp implication_precedence_msg(node, op, left, right) do
+    {implication, other, side} =
+      if implication?(left), do: {left, right, :left}, else: {right, left, :right}
+
+    {:~>, meta, [antecedent, consequent]} = implication
+
+    # Rendered by hand: `Macro.to_string/1` of the node reproduces the source verbatim, which is
+    # precisely the spelling that misleads. The point is to show where the parentheses land.
+    implication_source = Macro.to_string(implication)
+    other_source = Macro.to_string(other)
+
+    {parsed_as, intended} =
+      case side do
+        :left ->
+          {"(#{implication_source}) #{op} #{other_source}",
+           {:~>, meta, [antecedent, {op, [], [consequent, other]}]}}
+
+        :right ->
+          {"#{other_source} #{op} (#{implication_source})",
+           {:~>, meta, [antecedent, {op, [], [other, consequent]}]}}
+      end
+
+    %{
+      rule: :implication_precedence,
+      message:
+        "Bond assertion linter: `#{Macro.to_string(node)}` compares the result of an " <>
+          "implication. `~>` binds tighter than every comparison, so this parses as " <>
+          "`#{parsed_as}`" <>
+          constant_note(op, left, right) <>
+          ". Parenthesise the " <>
+          "consequent: `#{Macro.to_string(intended)}`."
+    }
+  end
+
+  # `~>` returns a boolean, so where the other operand is a literal number or binary the whole
+  # comparison folds — `true` and `false` are both atoms and sort the same way against either.
+  # Left `:dynamic` when the other operand is anything else, including an atom, where `true` and
+  # `false` could compare differently.
+  defp constant_note(op, left, right) do
+    other = if implication?(left), do: right, else: left
+
+    if is_number(other) or is_binary(other) do
+      case {apply(Kernel, op, [true, other]), apply(Kernel, op, [false, other])} do
+        {same, same} -> " — always `#{same}`, so it #{constant_phrase(same)}"
+        _ -> ""
+      end
+    else
+      ""
+    end
+  end
+
+  # The clause-fragment form of `constant_effect/1`, which is a whole sentence and does not fit
+  # mid-message.
+  defp constant_phrase(true), do: "asserts nothing"
+  defp constant_phrase(false), do: "fails on every call"
 
   # Walk `ast`, applying `fun` to every node; accumulate the non-nil results (in reverse order).
   defp collect(ast, fun) do
