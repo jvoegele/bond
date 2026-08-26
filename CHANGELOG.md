@@ -45,6 +45,22 @@ conclusion. No library code changes.
   nowhere) and **give `defstruct` defaults that satisfy the invariant**. The payoff compounds:
   every function in the new module is then a candidate for a contract of its own.
 
+- **Explain a contract in its `@doc`, not in a comment above it**, in `usage-rules.md`, the skill
+  and `guides/writing-contracts.md`. Bond appends the generated `#### Preconditions` /
+  `#### Postconditions` sections to a function's `@doc`, so prose written there renders directly
+  above the contract it justifies and reaches the callers who must satisfy it; the same words in
+  a `#` comment reach nobody but whoever opens the file. A comment beside an assertion still
+  earns its place when it records what the assertion *cannot say about itself* and a caller does
+  not need — a bound that came from a measurement, a deliberate suppression — which is what the
+  existing rules asking for a comment beside a coverage guard or a
+  `@bond_warn_skipped_invariants false` were always about.
+
+  With it, the general form: **write comments and docstrings for people.** A source comment is a
+  poor channel for anything aimed at an AI agent — not because agents don't read them, but
+  because every reader pays for it, it is duplicated at each site, and a comment paraphrasing
+  these rules goes stale against them. Durable project knowledge belongs where it loads
+  regardless of which file is open.
+
 - **How much to test**, in `usage-rules/testing.md` and `guides/testing-contracts.md`. A contract
   you have never seen fail is a claim, not a check. Includes the measured ratio — about one proof
   per two contracts — and singles out `invariants_hold/2` as the most under-used macro in the

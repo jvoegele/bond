@@ -510,6 +510,60 @@ contract as the published interface rather than an internal test aid, and it mea
 most of a contract's value is delivered before anything runs — see
 [What Should a Contract Say?](what-contracts-say.md#a-one-line-implementation-still-deserves-a-specification).
 
+### Explain a contract in its `@doc`, not in a comment above it
+
+Because the generated sections are appended to the `@doc`, prose you write there
+renders *directly above* the contract it explains, in the published docs, for the
+callers who have to satisfy it. A `#` comment above the same assertion reaches
+nobody except whoever opens the source file.
+
+That makes the choice of channel almost automatic. If the reasoning would help
+someone deciding whether they may call this function, it is `@doc` material — the
+same place you would explain anything else about the interface. If it would not, it
+is worth asking who it is for.
+
+```elixir
+# ❌ The reasoning is real, and nobody who needs it will see it.
+# Winkler's bonus is added to a value that may already be 1.0, so an
+# implementation that forgets to scale it by (1 - jaro) returns something above
+# 1.0 — which does not raise, and silently outranks an exact ISRC match.
+@post in_unit_interval: result >= 0.0 and result <= 1.0
+
+# ✅ Same words, published next to the assertion they justify.
+@doc """
+Jaro-Winkler similarity, always a proportion.
+
+Winkler's bonus is added to a value that may already be `1.0`, so an
+implementation that forgets to scale it by `(1 - jaro)` returns something above
+`1.0` — which does not raise, and silently outranks an exact ISRC match.
+"""
+@post in_unit_interval: result >= 0.0 and result <= 1.0
+```
+
+Comments beside an assertion are still worth writing where they record something
+the assertion **cannot say about itself** and a caller does not need: a bound whose
+value came from a measurement, a deliberate suppression, a formulation that looks
+like a mistake and is not. This guide asks for exactly that in a few places — a
+measured range recorded next to a coverage guard, a reason written beside a
+`@bond_warn_skipped_invariants false`. Those are notes to a future maintainer about
+a *decision*, not explanations of what the assertion says, and a line or two does
+the job.
+
+The failure mode is a comment block long enough that a reader skims it, which costs
+more than the note was worth: it pushes the next assertion off the screen and
+breaks up the one thing the contract block is for — being readable at a glance as a
+specification.
+
+> #### Write comments for people {: .neutral}
+>
+> Source comments are a poor channel for anything aimed at an AI coding agent.
+> Not because agents don't read them — they do — but because a comment is paid for
+> by every reader, duplicated at every site that needs it, and drifts out of step
+> with the rules it paraphrases. Durable project knowledge belongs somewhere loaded
+> regardless of which file is open: `AGENTS.md`, the files it references, or the
+> agent's own project memory. Library mechanics belong in the library's docs, which
+> is where you are now.
+
 `@invariant`s are documented at the **module** level: a module that declares
 invariants gets a `## Invariants` section appended to its `@moduledoc`, naming the
 struct, explaining the `subject` binding, listing each invariant in the same

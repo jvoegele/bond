@@ -392,6 +392,26 @@ The payoff compounds: once the map is a struct with a module, every function in 
 candidate for a `@pre`/`@post` of its own, and they are usually the pure, law-bearing functions
 where contracts are worth the most.
 
+## Where the rationale goes
+
+You will often know *why* an assertion is worth having — the bug it catches, the reasoning behind
+a bound. That belongs in the function's `@doc`, because Bond appends the generated contract
+sections to it: prose there renders directly above the assertion it justifies, in the docs the
+callers read. The same words in a `#` comment above the assertion reach nobody but whoever opens
+the file.
+
+A comment beside an assertion earns its place only when it records what the assertion **cannot
+say about itself** and a caller does not need — a bound that came from a measurement, a
+deliberate suppression, a formulation that looks like a mistake and is not. One or two lines.
+Anything longer competes with the contract block it sits in, which exists to be read at a glance
+as a specification.
+
+**Write comments for people.** Not because agents don't read them, but because a source comment
+is the wrong channel for agent-directed content: every reader pays for it, it is duplicated at
+each site, and a comment paraphrasing these rules goes stale against them. Durable project
+knowledge belongs where it loads regardless of which file is open — `AGENTS.md`, the files it
+references, or project memory. Bond mechanics belong in the usage rules.
+
 ## Checklist for a new contract
 
 1. **State what the function or type promises**, in terms a caller can rely on. If you cannot say
@@ -407,5 +427,7 @@ where contracts are worth the most.
    the program **does** or only what it **notices**?
 7. **Can it fail?** Write a `Bond.Test` assertion targeting its `label:`. Where no input can
    falsify it, mutate the implementation and confirm it fires.
-8. **Read the coverage table.** `⚠ never failed` is a question with three answers.
-9. **When you add a precondition, audit its call sites.**
+8. **Does the reasoning belong in the `@doc`?** If you are about to write a comment explaining
+   the assertion, that is where it goes — published, next to the contract, for the caller.
+9. **Read the coverage table.** `⚠ never failed` is a question with four answers.
+10. **When you add a precondition, audit its call sites.**

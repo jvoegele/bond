@@ -119,6 +119,22 @@ end
     validation — it can be compiled out.
   * Contracts attach to a **function**, not a clause: put them before the first clause. A `@pre`
     between clauses is a compile error.
+  * **Explain a contract in its `@doc`, not in a comment above it.** Bond appends the generated
+    `#### Preconditions` / `#### Postconditions` sections to the function's `@doc`, so prose there
+    renders directly above the contract it justifies and reaches the callers who must satisfy it;
+    a `#` comment reaches nobody but whoever opens the file. Keep a comment beside an assertion
+    only for what the assertion **cannot say about itself** and a caller does not need — a bound
+    that came from a measurement, a deliberate suppression, a formulation that looks like a
+    mistake and is not — and keep it to a line or two. A comment long enough to skim past pushes
+    the next assertion off the screen and costs more than it records.
+
+**Write comments and docstrings for people, not for agents.** This one is about you. Source
+comments are a poor channel for anything aimed at an AI agent — not because agents don't read
+them, they do, but because a comment is paid for by every reader, duplicated at every site that
+needs it, and drifts out of step with the rules it paraphrases. Notes to your future self or to
+the next agent belong where they load regardless of which file is open: `AGENTS.md`, the files it
+references, or your project memory. Bond's own mechanics belong in these rules — a comment
+restating `bond:inheritance` above an inherited contract is a copy that will go stale.
 
 ## The traps
 
