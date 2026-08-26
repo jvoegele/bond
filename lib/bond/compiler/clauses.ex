@@ -296,15 +296,25 @@ defmodule Bond.Compiler.Clauses do
   #   * the binding source IS evaluated in the parameter scope, so its free names ARE references
   #     (e.g. `whenever({:ok, x} <- acc)` must keep `acc`, or a multi-clause lifted defp would
   #     drop it).
-  defp assertion_referenced_names(%{
-         binding: %{pattern: pattern, source: source},
-         expression: expr
-       }) do
+  @doc """
+  The names one assertion references from the scope enclosing it.
+
+  Public because `Bond.Compiler.AnnotatedFunction` needs the *un-intersected* set when deciding
+  whether a parameter shadowed by a `whenever` pattern is read anywhere else (#122);
+  `referenced_param_names/2` intersects with the clause's top-level names and so cannot answer
+  that.
+  """
+  @spec assertion_referenced_names(%{:expression => Macro.t(), optional(any()) => any()}) ::
+          MapSet.t(atom())
+  def assertion_referenced_names(%{
+        binding: %{pattern: pattern, source: source},
+        expression: expr
+      }) do
     member_refs = MapSet.difference(collect_var_names(expr), pattern_binding_names(pattern))
     MapSet.union(member_refs, collect_var_names(source))
   end
 
-  defp assertion_referenced_names(%{expression: expr}), do: collect_var_names(expr)
+  def assertion_referenced_names(%{expression: expr}), do: collect_var_names(expr)
 
   # For every clause's top-level name, include both `_name` and `name` in the
   # candidate set so contracts referencing either spelling are recognised
