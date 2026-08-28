@@ -191,6 +191,30 @@ expectations — use `Mox.set_mox_global` with `async: false`, or `Mox.allow/3`.
 reply**: a branch that runs only when an API call fails is never reached under a success stub,
 however long the sequence. Split runs by outcome.
 
+## Density: which functions have no contract at all
+
+```sh
+mix bond.audit             # per-module and overall percentages
+mix bond.audit --verbose   # and every uncontracted function by name
+mix bond.audit --only Foo  # restrict to matching module names
+mix bond.audit --min 40    # exit non-zero below 40%, for CI
+```
+
+Coverage (below) reports assertions that **ran**, so it is a report about contracts that exist —
+a function nobody contracted appears in it nowhere. `mix bond.audit` is the other half, read
+from a compiler reflection rather than parsed from source, so it sees macro-generated functions
+and `defdelegate`s too.
+
+The denominator is public, non-callback functions in modules that `use Bond`. A `defp`, an
+`@impl` callback, and a function covered only by a module `@invariant` are each reported apart
+rather than folded in — a private function is not part of the module's promise, a callback's
+promise belongs to the behaviour, and an invariant is a law about the type rather than about
+any one function.
+
+**Run it before reporting that a contracting pass is done.** A bare function is a question, not
+a defect, and "unsound, unreachable, or not warranted by the specification" are the only reasons
+to leave it bare — but you cannot claim the pass is finished without having looked at the list.
+
 ## Coverage, and the workflow it prompts
 
 ```elixir

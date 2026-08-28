@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`mix bond.audit`** — reports contract *density*: which public, non-callback functions in
+  modules that `use Bond` carry a contract of their own, and which carry none, per module and
+  overall. `--verbose` names every uncontracted function, `--only <string>` restricts to
+  matching module names, and `--min <integer>` exits non-zero below that percentage for use as
+  a CI ratchet.
+
+  This is the half `Bond.Coverage` structurally cannot report. Coverage records assertions that
+  *ran*, which makes it a report about contracts that exist — a function nobody contracted
+  appears nowhere in it, and neither does the module it lives in. That absence is precisely the
+  failure the contract-writing guidance calls one-sided: a codebase with too few contracts looks
+  exactly like one that never needed them.
+
+  The denominator is public, non-callback functions in modules that use Bond. A `defp`, an
+  `@impl` callback, and a function covered only by a module `@invariant` are each reported
+  apart rather than folded in, because each answers a different question. Machine-generated
+  exports are excluded by Elixir's own convention — a name both starting and ending in `__` —
+  so `__schema__/1` and friends do not inflate the denominator, and coverage is decided per
+  function *name* rather than per `{name, arity}`, so a default argument does not report the
+  arity nobody wrote as bare.
+
+  Bond ships no other Mix task, so `mix docs` now carries a **"Mix tasks"** module group.
+
+- **`__bond_contracted__/0`**, a reflection emitted into every module that `use Bond`, listing
+  the functions the compiler contracted with per-kind assertion counts and the `def`/`defp`
+  kind. It is emitted even when a module contracted nothing, so `%{}` distinguishes "uses Bond
+  and contracts nothing" from "does not use Bond". `mix bond.audit` reads it instead of parsing
+  source, which is what lets it see macro-generated functions, modules that acquired `use Bond`
+  through another `__using__`, and `defdelegate`s.
+
+  **Provisional, not public surface.** `mix bond.audit` is the supported way to get at this
+  data; see `guides/public-api.md`.
+
 ## [1.18.1] - 2026-08-28
 
 Documentation only. No library code changes, and nothing that compiled before behaves
