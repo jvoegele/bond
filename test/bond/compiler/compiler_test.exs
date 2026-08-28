@@ -213,6 +213,68 @@ defmodule Bond.CompilerTest do
     end
   end
 
+  describe "__bond_contracted__/0 reflection" do
+    defmodule Contracted do
+      use Bond
+
+      @invariant positive: is_integer(subject.n) and subject.n > 0
+      defstruct n: 1
+
+      @pre amount >= 0
+      @post grew: result.n >= subject.n
+      def deposit(%__MODULE__{} = subject, amount), do: %{subject | n: subject.n + amount}
+
+      @post named: is_binary(result)
+      def label(%__MODULE__{} = subject), do: "n=#{subject.n}"
+
+      def plain(%__MODULE__{} = subject), do: subject
+
+      @pre is_integer(x)
+      defp double(x), do: x * 2
+
+      def doubled(x), do: double(x)
+    end
+
+    defmodule NothingContracted do
+      use Bond
+
+      def bare(x), do: x
+    end
+
+    test "counts each kind of assertion on every function that carries one" do
+      table = Contracted.__bond_contracted__()
+
+      assert %{preconditions: 1, postconditions: 1, own_assertions: 2, kind: :def} =
+               table[{:deposit, 2}]
+
+      assert %{preconditions: 0, postconditions: 1, own_assertions: 1} = table[{:label, 1}]
+    end
+
+    test "reports a private function's contract, and marks it private" do
+      # `defp` carries contracts and should be visible to a reader of the table;
+      # what a *density* over public functions does with it is the caller's
+      # decision, not this reflection's.
+      assert %{kind: :defp, preconditions: 1} = Contracted.__bond_contracted__()[{:double, 1}]
+    end
+
+    test "separates a module invariant from a function's own assertions" do
+      # An invariant is checked around every public function of its module, so it
+      # is real coverage — but it is a law about the *type*, not a promise about
+      # any one function. `own_assertions: 0` with `invariants: 1` is how a
+      # reader tells the two apart.
+      assert %{own_assertions: 0, invariants: n} = Contracted.__bond_contracted__()[{:plain, 1}]
+      assert n > 0
+    end
+
+    test "a module that uses Bond and contracts nothing exports an empty table" do
+      # Not *no* reflection: "uses Bond and contracts nothing" is the most
+      # interesting row an audit can print, and it must be distinguishable from
+      # "does not use Bond", which is a different question.
+      assert function_exported?(NothingContracted, :__bond_contracted__, 0)
+      assert NothingContracted.__bond_contracted__() == %{}
+    end
+  end
+
   describe "__bond_boundaries__/0 reflection (#36)" do
     defmodule WithBoundaries do
       use Bond
