@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`guides/ai-coding-agents.md`** — a guide for the person installing Bond's agent-facing
+  rules in an application, alongside `usage-rules.md`, which is written for the agent that
+  reads them. Covers what ships in the package, the `usage_rules` config that inlines the main
+  rules and links the two sub-rules (with measured `AGENTS.md` sizes for each of the three
+  shapes), the fact that `usage_rules: :all` does *not* bring the `writing-bond-contracts`
+  skill — that needs `skills: [package_skills: [:bond]]` — the manual route for projects on
+  Elixir 1.16 or 1.17, where `usage_rules` cannot be installed, and re-syncing after a Bond
+  upgrade.
+
 ## [1.18.0] - 2026-08-26
 
 Three things Bond should have told you, and one it shouldn't have.

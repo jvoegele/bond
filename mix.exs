@@ -119,8 +119,9 @@ defmodule Bond.MixProject do
         "CHANGELOG.md",
         # Guides are ordered by the questions a reader asks, in the order they
         # ask them: learn it, write it, know what to say in it, say it soundly,
-        # then the larger features, then the operational concerns. Reference is for lookup rather than
-        # reading, so it sits after the narrative path.
+        # then the larger features, then the operational concerns — of which wiring the
+        # agent-facing rules into a downstream project is the last. Reference is for lookup rather
+        # than reading, so it sits after the narrative path.
         "guides/getting-started.md",
         "guides/writing-contracts.md",
         "guides/what-contracts-say.md",
@@ -133,11 +134,13 @@ defmodule Bond.MixProject do
         "guides/configuration.md",
         "guides/overhead.md",
         "guides/telemetry.md",
+        "guides/ai-coding-agents.md",
         "guides/cheatsheet.cheatmd",
         "guides/faq.md",
         # Agent-facing, but published here too: the README links to it, and a reader
         # browsing HexDocs should be able to find what their agent is being told.
-        # Only the main file — the sub-rules and the skill are synced, not browsed.
+        # Only the main file — the sub-rules and the skill are synced, not browsed. Installing
+        # any of it is guides/ai-coding-agents.md, which is written for a person.
         "usage-rules.md",
         "guides/public-api.md",
         "guides/stability.md",
@@ -157,7 +160,8 @@ defmodule Bond.MixProject do
           "guides/testing-contracts.md",
           "guides/configuration.md",
           "guides/overhead.md",
-          "guides/telemetry.md"
+          "guides/telemetry.md",
+          "guides/ai-coding-agents.md"
         ],
         Reference: [
           "guides/cheatsheet.cheatmd",
