@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.18.1] - 2026-08-28
+
+Documentation only. No library code changes, and nothing that compiled before behaves
+differently.
+
+Bond has shipped agent-facing rules since 1.17.0, written for the agent that reads them.
+This release adds the missing half: a guide for the person who has to install them.
 
 ### Added
 
