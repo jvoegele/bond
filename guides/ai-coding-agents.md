@@ -46,7 +46,7 @@ end
 
 defp deps do
   [
-    {:bond, "~> 1.18"},
+    {:bond, "~> 1.19"},
     {:usage_rules, "~> 1.2", only: [:dev]}
   ]
 end

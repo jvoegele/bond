@@ -54,7 +54,7 @@ already exist. See `bond:testing`.
 
 ```elixir
 # mix.exs
-{:bond, "~> 1.18"},
+{:bond, "~> 1.19"},
 {:stream_data, "~> 1.0", only: [:dev, :test]}   # only if you want Bond.PropertyTest
 ```
 
