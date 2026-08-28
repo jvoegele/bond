@@ -5,7 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.19.0] - 2026-08-28
+
+The contracts you did not write.
+
+Everything Bond has measured until now has been about contracts that exist. `Bond.Coverage`
+records assertions that ran; the linter inspects assertions you wrote; the error messages
+describe assertions that failed. None of them can see a function nobody contracted, because
+there is nothing there to see — and that absence is the failure the contract-writing guidance
+calls the dangerous one, precisely because a codebase with too few contracts looks exactly like
+one that never needed them.
+
+This release makes it a number.
+
+Minor rather than patch because every module that `use Bond` now exports one additional
+generated function. No contract semantics change, no API changes, and nothing that compiled
+before stops compiling.
 
 ### Added
 
