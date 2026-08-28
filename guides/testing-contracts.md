@@ -599,6 +599,11 @@ Bond contract density — 3 modules using Bond
 | `--only Tidal` | Restrict to modules whose name contains the string |
 | `--min 40` | Exit non-zero below that percentage — a CI ratchet |
 
+Density is a property of the source, not of the build, so the numbers are the same under
+`:purge` as under a fully contracted build — verified on the integration consumer, where both
+report identically. A `--min` gate in CI therefore works in whichever environment you already
+compile.
+
 The denominator is **public, non-callback functions in modules that use Bond**. Three things
 are deliberately counted apart rather than folded in: a `defp` is reported but not counted,
 since a private function is not part of the module's promise to its callers; `@impl` callbacks
