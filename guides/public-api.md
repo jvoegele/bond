@@ -365,6 +365,18 @@ surfacing assertions that ran but were never observed to fail. Public functions:
   * `reset/0` — clear accumulated coverage.
   * `install_reporter/0` — print `report/0` after the ExUnit suite (call in `test_helper.exs`).
 
+## Mix tasks
+
+  * `mix bond.audit` — reports contract density: which public, non-callback functions in
+    modules that `use Bond` carry a contract of their own, and which carry none. The
+    complement to `Bond.Coverage`, which can only report assertions that exist. Switches:
+    `--verbose` (list every uncontracted function), `--only <string>` (restrict to matching
+    module names), `--min <integer>` (exit non-zero below that percentage, for a CI ratchet).
+
+The task's **existence, name and switches** are public surface. Its report text is not — it is
+human-facing prose that may be reworded, so do not grep it in CI; use `--min` instead. See
+[Testing Contracts](testing-contracts.md#contract-density-which-functions-carry-a-contract-at-all).
+
 ## `Bond.Config`
 
 Runtime control over which kinds Bond evaluates, for kinds compiled in as `true`
@@ -533,6 +545,13 @@ by the stability guarantees:
   * The shape of the wrapper and helper functions Bond generates into the
     user's module. The names (`__bond_preconditions__<fun>__<arity>`,
     `__bond_postconditions__...`, `__bond_invariants__...`) are not stable.
+  * `__bond_contracted__/0`, the reflection `mix bond.audit` reads. Every module
+    that `use Bond` exports it, and it is emitted even when the module contracted
+    nothing, so `function_exported?/3` distinguishes "uses Bond and contracts
+    nothing" from "does not use Bond". Both that behaviour and the shape of the
+    map it returns are **provisional**: `mix bond.audit` is the supported way to
+    get at this data. Building other tooling on the reflection directly is
+    exactly the use case that would promote it — open an issue.
   * The text of compile-error diagnostics raised by Bond's macros. These are
     user-facing prose that may be reworded for clarity; the **fact** of a
     diagnostic firing (e.g. "labelled @invariant 2-arg form is removed")

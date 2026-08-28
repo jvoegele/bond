@@ -175,6 +175,14 @@ defmodule Bond.MixProject do
           "guides/history.md"
         ]
       ],
+      # Bond's first Mix task. Without a group it sorts in among the
+      # library modules, where `Mix.Tasks.Bond.Audit` reads as an API module
+      # rather than something you run.
+      groups_for_modules: [
+        "Mix tasks": [
+          Mix.Tasks.Bond.Audit
+        ]
+      ],
       filter_modules: fn _module, meta ->
         # This allows us to tag modules as internal and exclude them from the API docs as follows:
         #   @moduledoc internal: true

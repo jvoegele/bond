@@ -25,6 +25,10 @@ screening under-contracts by default and nobody notices. Measured on an applicat
 with these rules, reaching a density its author was happy with took **five passes**, each earlier
 one having stopped too soon. Start from "what does this promise?" and write what you can state.
 
+`mix bond.audit --verbose` names every public function that carries no contract of its own, so
+this is measurable rather than a matter of impression — run it before concluding a pass is
+finished.
+
 ## The test is mechanism versus meaning
 
 Not "does it restate the body". For a short function the answer is often yes and the contract is

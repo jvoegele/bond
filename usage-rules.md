@@ -43,6 +43,13 @@ code is worse than nothing, and none of what follows is suspended by this sectio
 the presumption: **contract it unless one of the stated reasons applies**, rather than contract it
 only where the case is overwhelming.
 
+**`mix bond.audit` measures this, so do not estimate it.** It reports how many public,
+non-callback functions in modules that `use Bond` carry a contract of their own, per module and
+overall; `mix bond.audit --verbose` names every function that carries none. Run it before
+claiming a pass is finished — that is the number the five passes above were moving, and the one
+thing `Bond.Coverage` structurally cannot show you, since coverage only reports assertions that
+already exist. See `bond:testing`.
+
 ## Setup
 
 ```elixir
